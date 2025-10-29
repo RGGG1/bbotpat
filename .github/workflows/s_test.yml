@@ -8,6 +8,6 @@ jobs:
       runs-on: ubuntu-latest
       steps:
          - name: show time
-            run: |
+            run:|
               echo "UTC now"
               date -u
