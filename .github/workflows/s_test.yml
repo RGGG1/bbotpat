@@ -7,7 +7,7 @@ jobs:
    pings:
       runs-on: ubuntu-latest
       steps:
-         - name: show time
-            run:|
+         - name: Show time
+         run: |
               echo "UTC now"
               date -u
