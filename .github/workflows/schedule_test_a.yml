@@ -10,4 +10,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Show time
-        run: echo "UTC now: $(date -u)"
+        run: |
+           echo "UTC now: $(date -u)"
