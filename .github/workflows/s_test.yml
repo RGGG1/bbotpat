@@ -1,0 +1,13 @@
+Name: S Test
+on:
+   schedule:
+      - cron: "*/1 * * * *"
+   workflow_dispatch:
+jobs:
+   pings:
+      runs-on: ubuntu-latest
+      steps:
+         - name: show time
+            run: |
+              echo "UTC now"
+              date -u
