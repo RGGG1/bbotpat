@@ -62,7 +62,7 @@ HEADERS = {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Data fetch — Binance 1d klines with multi-endpoint fallback
+# Data fetch —  Binance 1d klines with multi-endpoint fallback
 # ──────────────────────────────────────────────────────────────────────────────
 def binance_daily(symbol: str) -> List[Tuple[datetime.date, float]]:
     """
