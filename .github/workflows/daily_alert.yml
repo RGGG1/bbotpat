@@ -20,8 +20,9 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run alert script
+      - name: Run alert script (Binance)
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python adaptive_alerts_coingecko.py
+        run: python alerts_binance.py
+        
