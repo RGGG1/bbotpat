@@ -2,9 +2,7 @@ name: Daily Crypto Alerts
 
 on:
   schedule:
-    # Runs at 00:05 UTC every day
-    - cron: "5 0 * * *"
-  # Lets you trigger it manually from the Actions tab
+    - cron: "5 0 * * *"   # 00:05 UTC daily
   workflow_dispatch:
 
 jobs:
