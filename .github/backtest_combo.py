@@ -42,8 +42,8 @@ LOOKBACK = 20
 
 # Heat thresholds
 CONF_TRIGGER = 77           # leveraged enter (>=77 short, <=23 long)
-BAND_ENTER   = 57           # baseline enter (>=57 short, <=43 long)
-BAND_EXIT    = 54           # baseline exit back into 46..54
+BAND_ENTER   =            # baseline enter (>=57 short, <=43 long)
+BAND_EXIT    = 55           # baseline exit back into 46..54
 
 TP_FALLBACK = {"BTC": 0.0227, "ETH": 0.0167, "SOL": 0.0444}
 SL = 0.03
