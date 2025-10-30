@@ -25,7 +25,7 @@ BASES = [
 HEADERS = {"User-Agent": "bbot-backtest/1.0"}
 
 LOOKBACK = 20
-THRESH   = 55  # heat threshold; long <= (100-THRESH), short >= THRESH
+THRESH   = 65  # heat threshold; long <= (100-THRESH), short >= THRESH
 
 START_A = datetime(2023,1,1, tzinfo=timezone.utc)
 START_B = datetime(2025,1,1, tzinfo=timezone.utc)
