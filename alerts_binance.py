@@ -2,12 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 alerts_binance.py
-v2.5 – Daily adaptive signals + dashboard + pyramiding + exit advisory
+v2.6 – Daily adaptive signals + dashboard + pyramiding + exit advisory
      – Uses Binance endTime to fetch ONLY fully closed daily candles.
+     – Adds anchor (kline close) entry, current price & slippage, TP/SL prices.
 
-Adds vs v2.4:
-- Candle fetch now sets endTime = today's UTC midnight - 1 ms,
-  ensuring we never read the still-forming daily candle.
+What’s new vs v2.5
+- Shows the anchor entry (last CLOSED daily candle).
+- Pulls current price to show slippage Δ from anchor.
+- Displays TP% + TP price, SL% + SL price, confidence, leverage.
+- ⚠️ Slippage warning if drift exceeds DRIFT_WARN threshold.
 """
 
 import os, json, time, requests
@@ -19,7 +22,7 @@ from datetime import datetime, timezone, timedelta
 COINS = [("BTCUSDT","BTC"), ("ETHUSDT","ETH"), ("SOLUSDT","SOL")]
 
 CONF_TRIGGER = 77            # heat threshold for short; long uses 100-CONF_TRIGGER (=23)
-SL = 0.03                    # shown in messages (you execute manually)
+SL = 0.03                    # informational (you execute manually)
 HOLD_BARS = 4                # 96h
 STATE_FILE = "adaptive_alerts_state.json"
 
@@ -29,6 +32,9 @@ TP_FALLBACK = {"BTC":0.0227, "ETH":0.0167, "SOL":0.0444}
 BASE_LEV = 10
 MAX_LEV  = 14
 CONF_PER_LEV = 5            # +1x per +5% confidence gain (integer steps)
+
+# Slippage warning threshold (vs anchor kline close)
+DRIFT_WARN = 0.010           # 1.0%
 
 # Telegram
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -42,7 +48,7 @@ BASES = [
     "https://api3.binance.com",
     "https://data-api.binance.vision",
 ]
-HEADERS = {"User-Agent": "crypto-alert-bot/2.5 (+github actions)"}
+HEADERS = {"User-Agent": "crypto-alert-bot/2.6 (+github actions)"}
 
 # ────────────────────────────────────────────────
 # Data helpers
@@ -58,26 +64,19 @@ def binance_daily(symbol):
         try:
             url = f"{base}/api/v3/klines"
 
-            # endTime = today's UTC midnight - 1 ms
             utc_now = datetime.utcnow()
             utc_midnight = datetime(utc_now.year, utc_now.month, utc_now.day, tzinfo=timezone.utc)
             end_time_ms = int(utc_midnight.timestamp() * 1000) - 1
 
-            params = {
-                "symbol": symbol,
-                "interval": "1d",
-                "limit": 1500,
-                "endTime": end_time_ms
-            }
-
+            params = {"symbol": symbol, "interval": "1d", "limit": 1500, "endTime": end_time_ms}
             r = requests.get(url, params=params, headers=HEADERS, timeout=30)
             r.raise_for_status()
             data = r.json()
 
             rows = []
             for k in data:
-                close_ts = int(k[6]) // 1000  # k[6] = close time (ms)
-                close_price = float(k[4])     # k[4] = close price
+                close_ts = int(k[6]) // 1000  # close time (ms)
+                close_price = float(k[4])     # close price
                 rows.append((datetime.utcfromtimestamp(close_ts).date(), close_price))
             return rows
 
@@ -85,6 +84,20 @@ def binance_daily(symbol):
             last_err = e
             continue
     raise last_err if last_err else RuntimeError("All Binance bases failed")
+
+def binance_last_price(symbol):
+    """Get the current (spot) price."""
+    last_err = None
+    for base in BASES:
+        try:
+            url = f"{base}/api/v3/ticker/price"
+            r = requests.get(url, params={"symbol": symbol}, headers=HEADERS, timeout=15)
+            r.raise_for_status()
+            return float(r.json()["price"])
+        except Exception as e:
+            last_err = e
+            continue
+    raise last_err if last_err else RuntimeError("All Binance bases failed (ticker)")
 
 def pct_returns(closes):
     return [closes[i]/closes[i-1]-1 for i in range(1,len(closes))]
@@ -111,6 +124,13 @@ def median_mfe_for_coin(sym, state):
     hist=state.get("signals",{}).get(sym,[])
     mfes=[x.get("mfe") for x in hist if x.get("mfe") is not None]
     return median(mfes) if len(mfes)>=5 else TP_FALLBACK.get(sym,0.03)
+
+def fmt_price(x):
+    # Simple dynamic formatting
+    if x >= 1000: return f"{x:,.2f}"
+    if x >= 100:  return f"{x:,.2f}"
+    if x >= 1:    return f"{x:,.2f}"
+    return f"{x:,.4f}"
 
 # ────────────────────────────────────────────────
 # State & Telegram
@@ -144,7 +164,7 @@ def main():
 
     # Evaluate each coin
     summary_lines=[]
-    latest_by_sym={}  # sym -> dict(level, direction, price, date)
+    latest_by_sym={}  # sym -> dict(level, direction, anchor_px, current_px, date)
 
     for symbol,sym in COINS:
         try:
@@ -174,7 +194,17 @@ def main():
         summary_lines.append(f"{emoji} {sym}: {desc}")
 
         direction="SHORT" if ret>0 else "LONG"
-        latest_by_sym[sym]={"level":level,"direction":direction,"price":closes[-1],"date":dates[-1]}
+        anchor_px = closes[-1]                 # last CLOSED daily close (model anchor)
+        try:
+            current_px = binance_last_price(symbol)
+        except Exception:
+            current_px = anchor_px             # fallback if ticker fails
+
+        latest_by_sym[sym]={
+            "level":level,"direction":direction,
+            "anchor_px":anchor_px,"current_px":current_px,
+            "date":dates[-1]
+        }
 
         time.sleep(0.12)
 
@@ -204,10 +234,10 @@ def main():
         if still_active and cur:
             # Current signed move since entry (close-to-close)
             if active_dir=="LONG":
-                cur_move = cur["price"]/entry - 1.0
+                cur_move = cur["anchor_px"]/entry - 1.0  # anchor vs entry (we used anchor as entry)
                 trigger_band = cur["level"] <= 100-CONF_TRIGGER
             else:
-                cur_move = entry/cur["price"] - 1.0
+                cur_move = entry/cur["anchor_px"] - 1.0
                 trigger_band = cur["level"] >= CONF_TRIGGER
 
             # 1) Pyramiding if confidence increased (same direction + stronger)
@@ -248,11 +278,11 @@ def main():
         for sym in ["BTC","ETH","SOL"]:
             snap=latest_by_sym.get(sym)
             if not snap: continue
-            lvl=snap["level"]; dirn=snap["direction"]; px=snap["price"]; d=snap["date"]
+            lvl=snap["level"]; dirn=snap["direction"]; apx=snap["anchor_px"]; d=snap["date"]
             if (lvl>=CONF_TRIGGER) or (lvl<=100-CONF_TRIGGER):
                 tp=median_mfe_for_coin(sym,state)
                 valid_until=datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=HOLD_BARS)
-                candidates.append((sym,dirn,px,tp,d,valid_until,lvl))
+                candidates.append((sym,dirn,apx,tp,d,valid_until,lvl))
         if candidates:
             priority={"BTC":0,"ETH":1,"SOL":2}
             candidates.sort(key=lambda x:priority.get(x[0],99))
@@ -272,22 +302,68 @@ def main():
     header=f"📊 Daily Crypto Report — {today}"
     summary="\n".join(summary_lines)
 
+    def trade_block(sym, direction, entry, tp, lev, conf, valid_until):
+        # current ticker (for slippage vs anchor)
+        # We’ll try; if it fails, we omit slippage
+        try:
+            symbol = next(s for s,t in COINS if t==sym)
+            cur = binance_last_price(symbol)
+        except Exception:
+            cur = None
+
+        if direction=="LONG":
+            tp_price = entry*(1+tp)
+            sl_price = entry*(1-SL)
+        else:
+            tp_price = entry*(1-tp)
+            sl_price = entry*(1+SL)
+
+        lines = []
+        lines.append(f"🚨 TRADE SIGNAL: {sym}")
+        lines.append(f"Side: {direction}")
+        lines.append(f"Anchor (prev daily close): ${fmt_price(entry)}")
+        if cur is not None:
+            drift = (cur/entry - 1.0) if direction=="LONG" else (entry/cur - 1.0)
+            # Unbiased drift for display:
+            signed = (cur/entry - 1.0)
+            lines.append(f"Current: ${fmt_price(cur)}  (Δ vs anchor: {signed*100:+.2f}%)")
+            if abs(signed) >= DRIFT_WARN:
+                lines.append("⚠️ Slippage from anchor > " + f"{DRIFT_WARN*100:.2f}%")
+        lines.append(f"Confidence: {conf:.0f}%")
+        lines.append(f"Leverage: {lev}×")
+        lines.append(f"TP: {tp*100:.2f}% → ${fmt_price(tp_price)}")
+        lines.append(f"SL: {SL*100:.2f}% → ${fmt_price(sl_price)}")
+        lines.append(f"Max hold: {HOLD_BARS*24}h")
+        lines.append(f"Valid until: {valid_until}")
+        return "\n".join(lines)
+
     if opened_new:
         a=state["active_trade"]
-        msg=(f"{header}\n\n{summary}\n\n"
-             f"✅ *Active Trade: {a['sym']}*\n"
-             f"Direction: {a['direction']}\n"
-             f"Entry: {a['entry']:.2f} USD\n"
-             f"TP: {a['tp_used']*100:.2f}% | SL: 3.00%\n"
-             f"Leverage: {a['leverage']}× (base)\n"
-             f"Hold: {HOLD_BARS*24} h\n"
-             f"Valid until: {a['valid_until']}")
+        msg=(f"{header}\n\n{summary}\n\n" +
+             trade_block(
+                 a['sym'], a['direction'], float(a['entry']),
+                 float(a['tp_used']), int(a['leverage']),
+                 float(a['confidence']), a['valid_until']
+             ))
     elif state.get("active_trade"):
         a=state["active_trade"]
+        # Build a compact status block with slippage from anchor
+        try:
+            symbol = next(s for s,t in COINS if t==a['sym'])
+            cur = binance_last_price(symbol)
+            signed = (cur/float(a['entry']) - 1.0)
+            sl_line = f"Current: ${fmt_price(cur)}  (Δ from anchor: {signed*100:+.2f}%)"
+            warn = "\n⚠️ Slippage > " + f"{DRIFT_WARN*100:.2f}%" if abs(signed)>=DRIFT_WARN else ""
+        except Exception:
+            sl_line = ""
+            warn = ""
         msg=(f"{header}\n\n{summary}\n\n"
              f"🟨 Active trade unchanged: {a['sym']} ({a['direction']})\n"
-             f"Entry: {a['entry']:.2f} USD | TP: {a['tp_used']*100:.2f}% | SL: 3.00%\n"
+             f"Anchor: ${fmt_price(float(a['entry']))}\n"
+             f"{sl_line}\n"
+             f"TP: {float(a['tp_used'])*100:.2f}% | SL: {SL*100:.2f}%\n"
              f"Leverage: {a['leverage']}× | Valid until: {a['valid_until']}"
+             f"{warn}"
              f"{msg_tail}")
     else:
         msg=f"{header}\n\n{summary}\n\nNo trades today."
@@ -299,4 +375,4 @@ def main():
 # ────────────────────────────────────────────────
 if __name__=="__main__":
     main()
-  
+         
