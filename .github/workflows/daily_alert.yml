@@ -2,7 +2,7 @@ name: Daily Crypto Alerts
 
 on:
   schedule:
-    - cron: '2 */1 * * *'   # every 5 minutes UTC (debug)
+    - cron: '2 */12 * * *'   # every 5 minutes UTC (debug)
   workflow_dispatch:
 
 jobs:
