@@ -19,7 +19,7 @@ import os, json, time, requests
 from datetime import datetime, timezone, timedelta
 
 # ────────────────────────────────────────────────
-# Config
+# Config ok
 # ────────────────────────────────────────────────
 COINS = [("BTCUSDT","BTC"), ("ETHUSDT","ETH"), ("SOLUSDT","SOL")]
 
