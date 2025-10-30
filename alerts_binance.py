@@ -2,24 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 alerts_binance.py
-v2.4 – Daily adaptive signals + dashboard + pyramiding + exit advisory
+v2.5 – Daily adaptive signals + dashboard + pyramiding + exit advisory
+     – Uses Binance endTime to fetch ONLY fully closed daily candles.
 
-Adds:
-- Exit advisory: if in a trade and a same-token repeat signal is WEAKER (lower confidence)
-  AND its new adaptive TP is LOWER than the current TP,
-  AND current move >= new TP → alert to consider early exit.
-
-Keeps:
-- 77% trigger (heat >=77 → short, <=23 → long)
-- Base 10x leverage; pyramiding +1x per +5% confidence gain up to 14x
-- 3% SL (informational), adaptive TP per coin, 96h max hold, no overlap across tokens
+Adds vs v2.4:
+- Candle fetch now sets endTime = today's UTC midnight - 1 ms,
+  ensuring we never read the still-forming daily candle.
 """
 
 import os, json, time, requests
 from datetime import datetime, timezone, timedelta
 
 # ────────────────────────────────────────────────
-# Config ok
+# Config
 # ────────────────────────────────────────────────
 COINS = [("BTCUSDT","BTC"), ("ETHUSDT","ETH"), ("SOLUSDT","SOL")]
 
@@ -47,27 +42,48 @@ BASES = [
     "https://api3.binance.com",
     "https://data-api.binance.vision",
 ]
-HEADERS = {"User-Agent": "crypto-alert-bot/2.4 (+github actions)"}
+HEADERS = {"User-Agent": "crypto-alert-bot/2.5 (+github actions)"}
 
 # ────────────────────────────────────────────────
 # Data helpers
 # ────────────────────────────────────────────────
 def binance_daily(symbol):
-    last_err=None
+    """
+    Download fully closed DAILY candles with fallback endpoints.
+    We set endTime to today's midnight UTC minus 1 ms, so Binance returns
+    only completed candles (excluding the still-forming candle).
+    """
+    last_err = None
     for base in BASES:
         try:
-            url=f"{base}/api/v3/klines"
-            r=requests.get(url, params={"symbol":symbol,"interval":"1d","limit":1500},
-                           headers=HEADERS, timeout=30)
+            url = f"{base}/api/v3/klines"
+
+            # endTime = today's UTC midnight - 1 ms
+            utc_now = datetime.utcnow()
+            utc_midnight = datetime(utc_now.year, utc_now.month, utc_now.day, tzinfo=timezone.utc)
+            end_time_ms = int(utc_midnight.timestamp() * 1000) - 1
+
+            params = {
+                "symbol": symbol,
+                "interval": "1d",
+                "limit": 1500,
+                "endTime": end_time_ms
+            }
+
+            r = requests.get(url, params=params, headers=HEADERS, timeout=30)
             r.raise_for_status()
-            data=r.json()
-            rows=[]
+            data = r.json()
+
+            rows = []
             for k in data:
-                close_ts=int(k[6])//1000
-                rows.append((datetime.utcfromtimestamp(close_ts).date(), float(k[4])))
+                close_ts = int(k[6]) // 1000  # k[6] = close time (ms)
+                close_price = float(k[4])     # k[4] = close price
+                rows.append((datetime.utcfromtimestamp(close_ts).date(), close_price))
             return rows
+
         except Exception as e:
-            last_err=e; continue
+            last_err = e
+            continue
     raise last_err if last_err else RuntimeError("All Binance bases failed")
 
 def pct_returns(closes):
@@ -173,8 +189,6 @@ def main():
 
     msg_tail=""
     opened_new=False
-    reinforced=False
-    exit_advisory=False
 
     # ── Active trade management: reinforcement & exit advisory ──
     if active:
@@ -204,7 +218,6 @@ def main():
                 if add_units > 0:
                     new_lev=min(int(active.get("leverage",BASE_LEV))+add_units, MAX_LEV)
                     if new_lev > active.get("leverage", BASE_LEV):
-                        reinforced=True
                         active["leverage"]=new_lev
                         active["confidence"]=cur["level"]
                         msg_tail += (f"\n📈 Reinforcing signal on {sym}: confidence {prev_conf:.0f}% → {cur['level']:.0f}% "
@@ -219,7 +232,6 @@ def main():
             ahead_of_new_tp = cur_move >= new_tp - 1e-6  # tiny epsilon
 
             if same_direction and lower_conf and lower_tp and ahead_of_new_tp and trigger_band:
-                exit_advisory=True
                 msg_tail += (f"\n🎯 Exit advisory ({sym}): confidence cooled ({prev_conf:.0f}% → {cur['level']:.0f}%), "
                              f"new TP {new_tp*100:.2f}% < current TP {active.get('tp_used', new_tp)*100:.2f}%. "
                              f"Current move ≈ {cur_move*100:.2f}% ≥ new TP → consider taking profit early.")
@@ -229,7 +241,6 @@ def main():
         else:
             # Window ended; free the slot (execution remains manual)
             state["active_trade"]=None
-            active=None
 
     # ── Entry: if no active trade, open highest priority candidate ──
     if not state.get("active_trade"):
@@ -257,6 +268,10 @@ def main():
             })
 
     # ── Compose Telegram message ──
+    today=datetime.utcnow().strftime("%b %d, %Y")
+    header=f"📊 Daily Crypto Report — {today}"
+    summary="\n".join(summary_lines)
+
     if opened_new:
         a=state["active_trade"]
         msg=(f"{header}\n\n{summary}\n\n"
@@ -284,4 +299,4 @@ def main():
 # ────────────────────────────────────────────────
 if __name__=="__main__":
     main()
-    
+  
