@@ -116,6 +116,7 @@ def leveraged_dir_from_heat(h):
     return None
 
 # ---------- Backtest per token ----------
+
 def backtest_token(symbol, sym, start_dt):
     rows = binance_daily_closed(symbol)
     rows = [row for row in rows if row[0] >= start_dt - timedelta(days=LOOKBACK+2)]
@@ -126,116 +127,152 @@ def backtest_token(symbol, sym, start_dt):
     dates, closes = list(dates), list(closes)
     rets = pct_returns(closes)
     zs   = zscore_series(rets, LOOKBACK)
+
+    # Heat aligned to close index (None at index 0)
     heats = [None]
     for i in range(1,len(closes)):
         heats.append(heat_from_ret_and_z(rets[i-1], zs[i-1]))
 
-    # walk-forward adaptive TP store
-    prior_mfes = []                 # MFEs (underlying) of completed trades
+    # Walk-forward adaptive TP memory
+    prior_mfes = []
     tp_fallback = TP_FALLBACK_DEFAULT
 
     equity = 100.0
-    trades=0; wins=0
-    rois=[]  # underlying per-trade ROI (for avg)
+    trades=0; wins=0; rois=[]
 
-    # find first index at/after start
-    i0 = next((i for i,d in enumerate(dates) if d>=start_dt), None)
-    if i0 is None: i0 = LOOKBACK+1
+    # first usable index
+    i = next((k for k,d in enumerate(dates) if d>=start_dt), LOOKBACK+1)
 
-    i = i0
-    N = len(closes)
+    in_trade = False
+    # these are only meaningful while in_trade is True
+    entry_i = None
+    entry_px = None
+    direction = None
+    lev = BASE_LEV
+    conf_at_entry = None
+    tp = None
+    last_allowed_bar = None  # end of the 96h window (index)
 
-    while i < N-1:
+    while i < len(closes):
         h = heats[i]
-        direction = leveraged_dir_from_heat(h)
-        if not direction:
+
+        if not in_trade:
+            # only consider new entries when flat
+            signal_dir = leveraged_dir_from_heat(h)
+            if signal_dir is None:
+                i += 1
+                continue
+
+            # open new trade
+            in_trade = True
+            direction = signal_dir
+            entry_i = i
+            entry_px = closes[i]
+            conf_at_entry = h
+            lev = BASE_LEV
+            # adaptive TP (prior MFEs if we have >=5, else fallback)
+            tp = median(prior_mfes) if len(prior_mfes) >= 5 else tp_fallback
+
+            # define max holding window (4 daily bars)
+            last_allowed_bar = min(i + HOLD_BARS, len(closes)-1)
+
+            # move to the next bar to start monitoring exits
             i += 1
             continue
 
-        entry_i = i
-        entry_px = closes[entry_i]
-        # TP uses median of prior MFEs if enough, else fallback
-        tp = median(prior_mfes) if len(prior_mfes)>=5 else tp_fallback
-        sl = SL
-        conf_at_entry = h
-        lev = BASE_LEV
-
-        last_i = min(entry_i + HOLD_BARS, N-1)
-        exit_i = entry_i
+        # ----- manage open trade here -----
+        # Default: if nothing hits, we’ll time-exit at last_allowed_bar
+        exit_now = False
         hit_reason = "TIME"
-        best_move = 0.0  # MFE (underlying) for adaptive learning
 
-        for j in range(entry_i+1, last_i+1):
-            px = closes[j]
-            # move relative to entry (underlying)
-            if direction=="LONG":
-                move = px/entry_px - 1.0
-            else:
-                move = entry_px/px - 1.0
-
-            # Track MFE
-            if move > best_move:
-                best_move = move
-
-            # Recompute heat for pyramiding / exit advisory
-            hj = heats[j]
-            if hj is not None:
-                # pyramiding: confidence increased (same direction) → +1× per +5%
-                same_dir = (leveraged_dir_from_heat(hj) == direction)
-                in_band  = ((direction=="LONG" and hj <= 100-CONF_TRIGGER) or
-                            (direction=="SHORT" and hj >= CONF_TRIGGER))
-                if same_dir and in_band:
-                    # increase if confidence moved further into the trigger
-                    if (direction=="SHORT" and hj>conf_at_entry) or (direction=="LONG" and hj<conf_at_entry):
-                        steps = int(abs(hj - conf_at_entry)//CONF_PER_LEV)
-                        if steps>0:
-                            lev = min(lev+steps, MAX_LEV)
-                            conf_at_entry = hj
-
-                # exit advisory: weaker + lower TP and already >= new TP
-                new_tp = median(prior_mfes) if len(prior_mfes)>=5 else tp_fallback
-                weaker = (direction=="SHORT" and hj < conf_at_entry) or (direction=="LONG" and hj > conf_at_entry)
-                lower_tp = (new_tp < tp)
-                if weaker and lower_tp and move >= new_tp:
-                    exit_i = j
-                    hit_reason = "ADVISORY"
-                    break
-
-            # TP/SL hits
-            if move >= tp:
-                exit_i = j
-                hit_reason = "TP"
-                break
-            if move <= -sl:
-                exit_i = j
-                hit_reason = "SL"
-                break
-
-            exit_i = j  # default to time exit
-
-        # Final move (underlying)
-        if direction=="LONG":
-            final_move = closes[exit_i]/entry_px - 1.0
+        # Current move (underlying)
+        cur_px = closes[i]
+        if direction == "LONG":
+            move = cur_px/entry_px - 1.0
         else:
-            final_move = entry_px/closes[exit_i] - 1.0
+            move = entry_px/cur_px - 1.0
 
-        # record MFE for adaptive learning
-        prior_mfes.append(best_move)
+        # Track MFE for learning
+        # store best move since entry; we’ll finalize at exit
+        # (we’ll keep it in a local closure via dict)
+        if "_best_move" not in locals():
+            _best_move = 0.0
+        _best_move = max(_best_move, move)
 
-        # ---- FIXED COMPOUNDING LOGIC ----
-        # Bound loss to stop and then apply leverage; floor equity at 0
-        bounded_move = max(final_move, -SL)           # cap underlying loss at -SL
-        effective = bounded_move * lev                # leverage applied
-        equity = max(0.0, equity * (1.0 + effective)) # cannot go negative
+        # Recompute heat for pyramiding / exit advisory
+        hj = heats[i]
+        if hj is not None:
+            same_dir = (leveraged_dir_from_heat(hj) == direction)
+            in_band  = ((direction=="LONG" and hj <= 100-CONF_TRIGGER) or
+                        (direction=="SHORT" and hj >= CONF_TRIGGER))
+
+            # Pyramiding (+1× per +5% confidence gain, max 14×)
+            if same_dir and in_band:
+                if (direction=="SHORT" and hj > conf_at_entry) or (direction=="LONG" and hj < conf_at_entry):
+                    steps = int(abs(hj - conf_at_entry)//CONF_PER_LEV)
+                    if steps > 0:
+                        lev = min(lev + steps, MAX_LEV)
+                        conf_at_entry = hj
+
+            # Exit advisory (weaker + lower TP and already >= new TP)
+            new_tp = median(prior_mfes) if len(prior_mfes)>=5 else tp_fallback
+            weaker  = (direction=="SHORT" and hj < conf_at_entry) or (direction=="LONG" and hj > conf_at_entry)
+            lower_tp = new_tp < tp
+            if same_dir and in_band and weaker and lower_tp and move >= new_tp:
+                exit_now = True
+                hit_reason = "ADVISORY"
+
+        # Hard exits: TP/SL/time
+        if not exit_now and move >= tp:
+            exit_now = True
+            hit_reason = "TP"
+        if not exit_now and move <= -SL:
+            exit_now = True
+            hit_reason = "SL"
+        if not exit_now and i >= last_allowed_bar:
+            exit_now = True
+            hit_reason = "TIME"
+
+        if not exit_now:
+            i += 1
+            continue
+
+        # ----- close the trade -----
+        final_px = closes[i]
+        if direction == "LONG":
+            final_move = final_px/entry_px - 1.0
+        else:
+            final_move = entry_px/final_px - 1.0
+
+        # Learn from MFE
+        prior_mfes.append(_best_move)
+        _best_move = 0.0  # reset
+
+        # Apply bounded compounding (cap loss at SL; apply leverage; floor at 0)
+        bounded_move = max(final_move, -SL)
+        effective = bounded_move * lev
+        equity = max(0.0, equity * (1.0 + effective))
 
         trades += 1
         if effective > 0: wins += 1
         rois.append(final_move)
 
-        i = exit_i + 1
+        # flat again; only now can we consider a new entry
+        in_trade = False
+        direction = None
+        entry_i = None
+        entry_px = None
+        conf_at_entry = None
+        lev = BASE_LEV
+        tp = None
+        last_allowed_bar = None
+
+        # move forward to *after* the exit bar
+        i += 1
 
     avg_roi = (sum(rois)/len(rois))*100.0 if rois else 0.0
     return {"sym":sym, "trades":trades, "wins":wins, "avg_roi":avg_roi, "equity":equity}
+
 
 # ---------- Runner ----------
 def run_period(start_dt, title):
