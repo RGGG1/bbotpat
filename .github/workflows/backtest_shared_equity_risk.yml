@@ -1,0 +1,19 @@
+name: Backtest Shared Equity (Risk Report)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7 3 * * *'   # daily 03:07 UTC
+
+jobs:
+  run-risk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install requests
+      - name: Run shared-risk backtest
+        run: python .github/backtest_shared_equity_risk.py
+        
