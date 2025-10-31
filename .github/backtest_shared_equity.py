@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Shared-bankroll backtest with hit-rate tie-break & market-cap fallback
-Coins: BTC, ETH, SOL, ADA, TON, XRP, TRX, SUI, LTC
-Excludes: BNB, DOGE, LINK, XLM
-Rules: 77% trigger, 3% SL, adaptive TP, pyramiding 10→14×, 96h cap, exit-advisory
-One trade at a time, compounding from $100.
-
-Tie-break on same daily close:
-1) Prefer coin with highest walk-forward success rate (wins/trades).
-2) If insufficient history for all candidates, fall back to **highest market cap** (static priority mapping).
-   (No EV scoring is used.)
+Shared-bankroll backtest with per-coin leverage caps
+- One shared bankroll ($100 start), one trade at a time, same-bar close & reopen allowed
+- Universe (excludes BNB, DOGE, LINK, XLM): BTC, ETH, SOL, ADA, TON, XRP, TRX, SUI, LTC
+- Signals: heat from 20d z of daily returns; >=77 SHORT, <=23 LONG
+- TP: adaptive per-coin (walk-forward median MFE; fallback per coin)
+- SL: 3% underlying
+- Hold: max 96h (4 daily bars)
+- Tie-break on same close: highest walk-forward hit rate; fallback highest market cap
+- NEW: Per-coin leverage caps:
+    * BTC/ETH/SOL: base 10×, pyramiding +1×/ +5% confidence up to 14×
+    * Others (ADA/TON/XRP/TRX/SUI/LTC): fixed 2×, no pyramiding
 """
 
 import requests, time
@@ -24,26 +25,16 @@ SYMBOLS = [
 ]
 
 # Static market-cap fallback priority (1 = highest cap among this set)
-# This is a conservative, time-robust ordering for these nine coins.
 MCAP_PRIORITY = {
-    "BTC": 1,
-    "ETH": 2,
-    "XRP": 3,
-    "SOL": 4,
-    "TON": 5,
-    "ADA": 6,
-    "TRX": 7,
-    "LTC": 8,
-    "SUI": 9,
+    "BTC": 1, "ETH": 2, "XRP": 3, "SOL": 4, "TON": 5,
+    "ADA": 6, "TRX": 7, "LTC": 8, "SUI": 9,
 }
 
-# ── Algo parameters ───────────────────────────────────────────────────────────
+# ── Algo params ──────────────────────────────────────────────────────────────
 LOOKBACK      = 20
 CONF_TRIGGER  = 77
 SL            = 0.03          # 3% (underlying) hard stop
 HOLD_BARS     = 4             # 96h
-BASE_LEV      = 10
-MAX_LEV       = 14
 CONF_PER_LEV  = 5             # +1× per +5% confidence increase
 
 # Adaptive TP fallbacks per coin (used until ≥5 MFEs recorded)
@@ -53,13 +44,29 @@ TP_FALLBACKS  = {
     "TRX":0.0250, "SUI":0.0400, "LTC":0.0350
 }
 
+# NEW: Per-coin leverage policy
+# - For BTC/ETH/SOL: allow pyramiding (10→14×)
+# - For all others: fixed 2× (no pyramiding)
+LEV_BASE = {
+    "BTC":10, "ETH":10, "SOL":10,
+    "ADA":2,  "TON":2,  "XRP":2,  "TRX":2,  "SUI":2,  "LTC":2
+}
+LEV_MAX = {
+    "BTC":14, "ETH":14, "SOL":14,
+    "ADA":2,  "TON":2,  "XRP":2,  "TRX":2,  "SUI":2,  "LTC":2
+}
+ALLOW_PYRAMID = {
+    "BTC":True, "ETH":True, "SOL":True,
+    "ADA":False, "TON":False, "XRP":False, "TRX":False, "SUI":False, "LTC":False
+}
+
 # ── Binance endpoints ────────────────────────────────────────────────────────
 BASES = [
     "https://api.binance.com", "https://api1.binance.com",
     "https://api2.binance.com", "https://api3.binance.com",
     "https://data-api.binance.vision",
 ]
-HEADERS = {"User-Agent":"shared-equity-hitrate-mcap/1.0 (+github actions)"}
+HEADERS = {"User-Agent":"shared-equity-percoin-lev/1.0 (+github actions)"}
 
 # ── Data helpers ─────────────────────────────────────────────────────────────
 def binance_daily_closed(symbol):
@@ -121,20 +128,17 @@ def prep_token(symbol, sym):
         heats.append(heat_from_ret_and_z(rets[i-1], zs[i-1]))
     return {"sym":sym,"dates":dates,"closes":closes,"heats":heats}
 
-def next_trigger_idx(series, start_idx):
-    h = series["heats"]; n=len(h)
-    for i in range(max(start_idx, LOOKBACK+1), n):
-        if dir_from_heat(h[i]) is not None:
-            return i
-    return None
-
 # ── Simulate one trade from entry index to exit ──────────────────────────────
 def simulate_trade(series, entry_i, prior_mfes, equity):
     closes, heats, sym = series["closes"], series["heats"], series["sym"]
     entry_px = closes[entry_i]
     direction = dir_from_heat(heats[entry_i])
     conf0 = heats[entry_i]
-    lev   = BASE_LEV
+
+    lev   = LEV_BASE[sym]
+    lev_max = LEV_MAX[sym]
+    allow_pyr = ALLOW_PYRAMID[sym]
+
     tp    = median(prior_mfes[sym]) if len(prior_mfes[sym])>=5 else TP_FALLBACKS.get(sym,0.03)
     last_allowed = min(entry_i + HOLD_BARS, len(closes)-1)
 
@@ -150,17 +154,23 @@ def simulate_trade(series, entry_i, prior_mfes, equity):
             same = (dir_from_heat(h)==direction)
             inband = ((direction=="LONG" and h<=100-CONF_TRIGGER) or
                       (direction=="SHORT" and h>=CONF_TRIGGER))
-            # Pyramiding
-            if same and inband:
+            # Pyramiding only for coins that allow it (BTC/ETH/SOL)
+            if allow_pyr and same and inband:
                 stronger = (direction=="SHORT" and h>conf0) or (direction=="LONG" and h<conf0)
                 if stronger:
                     steps=int(abs(h-conf0)//CONF_PER_LEV)
                     if steps>0:
-                        lev=min(lev+steps, MAX_LEV); conf0=h
+                        lev=min(lev+steps, lev_max); conf0=h
                 # Exit advisory if weaker + lower new TP and already >= it
                 new_tp = median(prior_mfes[sym]) if len(prior_mfes[sym])>=5 else TP_FALLBACKS.get(sym,0.03)
                 weaker=(direction=="SHORT" and h<conf0) or (direction=="LONG" and h>conf0)
                 if weaker and new_tp<tp and move>=new_tp:
+                    break
+            else:
+                # Even without pyramiding, still allow exit-advisory logic
+                new_tp = median(prior_mfes[sym]) if len(prior_mfes[sym])>=5 else TP_FALLBACKS.get(sym,0.03)
+                weaker=(direction=="SHORT" and h<conf0) or (direction=="LONG" and h>conf0)
+                if same and inband and weaker and new_tp<tp and move>=new_tp:
                     break
 
         if move>=tp: break
@@ -170,9 +180,10 @@ def simulate_trade(series, entry_i, prior_mfes, equity):
 
     final_px = closes[i]
     final_move = (final_px/entry_px - 1.0) if direction=="LONG" else (entry_px/final_px - 1.0)
+
     prior_mfes[sym].append(best_move)
 
-    # bounded loss, pyramiding-enabled leverage, floor equity at 0
+    # bounded loss, per-coin leverage, floor equity at 0
     bounded = max(final_move, -SL)
     effective = bounded * lev
     new_eq = max(0.0, equity * (1.0 + effective))
@@ -181,7 +192,7 @@ def simulate_trade(series, entry_i, prior_mfes, equity):
     exit_i = i
     return exit_i, exit_date, new_eq, win
 
-# ── Backtest with hit-rate tie-break & market-cap fallback ───────────────────
+# ── Backtest with hit-rate tie-break & MCAP fallback ─────────────────────────
 def backtest_shared(start_date):
     series_map = {sym: prep_token(symbol, sym) for symbol, sym in SYMBOLS}
 
@@ -219,23 +230,20 @@ def backtest_shared(start_date):
             if i < len(s["dates"]) and s["dates"][i]==cur_date:
                 h = s["heats"][i]
                 if dir_from_heat(h) is not None:
-                    # compute hit-rate if enough history
                     t = hist_trades[sym]; w = hist_wins[sym]
-                    hit = (w / t) if t >= 1 else None   # 1+ trade yields a rate; you can set 5 if you prefer stricter
+                    hit = (w / t) if t >= 1 else None   # use ≥1 trade for responsiveness; raise to ≥5 for stricter
                     cands.append((sym, i, hit))
 
         if not cands:
             d_idx += 1
             continue
 
-        # choose best by hit-rate first; if tie/None, fallback by market-cap priority
-        # sort key: (has_hit, hit, -cap_priority_rank) descending for first 2, ascending for rank
+        # choose best by hit-rate first; tie/None → MCAP fallback
         def sort_key(item):
             sym, idx, hit = item
             has = 1 if (hit is not None) else 0
-            # For None hit, treat as -1 to push below any valid hit
             hit_val = hit if hit is not None else -1.0
-            # Lower rank number = higher market cap priority; we invert for sorting
+            # Lower MCAP rank number → higher priority; invert for sorting
             mcap_rank = -MCAP_PRIORITY.get(sym, 99)
             return (has, hit_val, mcap_rank)
 
@@ -290,10 +298,11 @@ def run_periods():
         print(f"Final equity: ${r['equity']:.2f}  (ROI {r['roi_pct']:.1f}%)")
         print(f"Max drawdown: {r['max_dd_pct']:.1f}%")
 
-    show("Shared Bankroll (Hit-rate tie-break; MCAP fallback) — from 2023-01-01", p1)
-    show("Shared Bankroll (Hit-rate tie-break; MCAP fallback) — from 2025-01-01", p2)
+    show("Shared Bankroll (Per-coin leverage caps) — from 2023-01-01", p1)
+    show("Shared Bankroll (Per-coin leverage caps) — from 2025-01-01", p2)
 
     import sys; sys.stdout.flush()
 
 if __name__ == "__main__":
     run_periods()
+       
