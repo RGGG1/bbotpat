@@ -251,8 +251,14 @@ def run_period(start_dt, title):
     for r in rows:
         wr = (r["wins"]/r["trades"]*100.0) if r["trades"]>0 else 0.0
         print(f"{r['sym']:<6} {r['trades']:>6} {wr:>6.1f}% {r['avg_roi']:>9.2f}% {r['equity']:>12.2f}")
+
     pooled_wr = (total_wins/total_trades*100.0) if total_trades>0 else 0.0
     print(f"{'TOTAL':<6} {total_trades:>6} {pooled_wr:>6.1f}% {'':>9} {'':>12}")
+
+    # ---- Force flush so GitHub logs always show full table ----
+    import sys
+    sys.stdout.flush()
+    
 
 def main():
     run_period(START_A, f"from {START_A.date()} to last closed")
