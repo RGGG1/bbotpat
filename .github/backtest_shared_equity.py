@@ -47,11 +47,11 @@ TP_FALLBACKS  = {
 # Per-coin leverage policy
 LEV_BASE = {
     "BTC":10, "ETH":10, "SOL":10,
-    "TON":2,  "TRX":2,  "SUI":2,  "LTC":2
+    "TON":1,  "TRX":1,  "SUI":1,  "LTC":1
 }
 LEV_MAX = {
     "BTC":14, "ETH":14, "SOL":14,
-    "TON":2,  "TRX":2,  "SUI":2,  "LTC":2
+    "TON":1,  "TRX":1,  "SUI":1,  "LTC":1
 }
 ALLOW_PYRAMID = {
     "BTC":True, "ETH":True, "SOL":True,
