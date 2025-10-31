@@ -1,41 +1,65 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Shared-bankroll backtest with EV tie-break and same-bar re-entry
+Shared-bankroll backtest with hit-rate tie-break & market-cap fallback
 Coins: BTC, ETH, SOL, ADA, TON, XRP, TRX, SUI, LTC
 Excludes: BNB, DOGE, LINK, XLM
-Rules: 77% trigger, 3% SL, adaptive TP, 10→14x pyramiding, 96h cap, exit-advisory
+Rules: 77% trigger, 3% SL, adaptive TP, pyramiding 10→14×, 96h cap, exit-advisory
 One trade at a time, compounding from $100.
+
+Tie-break on same daily close:
+1) Prefer coin with highest walk-forward success rate (wins/trades).
+2) If insufficient history for all candidates, fall back to **highest market cap** (static priority mapping).
+   (No EV scoring is used.)
 """
 
 import requests, time
 from datetime import datetime, timedelta
 
-# ── Config ───────────────────────────────────────────────────────────────────
+# ── Universe (excluded: BNB, DOGE, LINK, XLM) ────────────────────────────────
 SYMBOLS = [
     ("BTCUSDT","BTC"), ("ETHUSDT","ETH"), ("SOLUSDT","SOL"),
     ("ADAUSDT","ADA"), ("TONUSDT","TON"), ("XRPUSDT","XRP"),
     ("TRXUSDT","TRX"), ("SUIUSDT","SUI"), ("LTCUSDT","LTC"),
 ]
+
+# Static market-cap fallback priority (1 = highest cap among this set)
+# This is a conservative, time-robust ordering for these nine coins.
+MCAP_PRIORITY = {
+    "BTC": 1,
+    "ETH": 2,
+    "XRP": 3,
+    "SOL": 4,
+    "TON": 5,
+    "ADA": 6,
+    "TRX": 7,
+    "LTC": 8,
+    "SUI": 9,
+}
+
+# ── Algo parameters ───────────────────────────────────────────────────────────
 LOOKBACK      = 20
 CONF_TRIGGER  = 77
-SL            = 0.03
-HOLD_BARS     = 4           # 96h
+SL            = 0.03          # 3% (underlying) hard stop
+HOLD_BARS     = 4             # 96h
 BASE_LEV      = 10
 MAX_LEV       = 14
-CONF_PER_LEV  = 5           # +1x per +5% confidence
+CONF_PER_LEV  = 5             # +1× per +5% confidence increase
+
+# Adaptive TP fallbacks per coin (used until ≥5 MFEs recorded)
 TP_FALLBACKS  = {
     "BTC":0.0227, "ETH":0.0167, "SOL":0.0444,
     "ADA":0.0300, "TON":0.0300, "XRP":0.0300,
     "TRX":0.0250, "SUI":0.0400, "LTC":0.0350
 }
 
+# ── Binance endpoints ────────────────────────────────────────────────────────
 BASES = [
     "https://api.binance.com", "https://api1.binance.com",
     "https://api2.binance.com", "https://api3.binance.com",
     "https://data-api.binance.vision",
 ]
-HEADERS = {"User-Agent":"shared-equity-ev/1.1 (+github actions)"}
+HEADERS = {"User-Agent":"shared-equity-hitrate-mcap/1.0 (+github actions)"}
 
 # ── Data helpers ─────────────────────────────────────────────────────────────
 def binance_daily_closed(symbol):
@@ -79,17 +103,13 @@ def dir_from_heat(h):
     if h<=100-CONF_TRIGGER: return "LONG"
     return None
 
-def confidence_from_heat(h, direction):
-    # map to 77..100 for both sides at trigger
-    return h if direction=="SHORT" else (100 - h)
-
 def median(a):
     v=[x for x in a if x is not None]; v.sort()
     n=len(v); 
     if n==0: return None
     return v[n//2] if n%2 else (v[n//2-1]+v[n//2])/2.0
 
-# ── Build series per token ───────────────────────────────────────────────────
+# ── Build per-token series ───────────────────────────────────────────────────
 def prep_token(symbol, sym):
     rows = binance_daily_closed(symbol)
     dates, closes = zip(*rows)
@@ -108,7 +128,7 @@ def next_trigger_idx(series, start_idx):
             return i
     return None
 
-# ── Simulate one trade on a token from entry index to exit ───────────────────
+# ── Simulate one trade from entry index to exit ──────────────────────────────
 def simulate_trade(series, entry_i, prior_mfes, equity):
     closes, heats, sym = series["closes"], series["heats"], series["sym"]
     entry_px = closes[entry_i]
@@ -130,27 +150,29 @@ def simulate_trade(series, entry_i, prior_mfes, equity):
             same = (dir_from_heat(h)==direction)
             inband = ((direction=="LONG" and h<=100-CONF_TRIGGER) or
                       (direction=="SHORT" and h>=CONF_TRIGGER))
+            # Pyramiding
             if same and inband:
                 stronger = (direction=="SHORT" and h>conf0) or (direction=="LONG" and h<conf0)
                 if stronger:
                     steps=int(abs(h-conf0)//CONF_PER_LEV)
                     if steps>0:
                         lev=min(lev+steps, MAX_LEV); conf0=h
-
+                # Exit advisory if weaker + lower new TP and already >= it
                 new_tp = median(prior_mfes[sym]) if len(prior_mfes[sym])>=5 else TP_FALLBACKS.get(sym,0.03)
                 weaker=(direction=="SHORT" and h<conf0) or (direction=="LONG" and h>conf0)
                 if weaker and new_tp<tp and move>=new_tp:
-                    break  # exit advisory
+                    break
 
         if move>=tp: break
         if move<=-SL: break
         if i>=last_allowed: break
         i+=1
 
-    # close at i (same-day close)
     final_px = closes[i]
     final_move = (final_px/entry_px - 1.0) if direction=="LONG" else (entry_px/final_px - 1.0)
     prior_mfes[sym].append(best_move)
+
+    # bounded loss, pyramiding-enabled leverage, floor equity at 0
     bounded = max(final_move, -SL)
     effective = bounded * lev
     new_eq = max(0.0, equity * (1.0 + effective))
@@ -159,79 +181,93 @@ def simulate_trade(series, entry_i, prior_mfes, equity):
     exit_i = i
     return exit_i, exit_date, new_eq, win
 
-# ── Backtest with EV tie-break & same-bar reopen ─────────────────────────────
+# ── Backtest with hit-rate tie-break & market-cap fallback ───────────────────
 def backtest_shared(start_date):
     series_map = {sym: prep_token(symbol, sym) for symbol, sym in SYMBOLS}
 
-    # pointers per coin
+    # per-coin pointers at/after start_date
     ptr = {}
     for sym, s in series_map.items():
         i=0
-        while i<len(s["dates"]) and s["dates"][i]<start_date: i+=1
+        while i<len(s["dates"]) and s["dates"][i] < start_date: i+=1
         ptr[sym]=max(i, LOOKBACK+1)
 
-    # global date list (unique, sorted) from all coins
+    # global date set
     all_dates = sorted(set(d for s in series_map.values() for d in s["dates"] if d>=start_date))
 
     equity=100.0; trades=0; wins=0
     max_dd=0.0; peak=equity
     prior_mfes={sym:[] for _,sym in SYMBOLS}
 
+    # walk-forward hit-rate tallies
+    hist_trades={sym:0 for _,sym in SYMBOLS}
+    hist_wins  ={sym:0 for _,sym in SYMBOLS}
+
     d_idx=0
     while d_idx < len(all_dates):
         cur_date = all_dates[d_idx]
 
-        # gather all *ready* candidates ON this date
-        candidates=[]
+        # gather candidates on this date
+        cands=[]
         for sym, s in series_map.items():
             i = ptr[sym]
             if i is None or i>=len(s["dates"]): continue
-            # advance pointer up to current date (but not beyond)
+            # advance pointer to current date (but not past)
             while i < len(s["dates"]) and s["dates"][i] < cur_date:
                 i += 1
             ptr[sym]=i
             if i < len(s["dates"]) and s["dates"][i]==cur_date:
                 h = s["heats"][i]
-                direction = dir_from_heat(h)
-                if direction is not None:
-                    conf = confidence_from_heat(h, direction)  # 77..100
-                    tp = median(prior_mfes[sym]) if len(prior_mfes[sym])>=5 else TP_FALLBACKS.get(sym,0.03)
-                    ev = conf * tp  # EV score for tie-break
-                    candidates.append((ev, sym, i))
+                if dir_from_heat(h) is not None:
+                    # compute hit-rate if enough history
+                    t = hist_trades[sym]; w = hist_wins[sym]
+                    hit = (w / t) if t >= 1 else None   # 1+ trade yields a rate; you can set 5 if you prefer stricter
+                    cands.append((sym, i, hit))
 
-        if not candidates:
+        if not cands:
             d_idx += 1
             continue
 
-        # choose best EV
-        candidates.sort(reverse=True)   # highest EV first
-        _, chosen_sym, entry_i = candidates[0]
+        # choose best by hit-rate first; if tie/None, fallback by market-cap priority
+        # sort key: (has_hit, hit, -cap_priority_rank) descending for first 2, ascending for rank
+        def sort_key(item):
+            sym, idx, hit = item
+            has = 1 if (hit is not None) else 0
+            # For None hit, treat as -1 to push below any valid hit
+            hit_val = hit if hit is not None else -1.0
+            # Lower rank number = higher market cap priority; we invert for sorting
+            mcap_rank = -MCAP_PRIORITY.get(sym, 99)
+            return (has, hit_val, mcap_rank)
+
+        cands.sort(key=sort_key, reverse=True)
+        chosen_sym, entry_i, _ = cands[0]
         s = series_map[chosen_sym]
 
-        # simulate that one trade exclusively
+        # simulate that trade
         exit_i, exit_date, equity, win = simulate_trade(s, entry_i, prior_mfes, equity)
         trades += 1
-        if win: wins += 1
+        if win: 
+            wins += 1
+            hist_wins[chosen_sym] += 1
+        hist_trades[chosen_sym] += 1
 
-        # move chosen pointer to AFTER exit bar
+        # advance chosen pointer to after exit bar
         ptr[chosen_sym] = exit_i + 1
 
-        # allow same-bar re-entry by others:
-        # advance other pointers only for dates strictly < exit_date
+        # other pointers: advance only dates strictly < exit_date (allow same-bar re-entry)
         for sym2, ss in series_map.items():
             if sym2==chosen_sym: continue
-            i=ptr[sym2]
-            while i < len(ss["dates"]) and ss["dates"][i] < exit_date:
-                i += 1
-            ptr[sym2]=i
+            j = ptr[sym2]
+            while j < len(ss["dates"]) and ss["dates"][j] < exit_date:
+                j += 1
+            ptr[sym2] = j
 
-        # set loop date index to the exit date position (so we can open same-day)
-        # find index of exit_date (it exists in all_dates)
+        # move global loop index up to exit_date (not past), so we can open same-bar
         while d_idx < len(all_dates) and all_dates[d_idx] < exit_date:
             d_idx += 1
-        # do NOT increment here; next loop evaluates candidates at exit_date
+        # no increment here; next iteration will process exit_date too
 
-        # drawdown
+        # drawdown tracking
         if equity>peak: peak=equity
         if peak>0:
             dd=(peak-equity)/peak
@@ -254,11 +290,10 @@ def run_periods():
         print(f"Final equity: ${r['equity']:.2f}  (ROI {r['roi_pct']:.1f}%)")
         print(f"Max drawdown: {r['max_dd_pct']:.1f}%")
 
-    show("Shared Bankroll (EV tie-break) — from 2023-01-01", p1)
-    show("Shared Bankroll (EV tie-break) — from 2025-01-01", p2)
+    show("Shared Bankroll (Hit-rate tie-break; MCAP fallback) — from 2023-01-01", p1)
+    show("Shared Bankroll (Hit-rate tie-break; MCAP fallback) — from 2025-01-01", p2)
 
     import sys; sys.stdout.flush()
 
 if __name__ == "__main__":
     run_periods()
-  
