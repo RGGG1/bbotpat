@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Shared-bankroll backtest with per-coin leverage caps
+Shared-bankroll backtest with per-coin confidence triggers & leverage caps
 - One shared bankroll ($100 start), one trade at a time, same-bar close & reopen allowed
 - Universe (excludes BNB, DOGE, LINK, XLM): BTC, ETH, SOL, ADA, TON, XRP, TRX, SUI, LTC
-- Signals: heat from 20d z of daily returns; >=77 SHORT, <=23 LONG
+- Signals: heat from 20d z of daily returns; trigger is per-coin (see CONF_THRESHOLDS)
 - TP: adaptive per-coin (walk-forward median MFE; fallback per coin)
 - SL: 3% underlying
 - Hold: max 96h (4 daily bars)
 - Tie-break on same close: highest walk-forward hit rate; fallback highest market cap
-- NEW: Per-coin leverage caps:
+- Per-coin leverage:
     * BTC/ETH/SOL: base 10×, pyramiding +1×/ +5% confidence up to 14×
     * Others (ADA/TON/XRP/TRX/SUI/LTC): fixed 2×, no pyramiding
 """
@@ -32,10 +32,22 @@ MCAP_PRIORITY = {
 
 # ── Algo params ──────────────────────────────────────────────────────────────
 LOOKBACK      = 20
-CONF_TRIGGER  = 77
 SL            = 0.03          # 3% (underlying) hard stop
 HOLD_BARS     = 4             # 96h
 CONF_PER_LEV  = 5             # +1× per +5% confidence increase
+
+# Per-coin confidence triggers (77 for core; 90 for volatile alts)
+CONF_THRESHOLDS = {
+    "BTC": 77,
+    "ETH": 77,
+    "SOL": 77,
+    "ADA": 90,
+    "TON": 90,
+    "XRP": 90,
+    "TRX": 90,
+    "SUI": 90,
+    "LTC": 90,
+}
 
 # Adaptive TP fallbacks per coin (used until ≥5 MFEs recorded)
 TP_FALLBACKS  = {
@@ -44,9 +56,7 @@ TP_FALLBACKS  = {
     "TRX":0.0250, "SUI":0.0400, "LTC":0.0350
 }
 
-# NEW: Per-coin leverage policy
-# - For BTC/ETH/SOL: allow pyramiding (10→14×)
-# - For all others: fixed 2× (no pyramiding)
+# Per-coin leverage policy
 LEV_BASE = {
     "BTC":10, "ETH":10, "SOL":10,
     "ADA":2,  "TON":2,  "XRP":2,  "TRX":2,  "SUI":2,  "LTC":2
@@ -66,7 +76,7 @@ BASES = [
     "https://api2.binance.com", "https://api3.binance.com",
     "https://data-api.binance.vision",
 ]
-HEADERS = {"User-Agent":"shared-equity-percoin-lev/1.0 (+github actions)"}
+HEADERS = {"User-Agent":"shared-equity-percoin-conf-lev/1.0 (+github actions)"}
 
 # ── Data helpers ─────────────────────────────────────────────────────────────
 def binance_daily_closed(symbol):
@@ -104,17 +114,15 @@ def heat_from_ret_and_z(ret,z):
     s = z if ret>0 else -z
     return max(0,min(100, round(50 + s*20)))
 
-def dir_from_heat(h):
-    if h is None: return None
-    if h>=CONF_TRIGGER: return "SHORT"
-    if h<=100-CONF_TRIGGER: return "LONG"
+def triggered_direction(heat, sym):
+    """Return LONG/SHORT/None based on per-coin trigger."""
+    if heat is None: return None
+    trig = CONF_THRESHOLDS.get(sym, 77)
+    if heat >= trig:
+        return "SHORT"
+    if heat <= 100 - trig:
+        return "LONG"
     return None
-
-def median(a):
-    v=[x for x in a if x is not None]; v.sort()
-    n=len(v); 
-    if n==0: return None
-    return v[n//2] if n%2 else (v[n//2-1]+v[n//2])/2.0
 
 # ── Build per-token series ───────────────────────────────────────────────────
 def prep_token(symbol, sym):
@@ -132,14 +140,18 @@ def prep_token(symbol, sym):
 def simulate_trade(series, entry_i, prior_mfes, equity):
     closes, heats, sym = series["closes"], series["heats"], series["sym"]
     entry_px = closes[entry_i]
-    direction = dir_from_heat(heats[entry_i])
+    conf_trig = CONF_THRESHOLDS.get(sym, 77)
+
+    direction = triggered_direction(heats[entry_i], sym)
     conf0 = heats[entry_i]
 
     lev   = LEV_BASE[sym]
     lev_max = LEV_MAX[sym]
     allow_pyr = ALLOW_PYRAMID[sym]
 
-    tp    = median(prior_mfes[sym]) if len(prior_mfes[sym])>=5 else TP_FALLBACKS.get(sym,0.03)
+    tp    = (lambda arr, fb: (sorted([x for x in arr if x is not None])[len(arr)//2]
+            if len(arr)>=5 else fb))(prior_mfes[sym], TP_FALLBACKS.get(sym,0.03))
+
     last_allowed = min(entry_i + HOLD_BARS, len(closes)-1)
 
     best_move = 0.0
@@ -151,10 +163,10 @@ def simulate_trade(series, entry_i, prior_mfes, equity):
 
         h = heats[i]
         if h is not None:
-            same = (dir_from_heat(h)==direction)
-            inband = ((direction=="LONG" and h<=100-CONF_TRIGGER) or
-                      (direction=="SHORT" and h>=CONF_TRIGGER))
-            # Pyramiding only for coins that allow it (BTC/ETH/SOL)
+            same = (triggered_direction(h, sym)==direction)
+            inband = ((direction=="LONG" and h<=100-conf_trig) or
+                      (direction=="SHORT" and h>=conf_trig))
+            # Pyramiding (only for BTC/ETH/SOL)
             if allow_pyr and same and inband:
                 stronger = (direction=="SHORT" and h>conf0) or (direction=="LONG" and h<conf0)
                 if stronger:
@@ -162,13 +174,15 @@ def simulate_trade(series, entry_i, prior_mfes, equity):
                     if steps>0:
                         lev=min(lev+steps, lev_max); conf0=h
                 # Exit advisory if weaker + lower new TP and already >= it
-                new_tp = median(prior_mfes[sym]) if len(prior_mfes[sym])>=5 else TP_FALLBACKS.get(sym,0.03)
+                new_tp = (lambda arr, fb: (sorted([x for x in arr if x is not None])[len(arr)//2]
+                        if len(arr)>=5 else fb))(prior_mfes[sym], TP_FALLBACKS.get(sym,0.03))
                 weaker=(direction=="SHORT" and h<conf0) or (direction=="LONG" and h>conf0)
                 if weaker and new_tp<tp and move>=new_tp:
                     break
             else:
                 # Even without pyramiding, still allow exit-advisory logic
-                new_tp = median(prior_mfes[sym]) if len(prior_mfes[sym])>=5 else TP_FALLBACKS.get(sym,0.03)
+                new_tp = (lambda arr, fb: (sorted([x for x in arr if x is not None])[len(arr)//2]
+                        if len(arr)>=5 else fb))(prior_mfes[sym], TP_FALLBACKS.get(sym,0.03))
                 weaker=(direction=="SHORT" and h<conf0) or (direction=="LONG" and h>conf0)
                 if same and inband and weaker and new_tp<tp and move>=new_tp:
                     break
@@ -229,7 +243,7 @@ def backtest_shared(start_date):
             ptr[sym]=i
             if i < len(s["dates"]) and s["dates"][i]==cur_date:
                 h = s["heats"][i]
-                if dir_from_heat(h) is not None:
+                if triggered_direction(h, sym) is not None:
                     t = hist_trades[sym]; w = hist_wins[sym]
                     hit = (w / t) if t >= 1 else None   # use ≥1 trade for responsiveness; raise to ≥5 for stricter
                     cands.append((sym, i, hit))
@@ -298,8 +312,8 @@ def run_periods():
         print(f"Final equity: ${r['equity']:.2f}  (ROI {r['roi_pct']:.1f}%)")
         print(f"Max drawdown: {r['max_dd_pct']:.1f}%")
 
-    show("Shared Bankroll (Per-coin leverage caps) — from 2023-01-01", p1)
-    show("Shared Bankroll (Per-coin leverage caps) — from 2025-01-01", p2)
+    show("Shared Bankroll (Per-coin triggers & leverage) — from 2023-01-01", p1)
+    show("Shared Bankroll (Per-coin triggers & leverage) — from 2025-01-01", p2)
 
     import sys; sys.stdout.flush()
 
