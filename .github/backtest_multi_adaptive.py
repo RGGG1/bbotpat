@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Multi-Token Adaptive Backtest (v2.6 rules)
+Multi-Token Adaptive Backtest (v2.6 rules, equity fix)
 - Daily closed candles only (Binance endTime)
 - Heat via 20d z-score of daily returns (0..100; 50 neutral, dir-aware)
 - Signal: heat >= 77 → SHORT, heat <= 23 → LONG
@@ -9,11 +9,11 @@ Multi-Token Adaptive Backtest (v2.6 rules)
 - SL: 3%
 - Max hold: 4 bars (96h)
 - Leverage: 10× base; pyramiding +1× per +5% confidence gain (cap 14×)
-- Exit-advisory modeled as EARLY EXIT if weaker repeat lowers TP and current move >= new TP
+- Exit-advisory: early exit if weaker repeat lowers TP and move >= new TP
 - Compounding: per token, starting equity $100
 - Periods: from 2023-01-01; from 2025-01-01
 
-Outputs two tables (2023+ and 2025+): trades, win%, avg underlying ROI, equity_$.
+FIX: Per-trade PnL is bounded by stop * leverage, and equity is floored at 0.
 """
 
 import requests, math
@@ -42,15 +42,15 @@ BASES = [
     "https://api3.binance.com",
     "https://data-api.binance.vision",
 ]
-HEADERS = {"User-Agent": "bbot-multi-backtest/1.0"}
+HEADERS = {"User-Agent": "bbot-multi-backtest/1.1"}
 
 LOOKBACK = 20
 CONF_TRIGGER = 77
-SL = 0.03
-HOLD_BARS = 4
+SL = 0.03                 # stop (underlying)
+HOLD_BARS = 4             # 96h
 BASE_LEV = 10
 MAX_LEV  = 14
-CONF_PER_LEV = 5     # +1x per +5% confidence increase
+CONF_PER_LEV = 5          # +1× per +5% confidence gain
 TP_FALLBACK_DEFAULT = 0.03
 
 START_A = datetime(2023,1,1, tzinfo=timezone.utc)
@@ -64,7 +64,7 @@ def binance_daily_closed(symbol, limit=1500):
             url=f"{base}/api/v3/klines"
             now = datetime.utcnow()
             midnight = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-            end_ms = int(midnight.timestamp()*1000) - 1
+            end_ms = int(midnight.timestamp()*1000) - 1  # only fully closed candles
             r = requests.get(url, params={"symbol":symbol,"interval":"1d","limit":limit,"endTime":end_ms},
                              headers=HEADERS, timeout=30)
             r.raise_for_status()
@@ -117,7 +117,6 @@ def leveraged_dir_from_heat(h):
 
 # ---------- Backtest per token ----------
 def backtest_token(symbol, sym, start_dt):
-    # Load & cut data
     rows = binance_daily_closed(symbol)
     rows = [row for row in rows if row[0] >= start_dt - timedelta(days=LOOKBACK+2)]
     if len(rows) < LOOKBACK+5:
@@ -131,14 +130,15 @@ def backtest_token(symbol, sym, start_dt):
     for i in range(1,len(closes)):
         heats.append(heat_from_ret_and_z(rets[i-1], zs[i-1]))
 
-    # Walk-forward adaptive TP storage (per coin)
-    prior_mfes = []  # store MFE (underlying) of completed trades for adaptive median
+    # walk-forward adaptive TP store
+    prior_mfes = []                 # MFEs (underlying) of completed trades
     tp_fallback = TP_FALLBACK_DEFAULT
 
     equity = 100.0
     trades=0; wins=0
     rois=[]  # underlying per-trade ROI (for avg)
 
+    # find first index at/after start
     i0 = next((i for i,d in enumerate(dates) if d>=start_dt), None)
     if i0 is None: i0 = LOOKBACK+1
 
@@ -160,13 +160,11 @@ def backtest_token(symbol, sym, start_dt):
         conf_at_entry = h
         lev = BASE_LEV
 
-        # Simulate inside the 4-bar window with pyramiding + exit advisory on subsequent days
         last_i = min(entry_i + HOLD_BARS, N-1)
-        exit_i = entry_i  # will advance
+        exit_i = entry_i
         hit_reason = "TIME"
+        best_move = 0.0  # MFE (underlying) for adaptive learning
 
-        best_move = 0.0  # max favorable excursion (MFE) for adaptive learning
-        # step through next bars
         for j in range(entry_i+1, last_i+1):
             px = closes[j]
             # move relative to entry (underlying)
@@ -179,22 +177,22 @@ def backtest_token(symbol, sym, start_dt):
             if move > best_move:
                 best_move = move
 
-            # Recompute heat to allow pyramiding/exit-advisory
+            # Recompute heat for pyramiding / exit advisory
             hj = heats[j]
             if hj is not None:
-                # pyramiding: confidence increased (same direction) → +1x per +5%
+                # pyramiding: confidence increased (same direction) → +1× per +5%
                 same_dir = (leveraged_dir_from_heat(hj) == direction)
-                if same_dir and ((direction=="LONG" and hj <= 100-CONF_TRIGGER) or (direction=="SHORT" and hj >= CONF_TRIGGER)):
-                    delta_conf = hj - conf_at_entry if direction=="SHORT" else ( (100-CONF_TRIGGER) - hj ) * -1  # just compare raw % levels
-                    # simpler: use absolute increase in signed confidence vs entry
-                    # For consistency, if hj increased in favor of the direction beyond entry level:
+                in_band  = ((direction=="LONG" and hj <= 100-CONF_TRIGGER) or
+                            (direction=="SHORT" and hj >= CONF_TRIGGER))
+                if same_dir and in_band:
+                    # increase if confidence moved further into the trigger
                     if (direction=="SHORT" and hj>conf_at_entry) or (direction=="LONG" and hj<conf_at_entry):
                         steps = int(abs(hj - conf_at_entry)//CONF_PER_LEV)
                         if steps>0:
                             lev = min(lev+steps, MAX_LEV)
                             conf_at_entry = hj
 
-                # exit advisory: if confidence cooled and new walk-forward TP lower, and move >= new TP → exit
+                # exit advisory: weaker + lower TP and already >= new TP
                 new_tp = median(prior_mfes) if len(prior_mfes)>=5 else tp_fallback
                 weaker = (direction=="SHORT" and hj < conf_at_entry) or (direction=="LONG" and hj > conf_at_entry)
                 lower_tp = (new_tp < tp)
@@ -213,7 +211,7 @@ def backtest_token(symbol, sym, start_dt):
                 hit_reason = "SL"
                 break
 
-            exit_i = j  # if nothing hit, this will end on TIME at last_i
+            exit_i = j  # default to time exit
 
         # Final move (underlying)
         if direction=="LONG":
@@ -221,17 +219,19 @@ def backtest_token(symbol, sym, start_dt):
         else:
             final_move = entry_px/closes[exit_i] - 1.0
 
-        # Record MFE for adaptive learning (walk-forward)
+        # record MFE for adaptive learning
         prior_mfes.append(best_move)
 
-        # Apply leverage
-        effective = final_move * lev
-        equity *= (1.0 + effective)
+        # ---- FIXED COMPOUNDING LOGIC ----
+        # Bound loss to stop and then apply leverage; floor equity at 0
+        bounded_move = max(final_move, -SL)           # cap underlying loss at -SL
+        effective = bounded_move * lev                # leverage applied
+        equity = max(0.0, equity * (1.0 + effective)) # cannot go negative
+
         trades += 1
         if effective > 0: wins += 1
         rois.append(final_move)
 
-        # Move index forward to exit bar + 1
         i = exit_i + 1
 
     avg_roi = (sum(rois)/len(rois))*100.0 if rois else 0.0
@@ -260,3 +260,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+        
