@@ -4,7 +4,7 @@ on:
   workflow_dispatch:         # <-- required for API-triggered runs
   # (optional) keep your GitHub cron as a backup:
   # schedule:
-  #   - cron: '5 0 * * *'    # 00:05 UTC
+  #   - cron: '31 23 * * *'    # 00:05 UTC
 
 concurrency:
   group: daily-crypto-alerts
