@@ -11,6 +11,10 @@ What’s new vs v2.5
 - Pulls current price to show slippage Δ from anchor.
 - Displays TP% + TP price, SL% + SL price, confidence, leverage.
 - ⚠️ Slippage warning if drift exceeds DRIFT_WARN threshold.
+
+Update:
+- Summary lines keep emojis/color bands and now also show the token's
+  last CLOSED daily close price: “… | Close: $xx.xx”
 """
 
 import os, json, time, requests
@@ -185,16 +189,19 @@ def main():
         z_signed = z if ret>0 else -z
         level = max(0, min(100, round(50 + z_signed*20)))
 
+        # Anchor (last CLOSED daily close) — do this BEFORE building the summary line
+        anchor_px = closes[-1]
+
+        # Keep emojis & text, and just add the Close price
         if level>=CONF_TRIGGER:
             emoji="🔴"; desc=f"Overbought {level}% (needs ≥{CONF_TRIGGER}% to short)"
         elif level<=100-CONF_TRIGGER:
             emoji="🟢"; desc=f"Oversold {level}% (needs ≤{100-CONF_TRIGGER}% to long)"
         else:
             emoji="⚪"; desc=f"Neutral {level}%"
-        summary_lines.append(f"{emoji} {sym}: {desc}")
+        summary_lines.append(f"{emoji} {sym}: {desc} | Close: ${fmt_price(anchor_px)}")
 
         direction="SHORT" if ret>0 else "LONG"
-        anchor_px = closes[-1]                 # last CLOSED daily close (model anchor)
         try:
             current_px = binance_last_price(symbol)
         except Exception:
@@ -304,7 +311,6 @@ def main():
 
     def trade_block(sym, direction, entry, tp, lev, conf, valid_until):
         # current ticker (for slippage vs anchor)
-        # We’ll try; if it fails, we omit slippage
         try:
             symbol = next(s for s,t in COINS if t==sym)
             cur = binance_last_price(symbol)
@@ -323,11 +329,9 @@ def main():
         lines.append(f"Side: {direction}")
         lines.append(f"Anchor (prev daily close): ${fmt_price(entry)}")
         if cur is not None:
-            drift = (cur/entry - 1.0) if direction=="LONG" else (entry/cur - 1.0)
-            # Unbiased drift for display:
-            signed = (cur/entry - 1.0)
-            lines.append(f"Current: ${fmt_price(cur)}  (Δ vs anchor: {signed*100:+.2f}%)")
-            if abs(signed) >= DRIFT_WARN:
+            drift_signed = (cur/entry - 1.0)
+            lines.append(f"Current: ${fmt_price(cur)}  (Δ vs anchor: {drift_signed*100:+.2f}%)")
+            if abs(drift_signed) >= DRIFT_WARN:
                 lines.append("⚠️ Slippage from anchor > " + f"{DRIFT_WARN*100:.2f}%")
         lines.append(f"Confidence: {conf:.0f}%")
         lines.append(f"Leverage: {lev}×")
@@ -347,13 +351,13 @@ def main():
              ))
     elif state.get("active_trade"):
         a=state["active_trade"]
-        # Build a compact status block with slippage from anchor
+        # compact status with slippage vs anchor
         try:
             symbol = next(s for s,t in COINS if t==a['sym'])
             cur = binance_last_price(symbol)
-            signed = (cur/float(a['entry']) - 1.0)
-            sl_line = f"Current: ${fmt_price(cur)}  (Δ from anchor: {signed*100:+.2f}%)"
-            warn = "\n⚠️ Slippage > " + f"{DRIFT_WARN*100:.2f}%" if abs(signed)>=DRIFT_WARN else ""
+            drift_signed = (cur/float(a['entry']) - 1.0)
+            sl_line = f"Current: ${fmt_price(cur)}  (Δ from anchor: {drift_signed*100:+.2f}%)"
+            warn = "\n⚠️ Slippage > " + f"{DRIFT_WARN*100:.2f}%" if abs(drift_signed)>=DRIFT_WARN else ""
         except Exception:
             sl_line = ""
             warn = ""
@@ -375,4 +379,3 @@ def main():
 # ────────────────────────────────────────────────
 if __name__=="__main__":
     main()
-         
