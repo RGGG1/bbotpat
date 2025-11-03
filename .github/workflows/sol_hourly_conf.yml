@@ -12,3 +12,4 @@ jobs:
         with:
           python-version: "3.10"
       - run: python .github/get_sol_hourly_conf.py
+      
