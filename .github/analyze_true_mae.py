@@ -12,7 +12,7 @@ COINS = [
     ("SOLUSDT","SOL",0.0444),
 ]
 
-CONF_TRIGGER = 77
+CONF_TRIGGER = 90
 LOOKBACK     = 20
 HOLD_BARS    = 4
 START_DATE   = datetime(2023,1,1,tzinfo=timezone.utc)
