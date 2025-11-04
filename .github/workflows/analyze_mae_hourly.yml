@@ -1,8 +1,6 @@
-name: Analyze MAE per Trade (Hourly)
-
+name: True MAE Analyzer
 on:
   workflow_dispatch:
-
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -12,10 +10,9 @@ jobs:
         with:
           python-version: '3.10'
       - run: pip install requests
-      - name: Run MAE analyzer
-        run: python .github/analyze_mae_hourly.py
-      - name: Upload MAE CSV
-        uses: actions/upload-artifact@v4
+      - run: python .github/analyze_true_mae.py
+      - uses: actions/upload-artifact@v4
         with:
-          name: mae_trades
-          path: mae_trades.csv
+          name: mae_true
+          path: mae_true.csv
+          
