@@ -11,7 +11,7 @@ Analyze true MAE/MFE for the *actual* trades your live logic would take:
 Outputs mae_true.csv. Prints a concise per-trade table and a summary.
 """
 
-import csv, time, requests
+import csv, time, requests, math
 from datetime import datetime, timezone, timedelta
 from statistics import mean, pstdev
 
@@ -20,40 +20,54 @@ CONF_TRIGGER = 77
 HOLD_BARS    = 4  # 96h
 START_DATE   = datetime(2023, 1, 1, tzinfo=timezone.utc)
 
+# Put the Binance mirror FIRST to avoid 451 from runner IPs
 BASES = [
+    "https://data-api.binance.vision",   # mirror
     "https://api.binance.com",
     "https://api1.binance.com",
     "https://api2.binance.com",
     "https://api3.binance.com",
 ]
-HEADERS = {"User-Agent": "true-mae/1.1 (+bbot)"}
+HEADERS = {"User-Agent": "true-mae/1.2 (+bbot)"}
 
 # ---------- HTTP helpers ----------
-def binance_klines(symbol, interval, limit=1500, end_time_ms=None, start_time_ms=None, tries=4):
+def binance_klines(symbol, interval, limit=1500, end_time_ms=None, start_time_ms=None, tries=6):
     params = {"symbol": symbol, "interval": interval, "limit": limit}
-    if end_time_ms is not None: params["endTime"]   = end_time_ms
+    if end_time_ms is not None: params["endTime"]    = end_time_ms
     if start_time_ms is not None: params["startTime"] = start_time_ms
+
     last_err = None
+    backoff = 0.25
     for _ in range(tries):
         for base in BASES:
             try:
-                r = requests.get(f"{base}/api/v3/klines", params=params, headers=HEADERS, timeout=30)
+                r = requests.get(f"{base}/api/v3/klines", params=params, headers=HEADERS, timeout=30, allow_redirects=True)
+                # Handle 451/403 explicitly by trying next base
+                if r.status_code in (451, 403):
+                    last_err = requests.HTTPError(f"{r.status_code} {r.reason}")
+                    continue
                 r.raise_for_status()
                 return r.json()
             except Exception as e:
                 last_err = e
-                time.sleep(0.25)
+                time.sleep(backoff)
+        backoff = min(2.0, backoff * 1.8)
     raise last_err if last_err else RuntimeError("All Binance bases failed")
 
 def fully_closed_daily(symbol):
-    # Return only completed daily candles up to today's 00:00 UTC - 1 ms
+    """
+    Only completed daily candles:
+    end at *yesterday* 23:59:59.999 UTC to be extra-safe against timezone edge cases.
+    """
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
-    midnight = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-    end_ms = int(midnight.timestamp() * 1000) - 1
+    # yesterday midnight boundary
+    y = (now - timedelta(days=1))
+    y_midnight = datetime(y.year, y.month, y.day, tzinfo=timezone.utc)
+    end_ms = int((y_midnight + timedelta(days=1)).timestamp() * 1000) - 1
     ks = binance_klines(symbol, "1d", 1500, end_time_ms=end_ms)
     rows = []
     for k in ks:
-        close_ts = int(k[6]) // 1000  # close time
+        close_ts = int(k[6]) // 1000  # kline close time
         rows.append((datetime.utcfromtimestamp(close_ts).replace(tzinfo=timezone.utc), float(k[4])))
     return [(dt, px) for (dt, px) in rows if dt >= START_DATE]
 
@@ -112,7 +126,6 @@ def run():
             raise RuntimeError(f"{sym}: insufficient daily data after filtering.")
         dts, cls = zip(*rows)
         heats = heat_series(list(cls), 20)
-        # Build dicts for O(1) lookup
         dt_to_idx = {d: i for i, d in enumerate(dts)}
         daily[sym] = {
             "symbol": symbol,
@@ -122,21 +135,20 @@ def run():
             "idx": dt_to_idx,
             "tp": tp
         }
-        time.sleep(0.15)
+        time.sleep(0.12)
 
-    # Build calendar of common dates where all have heat computed (not None)
-    common_dates = set(daily["BTC"]["dates"]) & set(daily["ETH"]["dates"]) & set(daily["SOL"]["dates"])
+    # Calendar of aligned dates where all have valid heat
+    common = set(daily["BTC"]["dates"]) & set(daily["ETH"]["dates"]) & set(daily["SOL"]["dates"])
     cal = []
-    for d in sorted(common_dates):
+    for d in sorted(common):
         ok = True
-        for sym in ["BTC", "ETH", "SOL"]:
-            idx = daily[sym]["idx"].get(d, None)
+        for sym in ("BTC","ETH","SOL"):
+            idx = daily[sym]["idx"].get(d)
             if idx is None or daily[sym]["heat"][idx] is None:
                 ok = False
                 break
         if ok:
             cal.append(d)
-
     if not cal:
         raise RuntimeError("No aligned dates with valid heat for all coins.")
 
@@ -144,20 +156,19 @@ def run():
     active = None
 
     for day in cal:
-        # If a trade is active, we finish it immediately (we don’t let another day start overlapping)
+        # If a trade is active, close it first (hourly path to exit)
         if active is not None:
-            # Evaluate exit using hourly path
             sym = active["sym"]
             symbol = daily[sym]["symbol"]
             entry_dt = active["entry_dt"]
             entry_px = active["entry_px"]
-            tp_pct = active["tp"]
+            tp_pct   = active["tp"]
             direction = active["direction"]
 
             valid_until = entry_dt + timedelta(days=HOLD_BARS)
             hours = hourlies_between(symbol, entry_dt, valid_until)
+
             if not hours:
-                # Fallback: keep entry_dt/px; force expiry at 96h even if no bars (edge case)
                 exit_dt = valid_until
                 exit_px = entry_px
                 mae = 0.0
@@ -194,11 +205,11 @@ def run():
                 "mfe": mfe * 100.0,
                 "reason": reason
             })
-            active = None  # free the slot for new signals on this day
+            active = None  # free slot
 
-        # If slot is free, check for a **new** signal today (priority BTC > ETH > SOL)
+        # If free, see if today fires a new signal (priority BTC>ETH>SOL)
         if active is None:
-            for sym in ["BTC", "ETH", "SOL"]:
+            for sym in ("BTC","ETH","SOL"):
                 idx = daily[sym]["idx"][day]
                 lvl = daily[sym]["heat"][idx]
                 if lvl is None:
@@ -210,11 +221,11 @@ def run():
                         "sym": sym,
                         "symbol": daily[sym]["symbol"],
                         "direction": direction,
-                        "entry_dt": day,        # model anchor = daily close time
+                        "entry_dt": day,        # anchor at daily close
                         "entry_px": entry_px,
-                        "tp": daily[sym]["tp"]
+                        "tp": daily[sym]["tp"],
                     }
-                    break  # take the first by priority
+                    break  # first by priority
 
     # Write results
     with open("mae_true.csv", "w", newline="") as f:
@@ -240,10 +251,11 @@ def run():
               f"{tr['exit_dt'].strftime('%Y-%m-%d %H:%M'):16}  "
               f"{tr['hold_h']:4d}  {tr['mae']:7.2f}  {tr['mfe']:7.2f}  {tr['reason']}")
     if trades:
-        mae_median = sorted(x["mae"] for x in trades)[len(trades)//2]
-        print(f"\nMedian MAE across real trades: {mae_median:.2f}%")
-        print("Tip: try limit entries at anchor improved by ~median MAE "
-              "(anchor*(1-μ) for LONG, anchor*(1+μ) for SHORT).")
+        mae_sorted = sorted(x["mae"] for x in trades)
+        median_mae = mae_sorted[len(mae_sorted)//2]
+        print(f"\nMedian MAE across real trades: {median_mae:.2f}%")
+        print("Tip: Consider limit entries ~ median MAE better than anchor "
+              "(LONG: anchor*(1 - μ), SHORT: anchor*(1 + μ)).")
 
 if __name__ == "__main__":
     run()
