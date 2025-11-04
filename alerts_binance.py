@@ -25,7 +25,7 @@ from datetime import datetime, timezone, timedelta
 # ────────────────────────────────────────────────
 COINS = [("BTCUSDT","BTC"), ("ETHUSDT","ETH"), ("SOLUSDT","SOL")]
 
-CONF_TRIGGER = 77            # heat threshold for short; long uses 100-CONF_TRIGGER (=23)
+CONF_TRIGGER = 90            # heat threshold for short; long uses 100-CONF_TRIGGER (=23)
 SL = 0.03                    # informational (you execute manually)
 HOLD_BARS = 4                # 96h
 STATE_FILE = "adaptive_alerts_state.json"
