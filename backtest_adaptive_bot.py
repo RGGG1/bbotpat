@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-backtest_adaptive_confidence.py
-Backtest since 2023-01-01 using 90%/10% heat-level trigger (confidence rule)
+backtest_adaptive_conf_leverage.py
 
-Trigger rule (default in this script):
-- Compute daily returns, 20-day z-score magnitude (abs) and apply sign by today's return
-- Heat level = clip(50 + 20 * z_signed, 0..100)
-- Signal if heat level >= 90 (SHORT) or <= 10 (LONG)
+Backtests the adaptive signal bot from 2023-01-01 with:
+- Trigger options:
+    * "confidence" (default): heat-level >= 90 → SHORT, <= 10 → LONG
+    * "zscore": |z| >= 2.5, direction from sign of daily return
+- One trade open at a time across BTC/ETH/SOL (priority: BTC > ETH > SOL)
+- Exits: first-touch TP/SL per day (SL wins ties within a bar), else time-exit after HOLD_BARS at close
+- Adaptive TP: median(MFE) per coin from past closed trades (>=5), else fallback
+- Compounding bankroll starting at $100
+- Leverage: --leverage N (default 1). PnL% is multiplied by N before compounding.
+- Optional liquidation: --liquidate (if adverse move >= 1/leverage, the trade is set to -100% PnL)
 
-Other rules (unchanged from bot logic):
-- TP = median(MFE) for coin from prior closed trades (>=5), else fallback
-- SL = 3%
-- Hold window = 4 daily candles; first-touch exit (SL priority if both inside a bar), else time-exit at end of window
-- Only ONE trade open at a time across all coins; if a trade closes on a day, a new one can open same day (after exit)
-- Bankroll: $100 start, compounding
-
-CLI:
-  python backtest_adaptive_confidence.py                    # 90/10 confidence trigger
-  python backtest_adaptive_confidence.py --trigger zscore   # original z-score trigger (|z|>=2.5)
 Outputs:
-  - trades.csv  (full trades with PnL, MFE, compounded bankroll)
-  - equity_curve.csv
+  - trades.csv        (full trade list with leveraged pnl_pct and bankroll_after)
+  - equity_curve.csv  (bankroll after each trade)
 """
 
 import math
@@ -36,7 +31,7 @@ import pandas as pd
 
 # ---------------------- Config ----------------------
 COINS = [("BTCUSDT", "BTC"), ("ETHUSDT", "ETH"), ("SOLUSDT", "SOL")]
-Z_THRESH = 2.5                  # used only if --trigger zscore
+Z_THRESH = 2.5
 SL = 0.03
 HOLD_BARS = 4
 TP_FALLBACK = {"BTC": 0.0227, "ETH": 0.0167, "SOL": 0.0444}
@@ -50,7 +45,7 @@ BASES = [
     "https://api3.binance.com",
     "https://data-api.binance.vision",
 ]
-HEADERS = {"User-Agent": "adaptive-bot-backtest/1.1"}
+HEADERS = {"User-Agent": "adaptive-bot-backtest/1.2"}
 
 # ---------------------- Data fetch ----------------------
 def binance_daily(symbol: str, start_dt: Optional[date] = None) -> List[Tuple[date, float, float, float, float]]:
@@ -116,9 +111,10 @@ class Trade:
     close_date: Optional[date] = None
     exit_price: Optional[float] = None
     exit_reason: Optional[str] = None  # TP / SL / TIME / TIME_END
-    pnl_pct: Optional[float] = None
+    pnl_pct: Optional[float] = None    # leveraged pnl %
     mfe_pct: Optional[float] = None
     bankroll_after: Optional[float] = None
+    raw_pnl_pct: Optional[float] = None  # unlevered pnl %, for reference
 
 def dict_by_date(rows: List[Tuple[date, float, float, float, float]]) -> Dict[date, Tuple[float,float,float,float]]:
     return {d: (o,h,l,c) for (d,o,h,l,c) in rows}
@@ -147,6 +143,7 @@ def compute_mfe_since_entry(direction: str, entry: float, ohlc_by_date, entry_da
         return max(0.0, (entry / min_low) - 1.0)
 
 def first_touch_exit(direction: str, entry: float, tp: float, sl: float, ohlc_by_date, entry_date: date, expiry_date: date):
+    """SL priority if both TP and SL are inside the same daily bar."""
     tp_up = entry * (1 + tp)
     sl_down = entry * (1 - sl)
     tp_down = entry * (1 - tp)
@@ -202,7 +199,7 @@ def build_signal_candidates(market: Dict[str, List[Tuple[date,float,float,float,
             level = max(0, min(100, round(50 + 20 * z_signed)))
 
             if trigger == "confidence":
-                # 90/10 rule drives direction directly from level
+                # 90/10 rule
                 if level >= 90:
                     direction = "SHORT"
                 elif level <= 10:
@@ -220,7 +217,7 @@ def build_signal_candidates(market: Dict[str, List[Tuple[date,float,float,float,
     return daily
 
 # ---------------------- Backtest ----------------------
-def run_backtest(trigger: str = "confidence"):
+def run_backtest(trigger: str = "confidence", leverage: float = 1.0, liquidate: bool = False):
     # 1) Fetch data
     market = {}
     for symbol, sym in COINS:
@@ -241,6 +238,18 @@ def run_backtest(trigger: str = "confidence"):
     priority = {"BTC": 0, "ETH": 1, "SOL": 2}
     all_days = sorted({d for rows in market.values() for (d,_,_,_,_) in rows})
 
+    # helper to apply leverage & liquidation
+    def apply_leverage_and_compound(unlevered_pnl: float) -> float:
+        """Return leveraged pnl (possibly liquidated) and update bankroll."""
+        nonlocal bankroll
+        # Liquidation check: if adverse move >= 1/leverage → -100% (bankrupt on that trade)
+        if liquidate and leverage > 1.0 and unlevered_pnl <= -1.0 / leverage:
+            leveraged_pnl = -1.0
+        else:
+            leveraged_pnl = unlevered_pnl * leverage
+        bankroll *= (1.0 + leveraged_pnl)
+        return leveraged_pnl
+
     for day in all_days:
         # Close/update open trade first
         if open_trade:
@@ -250,29 +259,40 @@ def run_backtest(trigger: str = "confidence"):
             expiry_date = entry_date + timedelta(days=HOLD_BARS-1)
             last_check_day = min(day, expiry_date)
 
+            # Update MFE (unlevered)
             mfe = compute_mfe_since_entry(open_trade.direction, open_trade.entry, ohlc, entry_date, last_check_day)
             open_trade.mfe_pct = mfe
 
+            # Check TP/SL
             exit_d, exit_px, reason = first_touch_exit(open_trade.direction, open_trade.entry,
                                                        open_trade.tp, open_trade.sl, ohlc,
                                                        entry_date, last_check_day)
             if exit_d is not None:
+                # Compute unlevered pnl
+                if open_trade.direction == "LONG":
+                    unlev = (exit_px / open_trade.entry) - 1.0
+                else:
+                    unlev = (open_trade.entry / exit_px) - 1.0
+                leveraged = apply_leverage_and_compound(unlev)
+
                 open_trade.close_date = exit_d
                 open_trade.exit_price = exit_px
                 open_trade.exit_reason = reason
-                pnl = (exit_px / open_trade.entry - 1.0) if open_trade.direction == "LONG" else (open_trade.entry / exit_px - 1.0)
-                open_trade.pnl_pct = pnl
-                bankroll *= (1.0 + pnl)
+                open_trade.raw_pnl_pct = unlev
+                open_trade.pnl_pct = leveraged
                 open_trade.bankroll_after = bankroll
+
                 trades.append(open_trade)
                 history_by_coin[open_trade.coin].append(open_trade)
                 open_trade = None
             else:
+                # Time-exit on expiry close
                 if day >= expiry_date:
-                    close_px = None
                     if expiry_date in ohlc:
                         close_px = ohlc[expiry_date][3]
                     else:
+                        # find latest prior close
+                        close_px = None
                         d = expiry_date
                         while close_px is None and d >= entry_date:
                             if d in ohlc:
@@ -280,13 +300,19 @@ def run_backtest(trigger: str = "confidence"):
                                 break
                             d -= timedelta(days=1)
                     if close_px is not None:
+                        if open_trade.direction == "LONG":
+                            unlev = (close_px / open_trade.entry) - 1.0
+                        else:
+                            unlev = (open_trade.entry / close_px) - 1.0
+                        leveraged = apply_leverage_and_compound(unlev)
+
                         open_trade.close_date = expiry_date
                         open_trade.exit_price = close_px
                         open_trade.exit_reason = "TIME"
-                        pnl = (close_px / open_trade.entry - 1.0) if open_trade.direction == "LONG" else (open_trade.entry / close_px - 1.0)
-                        open_trade.pnl_pct = pnl
-                        bankroll *= (1.0 + pnl)
+                        open_trade.raw_pnl_pct = unlev
+                        open_trade.pnl_pct = leveraged
                         open_trade.bankroll_after = bankroll
+
                         trades.append(open_trade)
                         history_by_coin[open_trade.coin].append(open_trade)
                         open_trade = None
@@ -313,16 +339,23 @@ def run_backtest(trigger: str = "confidence"):
         ohlc = ohlc_maps[sym]
         last_day = max(ohlc.keys())
         close_px = ohlc[last_day][3]
+        if open_trade.direction == "LONG":
+            unlev = (close_px / open_trade.entry) - 1.0
+        else:
+            unlev = (open_trade.entry / close_px) - 1.0
+        leveraged = apply_leverage_and_compound(unlev)
+
         open_trade.close_date = last_day
         open_trade.exit_price = close_px
         open_trade.exit_reason = "TIME_END"
-        pnl = (close_px / open_trade.entry - 1.0) if open_trade.direction == "LONG" else (open_trade.entry / close_px - 1.0)
-        open_trade.pnl_pct = pnl
+        open_trade.raw_pnl_pct = unlev
+        open_trade.pnl_pct = leveraged
         open_trade.mfe_pct = compute_mfe_since_entry(open_trade.direction, open_trade.entry, ohlc, open_trade.open_date, last_day)
-        bankroll *= (1.0 + pnl)
         open_trade.bankroll_after = bankroll
+
         trades.append(open_trade)
 
+    # Build DataFrames
     trades_df = pd.DataFrame([{
         "open_date": t.open_date,
         "close_date": t.close_date,
@@ -333,7 +366,8 @@ def run_backtest(trigger: str = "confidence"):
         "sl_pct": t.sl,
         "exit_price": t.exit_price,
         "exit_reason": t.exit_reason,
-        "pnl_pct": t.pnl_pct,
+        "raw_pnl_pct": t.raw_pnl_pct,   # unlevered
+        "pnl_pct": t.pnl_pct,           # leveraged/compounded
         "mfe_pct": t.mfe_pct,
         "bankroll_after": t.bankroll_after
     } for t in trades])
@@ -349,9 +383,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--trigger", choices=["confidence","zscore"], default="confidence",
                         help="Signal trigger: 'confidence' for 90/10 heat level; 'zscore' for |z|>=2.5")
+    parser.add_argument("--leverage", type=float, default=1.0,
+                        help="Leverage multiplier (e.g., 10 for 10x). Default 1.0")
+    parser.add_argument("--liquidate", action="store_true",
+                        help="If set, liquidate (set trade to -100%%) whenever unlevered loss >= 1/leverage.")
     args = parser.parse_args()
 
-    trades_df, equity_df = run_backtest(trigger=args.trigger)
+    trades_df, equity_df = run_backtest(trigger=args.trigger, leverage=args.leverage, liquidate=args.liquidate)
 
     trades_df.to_csv("trades.csv", index=False)
     equity_df.to_csv("equity_curve.csv", index=False)
@@ -364,8 +402,10 @@ def main():
     final = float(equity_df["bankroll"].iloc[-1]) if len(equity_df) else START_BANKROLL
     total_ret = (final / start - 1.0) * 100
 
-    label = "90/10 Confidence Trigger" if args.trigger == "confidence" else f"Z-Score Trigger (|z|>={Z_THRESH})"
-    print(f"==== Adaptive Bot Backtest (since {START_DATE.isoformat()}) — {label} ====")
+    label = "90/10 Confidence" if args.trigger == "confidence" else f"Z-Score (|z|>={Z_THRESH})"
+    lev = f"{args.leverage:.2f}x"
+    liq = " + Liquidation" if args.liquidate and args.leverage > 1 else ""
+    print(f"==== Adaptive Bot Backtest (since {START_DATE.isoformat()}) — {label} — Leverage {lev}{liq} ====")
     print(f"Trades: {total_trades} | Wins: {wins} | Losses: {losses} | Winrate: {winrate:.2f}%")
     print(f"Start: ${start:.2f} → Final: ${final:.2f} | Total Return: {total_ret:.2f}%")
     if total_trades:
