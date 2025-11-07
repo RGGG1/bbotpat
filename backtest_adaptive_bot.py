@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-backtest_adaptive_bot.py
-Backtest for the adaptive signal bot since 2023-01-01
+backtest_adaptive_confidence.py
+Backtest since 2023-01-01 using 90%/10% heat-level trigger (confidence rule)
 
-- Data: Binance daily klines via public REST (no API key required)
-- Coins: BTCUSDT, ETHUSDT, SOLUSDT
-- Signals: 20-day z-score of daily returns, trigger if |z| >= 2.5
-- Direction: SHORT if today's return > 0 else LONG
-- TP: median(MFE) for that coin from prior closed trades with MFE (>=5), else fallback
-- SL: 3%
-- Hold window: 4 daily candles (96h). Exit on first touch of TP/SL (SL priority if both inside bar);
-  otherwise time-exit at end of HOLD_BARS (close price).
-- One trade open at a time across ALL coins. If a trade closes on day D, a new trade
-  may open on the same day D (after processing exit) using that day's signals.
-- Bankroll: starts at $100. Compounds on each trade: bankroll *= (1 + pnl_pct).
-- Outputs:
-  * Prints summary + trades
-  * Saves CSVs: trades.csv, equity_curve.csv
+Trigger rule (default in this script):
+- Compute daily returns, 20-day z-score magnitude (abs) and apply sign by today's return
+- Heat level = clip(50 + 20 * z_signed, 0..100)
+- Signal if heat level >= 90 (SHORT) or <= 10 (LONG)
+
+Other rules (unchanged from bot logic):
+- TP = median(MFE) for coin from prior closed trades (>=5), else fallback
+- SL = 3%
+- Hold window = 4 daily candles; first-touch exit (SL priority if both inside a bar), else time-exit at end of window
+- Only ONE trade open at a time across all coins; if a trade closes on a day, a new one can open same day (after exit)
+- Bankroll: $100 start, compounding
+
+CLI:
+  python backtest_adaptive_confidence.py                    # 90/10 confidence trigger
+  python backtest_adaptive_confidence.py --trigger zscore   # original z-score trigger (|z|>=2.5)
+Outputs:
+  - trades.csv  (full trades with PnL, MFE, compounded bankroll)
+  - equity_curve.csv
 """
 
 import math
 import time
+import argparse
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
 from datetime import date, datetime, timedelta
@@ -31,7 +36,7 @@ import pandas as pd
 
 # ---------------------- Config ----------------------
 COINS = [("BTCUSDT", "BTC"), ("ETHUSDT", "ETH"), ("SOLUSDT", "SOL")]
-Z_THRESH = 2.5
+Z_THRESH = 2.5                  # used only if --trigger zscore
 SL = 0.03
 HOLD_BARS = 4
 TP_FALLBACK = {"BTC": 0.0227, "ETH": 0.0167, "SOL": 0.0444}
@@ -45,7 +50,7 @@ BASES = [
     "https://api3.binance.com",
     "https://data-api.binance.vision",
 ]
-HEADERS = {"User-Agent": "adaptive-bot-backtest/1.0"}
+HEADERS = {"User-Agent": "adaptive-bot-backtest/1.1"}
 
 # ---------------------- Data fetch ----------------------
 def binance_daily(symbol: str, start_dt: Optional[date] = None) -> List[Tuple[date, float, float, float, float]]:
@@ -72,11 +77,12 @@ def binance_daily(symbol: str, start_dt: Optional[date] = None) -> List[Tuple[da
             continue
     raise last_err if last_err else RuntimeError("All Binance bases failed")
 
-# ---------------------- Math helpers ----------------------
+# ---------------------- Helpers ----------------------
 def pct_returns(closes: List[float]) -> List[float]:
     return [closes[i] / closes[i - 1] - 1 for i in range(1, len(closes))]
 
-def zscore_series(r: List[float], look: int = 20) -> List[Optional[float]]:
+def zscore_series_abs(r: List[float], look: int = 20) -> List[Optional[float]]:
+    """Return ABS z-score of returns (same as the bot), leaving sign to be applied by today's return."""
     zs = []
     for i in range(len(r)):
         if i + 1 < look:
@@ -98,7 +104,6 @@ def median(values: List[float]) -> Optional[float]:
         return v[n // 2]
     return (v[n // 2 - 1] + v[n // 2]) / 2.0
 
-# ---------------------- Trade structures ----------------------
 @dataclass
 class Trade:
     open_date: date
@@ -115,7 +120,6 @@ class Trade:
     mfe_pct: Optional[float] = None
     bankroll_after: Optional[float] = None
 
-# ---------------------- OHLC helpers ----------------------
 def dict_by_date(rows: List[Tuple[date, float, float, float, float]]) -> Dict[date, Tuple[float,float,float,float]]:
     return {d: (o,h,l,c) for (d,o,h,l,c) in rows}
 
@@ -164,19 +168,21 @@ def first_touch_exit(direction: str, entry: float, tp: float, sl: float, ohlc_by
                 return d, tp_down, "TP"
     return None, None, None
 
-# ---------------------- Backtest ----------------------
 def median_mfe_for_coin(sym: str, past_trades: List[Trade]) -> float:
     mfes = [t.mfe_pct for t in past_trades if t.mfe_pct is not None]
     if len(mfes) >= 5:
         return float(median(mfes))
     return TP_FALLBACK.get(sym, 0.03)
 
-def build_signal_candidates(market: Dict[str, List[Tuple[date,float,float,float,float]]]) -> Dict[date, List[Tuple[str,str,float,float]]]:
+# ---------------------- Signals ----------------------
+def build_signal_candidates(market: Dict[str, List[Tuple[date,float,float,float,float]]],
+                            trigger: str = "confidence") -> Dict[date, List[Tuple[str,str,float]]]:
     """
-    For each calendar day, build at most one candidate per coin:
-      return dict: day -> list of tuples (coin, direction, entry_price, tp_placeholder)
+    Return: dict day -> list[(coin, direction, entry_price)]
+    trigger = "confidence" uses heat level >= 90 / <= 10
+    trigger = "zscore" uses |z| >= Z_THRESH
     """
-    daily_candidates: Dict[date, List[Tuple[str,str,float,float]]] = {}
+    daily: Dict[date, List[Tuple[str,str,float]]] = {}
     for symbol, sym in COINS:
         rows = market[sym]
         if len(rows) < 25:
@@ -184,40 +190,54 @@ def build_signal_candidates(market: Dict[str, List[Tuple[date,float,float,float,
         dates = [r[0] for r in rows]
         closes = [r[4] for r in rows]
         r = pct_returns(list(closes))
-        zs = zscore_series(r, 20)
-        for i in range(len(zs)):
-            if zs[i] is None:
-                continue
-            z = zs[i]
-            today = dates[i+1]  # r and zs are shifted by 1 from closes/dates
-            recent_return = r[i]
-            if z >= Z_THRESH:
-                direction = "SHORT" if recent_return > 0 else "LONG"
-                entry = closes[i+1]
-                daily_candidates.setdefault(today, []).append((sym, direction, entry, None))  # tp decided at open
-    return daily_candidates
+        zs_abs = zscore_series_abs(r, 20)
 
-def run_backtest():
+        for i in range(len(zs_abs)):
+            z_abs = zs_abs[i]
+            if z_abs is None:
+                continue
+            today = dates[i+1]        # r and z arrays are 1 step behind closes/dates
+            recent_return = r[i]
+            z_signed = z_abs if recent_return > 0 else -z_abs
+            level = max(0, min(100, round(50 + 20 * z_signed)))
+
+            if trigger == "confidence":
+                # 90/10 rule drives direction directly from level
+                if level >= 90:
+                    direction = "SHORT"
+                elif level <= 10:
+                    direction = "LONG"
+                else:
+                    continue
+            else:  # zscore
+                if z_abs >= Z_THRESH:
+                    direction = "SHORT" if recent_return > 0 else "LONG"
+                else:
+                    continue
+
+            entry = closes[i+1]  # enter at that day's close
+            daily.setdefault(today, []).append((sym, direction, entry))
+    return daily
+
+# ---------------------- Backtest ----------------------
+def run_backtest(trigger: str = "confidence"):
     # 1) Fetch data
     market = {}
     for symbol, sym in COINS:
-        rows = binance_daily(symbol, start_dt=START_DATE - timedelta(days=60))  # include warmup
-        rows = [r for r in rows if r[0] >= START_DATE]  # keep only START_DATE+
+        rows = binance_daily(symbol, start_dt=START_DATE - timedelta(days=60))  # warmup
+        rows = [r for r in rows if r[0] >= START_DATE]
         market[sym] = rows
-        time.sleep(0.15)
+        time.sleep(0.12)
 
-    # 2) Precompute OHLC maps
+    # 2) Precompute OHLC maps and signals
     ohlc_maps = {sym: dict_by_date(rows) for sym, rows in market.items()}
+    raw_candidates = build_signal_candidates(market, trigger=trigger)
 
-    # 3) Precompute raw signal dates per coin/day (tp will be injected adaptively at open time)
-    raw_candidates = build_signal_candidates(market)
-
-    # 4) Backtest loop
+    # 3) Loop
     bankroll = START_BANKROLL
     trades: List[Trade] = []
     open_trade: Optional[Trade] = None
     history_by_coin: Dict[str, List[Trade]] = {"BTC": [], "ETH": [], "SOL": []}
-
     priority = {"BTC": 0, "ETH": 1, "SOL": 2}
     all_days = sorted({d for rows in market.values() for (d,_,_,_,_) in rows})
 
@@ -229,10 +249,10 @@ def run_backtest():
             entry_date = open_trade.open_date
             expiry_date = entry_date + timedelta(days=HOLD_BARS-1)
             last_check_day = min(day, expiry_date)
-            # Update MFE
+
             mfe = compute_mfe_since_entry(open_trade.direction, open_trade.entry, ohlc, entry_date, last_check_day)
             open_trade.mfe_pct = mfe
-            # Check TP/SL
+
             exit_d, exit_px, reason = first_touch_exit(open_trade.direction, open_trade.entry,
                                                        open_trade.tp, open_trade.sl, ohlc,
                                                        entry_date, last_check_day)
@@ -248,7 +268,6 @@ def run_backtest():
                 history_by_coin[open_trade.coin].append(open_trade)
                 open_trade = None
             else:
-                # Time-exit on expiry
                 if day >= expiry_date:
                     close_px = None
                     if expiry_date in ohlc:
@@ -272,11 +291,11 @@ def run_backtest():
                         history_by_coin[open_trade.coin].append(open_trade)
                         open_trade = None
 
-        # After closes, consider opening a new trade on today's close
+        # After exit, consider opening new trade on today's close
         if open_trade is None and day in raw_candidates:
             cands = raw_candidates[day]
             cands.sort(key=lambda x: priority.get(x[0], 99))
-            sym, direction, entry, _ = cands[0]
+            sym, direction, entry = cands[0]
             tp = median_mfe_for_coin(sym, history_by_coin[sym])  # adaptive from history
             open_trade = Trade(
                 open_date=day,
@@ -288,7 +307,7 @@ def run_backtest():
                 sl=SL,
             )
 
-    # If still open at end of series, time-exit on last available close
+    # If still open at end, time-exit on last available close
     if open_trade:
         sym = open_trade.coin
         ohlc = ohlc_maps[sym]
@@ -327,7 +346,12 @@ def run_backtest():
     return trades_df, equity_df
 
 def main():
-    trades_df, equity_df = run_backtest()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--trigger", choices=["confidence","zscore"], default="confidence",
+                        help="Signal trigger: 'confidence' for 90/10 heat level; 'zscore' for |z|>=2.5")
+    args = parser.parse_args()
+
+    trades_df, equity_df = run_backtest(trigger=args.trigger)
 
     trades_df.to_csv("trades.csv", index=False)
     equity_df.to_csv("equity_curve.csv", index=False)
@@ -340,7 +364,8 @@ def main():
     final = float(equity_df["bankroll"].iloc[-1]) if len(equity_df) else START_BANKROLL
     total_ret = (final / start - 1.0) * 100
 
-    print("==== Adaptive Bot Backtest (since 2023-01-01) ====")
+    label = "90/10 Confidence Trigger" if args.trigger == "confidence" else f"Z-Score Trigger (|z|>={Z_THRESH})"
+    print(f"==== Adaptive Bot Backtest (since {START_DATE.isoformat()}) — {label} ====")
     print(f"Trades: {total_trades} | Wins: {wins} | Losses: {losses} | Winrate: {winrate:.2f}%")
     print(f"Start: ${start:.2f} → Final: ${final:.2f} | Total Return: {total_ret:.2f}%")
     if total_trades:
