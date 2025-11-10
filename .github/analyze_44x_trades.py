@@ -15,7 +15,7 @@ COINS = [
 
 LOOKBACK    = 20                 # z-score window (days)
 HOLD_DAYS   = 4                  # 96h cap
-SL          = 0.03               # 3% stop (underlying)
+SL          = 0.08               # 3% stop (underlying)
 START_DATE  = datetime(2023,1,1,tzinfo=timezone.utc)
 
 # Heat edges (0..100 scale)
