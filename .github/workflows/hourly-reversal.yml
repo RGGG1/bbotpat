@@ -23,7 +23,8 @@ jobs:
       - name: Run hourly reversal backtest
         run: |
           echo "Running hourly reversal backtest..."
-          python .github/analyze_hourly_reversal.py --symbols BTCUSDT,ETHUSDT,SOLUSDT --start 2023-01-01 --end now --top-k 10
+          run: python .github/analyze_hourly_reversal.py --symbols BTCUSDT,ETHUSDT,SOLUSDT --start 2023-01-01 --end now --fee-bps 8
+
 
       - name: Install dependencies
         run: |
