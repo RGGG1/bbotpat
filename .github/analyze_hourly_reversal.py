@@ -2,27 +2,33 @@
 # -*- coding: utf-8 -*-
 
 import time, math, requests
-from statistics import mean, pstdev
+from statistics import pstdev
 from datetime import datetime, timezone, timedelta
 
 # =================== Config ===================
-SYMBOL      = "BTCUSDT"
-START       = datetime(2023,1,1,tzinfo=timezone.utc)
-END         = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=1)  # exclude forming bar
-FEE_BPS     = 10        # 0.10% taker per side
-TIME_STOP_H = 96        # cap holding window
-START_EQUITY= 100.0
+SYMBOL       = "BTCUSDT"                                 # change to ETHUSDT / SOLUSDT to test others
+START        = datetime(2023,1,1,tzinfo=timezone.utc)
+END          = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=1)
+FEE_BPS      = 10        # 0.10% taker per side
+TIME_STOP_H  = 96        # cap holding window
+MIN_COOL_H   = 24        # cooldown after any exit before a new entry
+START_EQUITY = 100.0
 
-# Parameter grid (kept compact)
+# Parameter grid (kept compact & sane)
 LOOKBACKS   = [72, 120, 168]           # hours for z of returns (~3/5/7 days)
-Z_THRESHES  = [2.0, 2.25, 2.5, 2.75]   # entry threshold on |z|
+Z_THRESHES  = [2.0, 2.25, 2.5, 2.75]   # |z| threshold
 RSI_LEN     = [14, 21]
 RSI_GATES   = [(30, 70), (25, 75)]
-BB_LEN      = [48, 72]                 # hours
+BB_LEN      = [48, 72]                 # Bollinger basis length
 BB_DEV      = [2.0]                    # std devs
-ATR_LEN     = [24, 48]                 # hours
-TP_ATR      = [1.0, 1.5, 2.0]
-SL_ATR      = [0.8, 1.0, 1.2]
+ATR_LEN     = [24, 48]                 # ATR hours
+TP_ATR      = [1.0, 1.5, 2.0]          # take profit in ATRs
+SL_ATR      = [0.8, 1.0, 1.2]          # stop in ATRs
+
+# 200h slope gate: require flat-ish regime (abs % slope over window <= gate)
+SLOPE_N_H    = 200
+SLOPE_DELTAH = 24
+SLOPE_GATE   = 0.02    # 2% over 24h vs 200h mean => skip if stronger trend
 
 BASES = [
     "https://data-api.binance.vision",
@@ -31,7 +37,7 @@ BASES = [
     "https://api2.binance.com",
     "https://api3.binance.com",
 ]
-HEADERS = {"User-Agent":"hourly-reversal/1.0 (+bbot)"}
+HEADERS = {"User-Agent":"hourly-reversal/1.1 (+bbot)"}
 
 # =================== Data =====================
 def binance_klines_1h(symbol, start_dt, end_dt):
@@ -66,7 +72,6 @@ def binance_klines_1h(symbol, start_dt, end_dt):
     dd={}
     for x in out: dd[x["t"]]=x
     arr=sorted(dd.values(), key=lambda x:x["t"])
-    # crop within [start,end]
     return [x for x in arr if start_dt<=x["t"]<=end_dt]
 
 # ================= Indicators =================
@@ -101,7 +106,6 @@ def bollinger(closes, n=20, dev=2.0):
     return mu,upper,lower
 
 def atr(ohlc, n=14):
-    # ohlc: list of dicts with o,h,l,c
     trs=[0.0]
     for i in range(1,len(ohlc)):
         h,l,c_prev = ohlc[i]["h"], ohlc[i]["l"], ohlc[i-1]["c"]
@@ -131,6 +135,16 @@ def z_of_returns(ret, look):
         z[i] = (last - mu)/sd
     return z
 
+def sma(values, n):
+    out=[None]*len(values)
+    run=0.0
+    for i,v in enumerate(values):
+        if v is None: return out
+        run += v
+        if i>=n: run -= values[i-n]
+        if i>=n-1: out[i]= run/n
+    return out
+
 # ================ Backtest ====================
 def backtest(ohlc, params):
     lb, z_thr, rsiN, rsi_lo, rsi_hi, bbN, bbDev, atrN, tp_k, sl_k = params
@@ -141,12 +155,22 @@ def backtest(ohlc, params):
     rets = hourly_returns(closes)
     zs   = z_of_returns(rets, lb)
 
+    # slope filter precompute
+    base = sma(closes, SLOPE_N_H)
+    def flat_regime(i):
+        if i is None or i < max(SLOPE_N_H, SLOPE_DELTAH): return False
+        if base[i] is None or base[i-SLOPE_DELTAH] is None: return False
+        pct = abs(base[i] - base[i-SLOPE_DELTAH]) / base[i-SLOPE_DELTAH]
+        return pct <= SLOPE_GATE
+
     def trade_logic(i):
         """Return 'LONG' or 'SHORT' or None at hour i (close of bar i)."""
         if zs[i] is None or rs[i] is None or bbU[i] is None or atrs[i] is None:
             return None
-        # contrarian: big positive z -> SHORT; big negative z -> LONG
+        if not flat_regime(i):      # skip in strong trend regimes
+            return None
         sig=None
+        # contrarian: big +z -> SHORT; big -z -> LONG; gated by RSI & bands
         if zs[i] >= z_thr and rs[i] >= rsi_hi and closes[i] >= bbU[i]:
             sig="SHORT"
         elif -zs[i] >= z_thr and rs[i] <= rsi_lo and closes[i] <= bbL[i]:
@@ -157,27 +181,25 @@ def backtest(ohlc, params):
     def run_with_leverage(lev):
         equity=START_EQUITY
         peak=equity; maxdd=0.0
-        in_pos=False; side=None; entry=None; tp=None; sl=None; start_i=None; atr_at_entry=None
+        in_pos=False; side=None; entry=None; start_i=None
+        tp=None; sl=None
         trades=[]
         fee = FEE_BPS/10000.0
+        last_exit_i = -10**9  # far in past for cooldown logic
 
         for i in range(len(ohlc)):
-            # exit checks (if in trade) happen on close of bar i
+            # exit checks (if in trade) on close of bar i
             if in_pos:
                 px = closes[i]
-                # TP/SL hit using close-to-close (conservative; intrabar extremes would tighten further)
                 roi = (px/entry-1.0) if side=="LONG" else (entry/px-1.0)
-                # include leverage
                 gross = lev*roi
-                # exits:
-                hit_tp = (roi >= tp) if side=="LONG" else (roi >= tp)
-                hit_sl = (roi <= -sl) if side=="LONG" else (roi <= -sl)
+                hit_tp = (roi >= tp)
+                hit_sl = (roi <= -sl)
                 timed  = (i - start_i) >= TIME_STOP_H
 
                 if hit_tp or hit_sl or timed:
-                    # apply fees: entry + exit
-                    trade_fee = equity*fee + equity*(1+gross)*fee
-                    equity = equity*(1+gross) - trade_fee
+                    # fees: entry (already taken) + exit:
+                    equity = equity*(1+gross) - equity*(1+gross)*fee
                     trades.append({
                         "entry_t": ohlc[start_i]["t"], "exit_t": ohlc[i]["t"],
                         "side":side, "lev":lev, "entry":entry, "exit":px,
@@ -185,23 +207,24 @@ def backtest(ohlc, params):
                         "after":equity, "reason":"tp" if hit_tp else ("sl" if hit_sl else "expiry")
                     })
                     in_pos=False; side=None; entry=None; start_i=None
+                    last_exit_i = i
                     peak=max(peak,equity); maxdd=max(maxdd, (peak-equity)/peak)
-                    # allow same-bar re-entry if a signal fires again after closing
-                    # (we’ll check logic right after)
+                    # (fall through to allow same-bar new entry only if cooldown == 0)
+
             # entry check
-            if not in_pos:
+            if not in_pos and (i - last_exit_i) >= MIN_COOL_H:
                 sig = trade_logic(i)
                 if sig:
-                    # enter at close i (next line would be “at next open” if you prefer)
                     entry = closes[i]
                     atr_at_entry = atrs[i]
                     if atr_at_entry is None or atr_at_entry<=0: continue
-                    tp = tp_k * atr_at_entry / entry   # convert ATR $ to return
-                    sl = sl_k * atr_at_entry / entry
+                    tp = (tp_k * atr_at_entry) / entry
+                    sl = (sl_k * atr_at_entry) / entry
                     side=sig; in_pos=True; start_i=i
-                    # pay entry fee on notional
+                    # entry fee
                     equity -= equity*fee
                     peak=max(peak,equity)
+
         final = equity
         return final, maxdd, trades
 
@@ -212,9 +235,15 @@ def backtest(ohlc, params):
         "final_10x":final_10x, "dd_10x":dd_10x, "trades_10x":trades_10x
     }
 
+# --------- drawdown-penalized ranking ----------
+def score(res):
+    # Penalize drawdown more than linearly; keep simple & transparent.
+    # score = Final(1x) / (1 + 4*MaxDD_1x)
+    return res["final_1x"] / (1.0 + 4.0*max(0.0, res["dd_1x"]))
+
 # ================ Runner ======================
 def main():
-    print("Downloading BTCUSDT 1h…")
+    print(f"Downloading {SYMBOL} 1h…")
     ohlc = binance_klines_1h(SYMBOL, START, END)
     if len(ohlc) < 2000:
         raise RuntimeError(f"Only {len(ohlc)} hourly bars returned; expected many more.")
@@ -237,41 +266,46 @@ def main():
                                         params=(lb,zt,rlen,rlo,rhi,bbl,bbdev,alen,tp_k,sl_k)
                                         try:
                                             res = backtest(ohlc, params)
-                                        except Exception as e:
+                                        except Exception:
                                             continue
-                                        results.append((res, params))
+                                        results.append((score(res), res, params))
 
-    # rank by final_1x (you can switch to final_10x or include dd constraint)
-    results.sort(key=lambda x: x[0]["final_1x"], reverse=True)
+    if not results:
+        print("No results — something went wrong with the grid or data.")
+        return
+
+    # rank by penalized score
+    results.sort(key=lambda x: x[0], reverse=True)
     top = results[:10]
 
-    print("\n=== Top 10 configs (by 1× final equity) ===")
-    print("Rank  Final(1×)  MaxDD(1×)   Final(10×)  MaxDD(10×)   Params")
-    for i,(res,params) in enumerate(top,1):
-        print(f"{i:>4}  {res['final_1x']:>9.2f}   {res['dd_1x']*100:>8.2f}%   "
+    print("\n=== Top 10 configs (penalized by 4× MaxDD) ===")
+    print("Rank  Score    Final(1×)  MaxDD(1×)   Final(10×)  MaxDD(10×)   Params")
+    for i,(sc,res,params) in enumerate(top,1):
+        print(f"{i:>4}  {sc:7.2f}  {res['final_1x']:>9.2f}   {res['dd_1x']*100:>8.2f}%   "
               f"{res['final_10x']:>10.2f}   {res['dd_10x']*100:>9.2f}%   {params}")
 
     # take best and print trades for both 1× and 10×
-    if top:
-        best_res, best_params = top[0]
-        print("\nBest params:", best_params)
-        print("\n— Trades (1×) —")
+    best_sc, best_res, best_params = top[0]
+    print("\nBest params:", best_params)
+    print(f"Score: {best_sc:.2f} | Final(1×) ${best_res['final_1x']:.2f}  MaxDD(1×) {best_res['dd_1x']*100:.2f}%")
+    print(f"                     Final(10×) ${best_res['final_10x']:.2f} MaxDD(10×) {best_res['dd_10x']*100:.2f}%")
+
+    print("\n— Trades (1×) —")
+    print(f"{'#':>3}  {'Side':<5}  {'Entry UTC':<16}  {'Exit UTC':<16}  {'TP%':>6}  {'SL%':>6}  {'ROI%':>7}  {'After$':>9}  {'Exit'}")
+    for i,tr in enumerate(best_res["trades_1x"],1):
+        print(f"{i:>3}  {tr['side']:<5}  {tr['entry_t'].strftime('%Y-%m-%d %H:%M'):16}  "
+              f"{tr['exit_t'].strftime('%Y-%m-%d %H:%M'):16}  {tr['tp%']:6.2f}  {tr['sl%']:6.2f}  "
+              f"{tr['roi%']:7.2f}  {tr['after']:9.2f}  {tr['reason']}")
+
+    if best_res["trades_10x"]:
+        print("\n— Trades (10×) —")
         print(f"{'#':>3}  {'Side':<5}  {'Entry UTC':<16}  {'Exit UTC':<16}  {'TP%':>6}  {'SL%':>6}  {'ROI%':>7}  {'After$':>9}  {'Exit'}")
-        for i,tr in enumerate(best_res["trades_1x"],1):
+        for i,tr in enumerate(best_res["trades_10x"],1):
             print(f"{i:>3}  {tr['side']:<5}  {tr['entry_t'].strftime('%Y-%m-%d %H:%M'):16}  "
                   f"{tr['exit_t'].strftime('%Y-%m-%d %H:%M'):16}  {tr['tp%']:6.2f}  {tr['sl%']:6.2f}  "
                   f"{tr['roi%']:7.2f}  {tr['after']:9.2f}  {tr['reason']}")
-        if best_res["trades_10x"]:
-            print("\n— Trades (10×) —")
-            print(f"{'#':>3}  {'Side':<5}  {'Entry UTC':<16}  {'Exit UTC':<16}  {'TP%':>6}  {'SL%':>6}  {'ROI%':>7}  {'After$':>9}  {'Exit'}")
-            for i,tr in enumerate(best_res["trades_10x"],1):
-                print(f"{i:>3}  {tr['side']:<5}  {tr['entry_t'].strftime('%Y-%m-%d %H:%M'):16}  "
-                      f"{tr['exit_t'].strftime('%Y-%m-%d %H:%M'):16}  {tr['tp%']:6.2f}  {tr['sl%']:6.2f}  "
-                      f"{tr['roi%']:7.2f}  {tr['after']:9.2f}  {tr['reason']}")
-        print(f"\nSummary (1×): Final ${best_res['final_1x']:.2f} | MaxDD {best_res['dd_1x']*100:.2f}%")
-        print(f"Summary (10×): Final ${best_res['final_10x']:.2f} | MaxDD {best_res['dd_10x']*100:.2f}%")
-    else:
-        print("No results? (unexpected)")
+    print(f"\nSummary (1×): Final ${best_res['final_1x']:.2f} | MaxDD {best_res['dd_1x']*100:.2f}%")
+    print(f"Summary (10×): Final ${best_res['final_10x']:.2f} | MaxDD {best_res['dd_10x']*100:.2f}%")
 
 if __name__=="__main__":
     main()
