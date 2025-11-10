@@ -1,250 +1,479 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-analyze_hourly_reversal.py
-v1.2 — Hourly adaptive reversal analyzer
+# .github/analyze_hourly_reversal.py
+# Hourly reversal backtest with z-score entries, fixed % TP/SL and ATR-based TP/SL,
+# fees in bps (UNLEVERED), min-hold (no same-bar exits), and best-config reporting.
+# Leverage is DISABLED and forced to 1x regardless of flags.
 
-Goal:
-- Fetch Binance hourly klines since Jan 2023 for BTC/ETH/SOL.
-- Test z-score thresholds (1.5–3.5) and holding periods (12–96h)
-  for contrarian entry logic (overbought → short, oversold → long).
-- Compute per-trade ROI, MAE, MFE, and compounded bankroll at 1× and 10× leverage.
-- Print summary and best-performing configurations.
+import argparse
+import math
+import os
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from typing import List, Dict, Optional, Tuple
 
-Output:
-  Top results by compounded ROI and a detailed list of the top config’s trades.
-"""
-
+import numpy as np
+import pandas as pd
 import requests
-import time
-from datetime import datetime, timedelta, timezone
-import statistics as stats
+from dateutil import parser as dtparser
 
-# ───────────────────────────────────────────────────────────────
-# Configuration
-# ───────────────────────────────────────────────────────────────
-BASES = [
-    "https://api.binance.com",
-    "https://api1.binance.com",
-    "https://api2.binance.com",
-    "https://api3.binance.com",
-    "https://data-api.binance.vision",
-]
-HEADERS = {"User-Agent": "hourly-reversal-analyzer/1.2 (+github actions)"}
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-START_DATE = datetime(2023, 1, 1, tzinfo=timezone.utc)
-END_DATE = datetime.now(timezone.utc)
-THRESHOLDS = [1.5, 2.0, 2.5, 3.0, 3.5]
-HOLD_HOURS = [12, 24, 48, 72, 96]
-STOP_PCT = 0.03
+BINANCE_BASE = "https://api.binance.com"
 
-# ───────────────────────────────────────────────────────────────
-# Data fetcher (robust pagination)
-# ───────────────────────────────────────────────────────────────
-def binance_klines_1h(symbol, start_dt, end_dt):
+# -----------------------------
+# Utilities
+# -----------------------------
+def ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
+
+def parse_when(s: str) -> int:
+    """Return ms since epoch (UTC). Accepts 'now' or ISO8601."""
+    if s.lower() == "now":
+        return int(datetime.now(timezone.utc).timestamp() * 1000)
+    dt = dtparser.parse(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+# -----------------------------
+# Data Fetch
+# -----------------------------
+def fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> pd.DataFrame:
     """
-    Robust 1h pagination — continues strictly by time until end_dt.
+    Robustly fetch klines from Binance with pagination.
     """
-    PAGE_LIMIT = 1000
-    out = []
-    start_ms = int(start_dt.timestamp() * 1000)
-    hard_end_ms = int(end_dt.timestamp() * 1000)
-    last_err = None
-    backoff = 0.25
+    url = f"{BINANCE_BASE}/api/v3/klines}"
+    # fix accidental brace if copy-pasted
+    url = f"{BINANCE_BASE}/api/v3/klines"
+    limit = 1000
+    rows = []
+    curr = start_ms
+    last_open = None
 
-    while start_ms <= hard_end_ms:
-        params = {
-            "symbol": symbol,
-            "interval": "1h",
-            "limit": PAGE_LIMIT,
-            "startTime": start_ms,
-        }
-        got = None
-        for base in BASES:
-            try:
-                r = requests.get(f"{base}/api/v3/klines", params=params, headers=HEADERS, timeout=30)
-                if r.status_code in (451, 403):
-                    last_err = Exception(f"{r.status_code} {r.reason}")
-                    continue
-                r.raise_for_status()
-                got = r.json()
-                break
-            except Exception as e:
-                last_err = e
-                continue
-
-        if got is None:
-            time.sleep(backoff)
-            backoff = min(2.0, backoff * 1.7)
-            continue
-
-        if not got:
+    while True:
+        params = {"symbol": symbol, "interval": interval, "limit": limit, "startTime": curr, "endTime": end_ms}
+        r = requests.get(url, params=params, timeout=30)
+        if r.status_code != 200:
+            raise RuntimeError(f"Binance error {r.status_code}: {r.text}")
+        data = r.json()
+        if not data:
             break
 
-        for k in got:
-            ct = int(k[6]) // 1000
-            if ct > hard_end_ms:
-                break
-            out.append({
-                "t": datetime.utcfromtimestamp(ct).replace(tzinfo=timezone.utc),
-                "o": float(k[1]), "h": float(k[2]), "l": float(k[3]), "c": float(k[4])
-            })
+        if last_open is not None and data[0][0] == last_open and len(data) == 1:
+            break
+        last_open = data[-1][0]
 
-        last_ct_ms = int(got[-1][6])
-        next_ms = last_ct_ms + 1
-        if next_ms <= start_ms:
-            next_ms = start_ms + 60 * 60 * 1000
-        start_ms = next_ms
-        time.sleep(0.05)
+        rows.extend(data)
+        next_ms = data[-1][0] + 1
+        if next_ms >= end_ms:
+            break
+        curr = next_ms
 
-    ded = {}
-    for x in out:
-        ded[x["t"]] = x
-    arr = sorted(ded.values(), key=lambda x: x["t"])
-    return [x for x in arr if start_dt <= x["t"] <= end_dt]
+    if not rows:
+        raise RuntimeError("No klines returned.")
 
-# ───────────────────────────────────────────────────────────────
-# Calculations
-# ───────────────────────────────────────────────────────────────
-def pct_returns(closes):
-    return [closes[i] / closes[i-1] - 1.0 for i in range(1, len(closes))]
+    cols = [
+        "open_time","open","high","low","close","volume",
+        "close_time","qav","num_trades","taker_base","taker_quote","ignore"
+    ]
+    df = pd.DataFrame(rows, columns=cols)
+    for c in ("open","high","low","close","volume"):
+        df[c] = df[c].astype(float)
+    df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+    df["close_time"] = pd.to_datetime(df["close_time"], unit="ms", utc=True)
+    df = df.sort_values("close_time").reset_index(drop=True).set_index("close_time")
+    return df[["open","high","low","close","volume","open_time"]]
 
-def zscore_series(r, look=20):
-    zs = []
-    for i in range(len(r)):
-        if i + 1 < look:
-            zs.append(None)
-            continue
-        window = r[i + 1 - look : i + 1]
-        mu = sum(window) / len(window)
-        sd = stats.pstdev(window)
-        zs.append((r[i] - mu) / sd if sd else None)
-    return zs
+# -----------------------------
+# Indicators
+# -----------------------------
+def add_returns_zscore(df: pd.DataFrame, ret_lookback: int) -> pd.DataFrame:
+    out = df.copy()
+    out["ret"] = np.log(out["close"]).diff()
+    out["ret_mean"] = out["ret"].rolling(ret_lookback, min_periods=ret_lookback).mean()
+    out["ret_std"] = out["ret"].rolling(ret_lookback, min_periods=ret_lookback).std(ddof=0)
+    out["z"] = (out["ret"] - out["ret_mean"]) / out["ret_std"]
+    return out
 
-# ───────────────────────────────────────────────────────────────
-# Backtest core
-# ───────────────────────────────────────────────────────────────
-def backtest(symbol, data, thresh, hold_h):
-    closes = [x["c"] for x in data]
-    times = [x["t"] for x in data]
-    r = pct_returns(closes)
-    zs = zscore_series(r, 20)
-    trades = []
-    bal = 100.0
+def add_atr(df: pd.DataFrame, atr_len: int = 14) -> pd.DataFrame:
+    out = df.copy()
+    prev_close = out["close"].shift(1)
+    tr1 = out["high"] - out["low"]
+    tr2 = (out["high"] - prev_close).abs()
+    tr3 = (out["low"] - prev_close).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    out["atr"] = tr.rolling(atr_len, min_periods=atr_len).mean()
+    return out
 
-    i = 20
-    while i < len(r):
-        z = zs[i]
-        if z is None:
-            i += 1
-            continue
-        ret = r[i]
-        dir = None
-        if z > thresh and ret > 0:
-            dir = "SHORT"
-        elif z < -thresh and ret < 0:
-            dir = "LONG"
+# -----------------------------
+# Backtest Core
+# -----------------------------
+@dataclass
+class Trade:
+    i_entry: int
+    i_exit: int
+    t_entry: pd.Timestamp
+    t_exit: pd.Timestamp
+    side: str         # "LONG" or "SHORT"
+    entry: float
+    exit: float
+    roi: float        # net PnL as fraction of equity at entry (after fees)
+    equity_after: float
+    reason: str       # "TP", "SL", "TIME", etc.
 
-        if dir:
-            entry = closes[i+1]
-            entry_t = times[i+1]
-            stop_price = entry * (1 - STOP_PCT if dir == "LONG" else 1 + STOP_PCT)
-            target = entry * (1 + 0.02 if dir == "LONG" else 1 - 0.02)
-            exit_idx = min(i + 1 + hold_h, len(closes) - 1)
-            exit_t = times[exit_idx]
-            exit_price = closes[exit_idx]
-            mae = mfe = roi = 0
-            for j in range(i+1, exit_idx+1):
-                low, high = data[j]["l"], data[j]["h"]
-                if dir == "LONG":
-                    change = (high/entry - 1)*100
-                    mfe = max(mfe, change)
-                    mae = min(mae, (low/entry - 1)*100)
-                    if low <= stop_price:
-                        roi = -STOP_PCT*100
-                        exit_price = stop_price
-                        exit_t = times[j]
-                        break
-                    if high >= target:
-                        roi = 2.0
-                        exit_price = target
-                        exit_t = times[j]
-                        break
-                else:
-                    change = (entry/low - 1)*100
-                    mfe = max(mfe, change)
-                    mae = min(mae, (entry/high - 1)*100)
-                    if high >= stop_price:
-                        roi = -STOP_PCT*100
-                        exit_price = stop_price
-                        exit_t = times[j]
-                        break
-                    if low <= target:
-                        roi = 2.0
-                        exit_price = target
-                        exit_t = times[j]
-                        break
-            if roi == 0:
-                roi = (exit_price/entry - 1)*100 if dir == "LONG" else (entry/exit_price - 1)*100
+@dataclass
+class Config:
+    symbol: str
+    scheme: str       # "pct" or "atr"
+    z_th: float
+    min_hold: int
+    max_hold: int
+    tp: float         # if scheme="pct": TP% as decimal; if "atr": k_atr multiplier
+    sl: float         # if scheme="pct": SL% as decimal; if "atr": m_atr multiplier
+    ret_lookback: int
+    atr_len: int
+    fee_bps: float    # per side, UNLEVERED
 
-            bal *= (1 + roi/100)
-            trades.append({
-                "symbol": symbol,
-                "dir": dir,
-                "entry": entry,
-                "exit": exit_price,
-                "entry_t": entry_t,
-                "exit_t": exit_t,
-                "roi": roi,
-                "mae": mae,
-                "mfe": mfe,
-                "after": bal,
-            })
-            i = exit_idx + 1
+def round_trip_roi_unlevered(entry: float, exit: float, side: str, fee_bps: float) -> float:
+    """
+    Return net ROI fraction on equity (UNLEVERED) after fees per side.
+    Fees charged entry + exit, each = fee_bps / 1e4 of notional.
+    """
+    px_chg = (exit / entry - 1.0)
+    direction = +1.0 if side == "LONG" else -1.0
+    gross = direction * px_chg
+    fee_per_side = (fee_bps / 1e4)
+    net = gross - 2.0 * fee_per_side
+    return net
+
+def simulate_config(df: pd.DataFrame, cfg: Config) -> Tuple[List[Trade], float]:
+    """
+    Enter when z <= -z_th (LONG) or z >= +z_th (SHORT).
+    Exits: TP / SL intrabar (after min_hold), or time exit at max_hold bars.
+    If TP and SL touch same bar, assume SL first (conservative).
+    """
+    equity = 100.0
+    trades: List[Trade] = []
+
+    z = df["z"].values
+    close = df["close"].values
+    high = df["high"].values
+    low = df["low"].values
+    atr = df["atr"].values
+    times = df.index.to_list()
+
+    in_pos = False
+    side = None
+    i_entry = None
+    entry_px = None
+
+    n = len(df)
+
+    def levels(entry_px_local: float, bar_i: int) -> Tuple[float,float]:
+        if cfg.scheme == "pct":
+            if side == "LONG":
+                tp_px = entry_px_local * (1.0 + cfg.tp)
+                sl_px = entry_px_local * (1.0 - cfg.sl)
+            else:
+                tp_px = entry_px_local * (1.0 - cfg.tp)
+                sl_px = entry_px_local * (1.0 + cfg.sl)
+            return tp_px, sl_px
         else:
-            i += 1
-    return trades
+            a = atr[bar_i]
+            if np.isnan(a) or a <= 0:
+                return (math.inf, -math.inf) if side == "LONG" else (-math.inf, math.inf)
+            dist_tp = cfg.tp * a
+            dist_sl = cfg.sl * a
+            if side == "LONG":
+                tp_px = entry_px_local + dist_tp
+                sl_px = entry_px_local - dist_sl
+            else:
+                tp_px = entry_px_local - dist_tp
+                sl_px = entry_px_local + dist_sl
+            return tp_px, sl_px
 
-# ───────────────────────────────────────────────────────────────
-# Main runner
-# ───────────────────────────────────────────────────────────────
+    i = 0
+    while i < n:
+        if not in_pos:
+            if i == 0 or np.isnan(z[i]):
+                i += 1; continue
+
+            if z[i] <= -cfg.z_th:
+                in_pos = True; side = "LONG"; i_entry = i; entry_px = close[i]
+                i += 1; continue
+            elif z[i] >= cfg.z_th:
+                in_pos = True; side = "SHORT"; i_entry = i; entry_px = close[i]
+                i += 1; continue
+            else:
+                i += 1; continue
+        else:
+            bars_held = i - i_entry
+            can_exit = bars_held >= cfg.min_hold
+
+            do_exit = False
+            reason = "TIME"
+            exit_px = close[i]
+
+            if can_exit:
+                tp_px, sl_px = levels(entry_px, i)
+
+                if side == "LONG":
+                    hit_tp = high[i] >= tp_px
+                    hit_sl = low[i] <= sl_px
+                    if hit_tp and hit_sl:
+                        do_exit = True; exit_px = sl_px; reason = "SL"
+                    elif hit_sl:
+                        do_exit = True; exit_px = sl_px; reason = "SL"
+                    elif hit_tp:
+                        do_exit = True; exit_px = tp_px; reason = "TP"
+                else:
+                    hit_tp = low[i] <= tp_px
+                    hit_sl = high[i] >= sl_px
+                    if hit_tp and hit_sl:
+                        do_exit = True; exit_px = sl_px; reason = "SL"
+                    elif hit_sl:
+                        do_exit = True; exit_px = sl_px; reason = "SL"
+                    elif hit_tp:
+                        do_exit = True; exit_px = tp_px; reason = "TP"
+
+            if not do_exit and bars_held >= cfg.max_hold:
+                do_exit = True; reason = "TIME"; exit_px = close[i]
+
+            if do_exit:
+                net = round_trip_roi_unlevered(entry_px, exit_px, side, cfg.fee_bps)
+                equity *= (1.0 + net)
+                trades.append(Trade(
+                    i_entry=i_entry, i_exit=i, t_entry=times[i_entry], t_exit=times[i],
+                    side=side, entry=entry_px, exit=exit_px, roi=net, equity_after=equity, reason=reason
+                ))
+                in_pos = False; side = None; i_entry = None; entry_px = None
+                i += 1
+            else:
+                i += 1
+
+    return trades, equity
+
+# -----------------------------
+# Sweeps / Reporting
+# -----------------------------
+def sweep_configs(
+    df_by_symbol: Dict[str, pd.DataFrame],
+    symbols: List[str],
+    fee_bps: float,
+    min_hold: int,
+    ret_lookback: int,
+    max_hold_grid: List[int],
+    z_grid: List[float],
+    pct_tp_sl_grid: List[Tuple[float,float]],
+    atr_tp_sl_grid: List[Tuple[float,float]],
+    atr_len: int,
+    top_k: int = 10
+) -> Tuple[pd.DataFrame, Dict[str, List[Trade]], Dict[str, Config]]:
+    rows = []
+    best_trades_by_symbol: Dict[str, List[Trade]] = {}
+    best_cfg_by_symbol: Dict[str, Config] = {}
+
+    for sym in symbols:
+        df = df_by_symbol[sym]
+        cfgs: List[Config] = []
+
+        for z_th in z_grid:
+            for max_hold in max_hold_grid:
+                for tp, sl in pct_tp_sl_grid:
+                    cfgs.append(Config(
+                        symbol=sym, scheme="pct", z_th=z_th, min_hold=min_hold, max_hold=max_hold,
+                        tp=tp, sl=sl, ret_lookback=ret_lookback, atr_len=atr_len, fee_bps=fee_bps
+                    ))
+                for tpA, slA in atr_tp_sl_grid:
+                    cfgs.append(Config(
+                        symbol=sym, scheme="atr", z_th=z_th, min_hold=min_hold, max_hold=max_hold,
+                        tp=tpA, sl=slA, ret_lookback=ret_lookback, atr_len=atr_len, fee_bps=fee_bps
+                    ))
+
+        best_equity = -1.0
+        best_cfg = None
+        best_trades = None
+
+        for cfg in cfgs:
+            trades, eq = simulate_config(df, cfg)
+            ret = {
+                "symbol": cfg.symbol,
+                "scheme": cfg.scheme,
+                "z": cfg.z_th,
+                "min_hold_bars": cfg.min_hold,
+                "max_hold_bars": cfg.max_hold,
+                "tp" if cfg.scheme=="pct" else "tp_atr": cfg.tp,
+                "sl" if cfg.scheme=="pct" else "sl_atr": cfg.sl,
+                "ret_lookback": cfg.ret_lookback,
+                "atr_len": cfg.atr_len,
+                "fee_bps": cfg.fee_bps,
+                "trades": len(trades),
+                "final_equity": eq,
+                "roi_pct": (eq/100.0 - 1.0)*100.0
+            }
+            rows.append(ret)
+
+            if eq > best_equity:
+                best_equity = eq
+                best_cfg = cfg
+                best_trades = trades
+
+        best_trades_by_symbol[sym] = best_trades or []
+        if best_cfg:
+            best_cfg_by_symbol[sym] = best_cfg
+
+    summary = pd.DataFrame(rows).sort_values("final_equity", ascending=False).reset_index(drop=True)
+    summary_top = summary.head(top_k) if top_k > 0 else summary
+    return summary_top, best_trades_by_symbol, best_cfg_by_symbol
+
+def print_top(summary: pd.DataFrame, title: str, k: int = 10):
+    print(f"\n=== {title} ===")
+    for i, row in summary.head(k).iterrows():
+        sym = row["symbol"]
+        scheme = row["scheme"]
+        z = row["z"]
+        min_hold = int(row["min_hold_bars"])
+        max_hold = int(row["max_hold_bars"])
+        trades = int(row["trades"])
+        fe = row["final_equity"]
+        roi = row["roi_pct"]
+        if scheme == "pct":
+            print(f"{i+1:2d}. {sym} {scheme} z≥{z:.1f} hold=[{min_hold},{max_hold}] "
+                  f"TP={row['tp']*100:.1f}% SL={row['sl']*100:.1f}% → {fe:,.2f} ({roi:,.2f}%)  trades={trades}")
+        else:
+            print(f"{i+1:2d}. {sym} {scheme} z≥{z:.1f} hold=[{min_hold},{max_hold}] "
+                  f"TP={row['tp_atr']}×ATR SL={row['sl_atr']}×ATR → {fe:,.2f} ({roi:,.2f}%)  trades={trades}")
+
+def save_outputs(summary: pd.DataFrame,
+                 best_trades_by_symbol: Dict[str, List[Trade]],
+                 best_cfg_by_symbol: Dict[str, Config],
+                 outdir: str):
+    ensure_dir(outdir)
+    summary_path = os.path.join(outdir, "hourly_reversal_summary.csv")
+    summary.to_csv(summary_path, index=False)
+
+    for sym, trades in best_trades_by_symbol.items():
+        if sym not in best_cfg_by_symbol: 
+            continue
+        cfg = best_cfg_by_symbol[sym]
+        rows = []
+        for n, tr in enumerate(trades, 1):
+            rows.append({
+                "n": n,
+                "symbol": sym,
+                "side": tr.side,
+                "t_entry": tr.t_entry.isoformat(),
+                "t_exit": tr.t_exit.isoformat(),
+                "entry": tr.entry,
+                "exit": tr.exit,
+                "roi_frac": tr.roi,
+                "roi_pct": tr.roi*100.0,
+                "equity_after": tr.equity_after,
+                "reason": tr.reason
+            })
+        df_tr = pd.DataFrame(rows)
+        trades_path = os.path.join(outdir, f"best_trades_{sym}.csv")
+        df_tr.to_csv(trades_path, index=False)
+
+        cfg_path = os.path.join(outdir, f"best_config_{sym}.json")
+        with open(cfg_path, "w") as f:
+            import json
+            json.dump(asdict(cfg), f, indent=2)
+
+# -----------------------------
+# Main
+# -----------------------------
 def main():
-    results = []
+    ap = argparse.ArgumentParser(description="Hourly Reversal Backtest (fees UNLEVERED, min-hold, ATR variants)")
+    ap.add_argument("--symbols", type=str, default="BTCUSDT,ETHUSDT,SOLUSDT",
+                    help="Comma-separated symbols (Binance).")
+    ap.add_argument("--interval", type=str, default="1h")
+    ap.add_argument("--start", type=str, default="2023-01-01")
+    ap.add_argument("--end", type=str, default="now")
+    ap.add_argument("--ret-lookback", type=int, default=24, help="Bars for rolling z-score (on 1h returns).")
+    ap.add_argument("--atr-len", type=int, default=14, help="ATR length (for ATR-based exits).")
+    ap.add_argument("--z-grid", type=str, default="1.5,2.0,2.5", help="z thresholds to test (e.g. '1.5,2.0,2.5').")
+    ap.add_argument("--max-hold-grid", type=str, default="12,24,48", help="Max hold (bars) to test.")
+    ap.add_argument("--pct-tpsl", type=str, default="0.02x0.03,0.03x0.045,0.04x0.06",
+                    help="Comma list of TPxSL in % as decimals, e.g. '0.02x0.03,0.03x0.045'")
+    ap.add_argument("--atr-tpsl", type=str, default="1.5x2.0,2.0x3.0,3.0x4.5",
+                    help="Comma list of TPxSL in ATR multiples, e.g. '2.0x3.0,3.0x4.5'")
+    ap.add_argument("--min-hold-bars", type=int, default=1, help="Minimum hold bars (prevents same-bar exits).")
+    # Retained for CLI compatibility, but ignored:
+    ap.add_argument("--leverage", type=float, default=1.0, help="IGNORED. Leverage is disabled and forced to 1x.")
+    ap.add_argument("--fee-bps", type=float, default=6.0, help="Fee per side in basis points (UNLEVERED).")
+    ap.add_argument("--top-k", type=int, default=10)
+    ap.add_argument("--outdir", type=str, default=".github/output")
+    args = ap.parse_args()
+
+    if abs(args.leverage - 1.0) > 1e-9:
+        print("NOTE: --leverage is ignored. Leverage is disabled and forced to 1x (fees are unlevered).")
+
+    start_ms = parse_when(args.start)
+    end_ms = parse_when(args.end)
+
+    syms = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     print("Fetching hourly data…")
-    hourly_data = {}
-    for sym in SYMBOLS:
-        print(f"Downloading {sym} 1h…")
-        hourly_data[sym] = binance_klines_1h(sym, START_DATE, END_DATE)
-        print(f"  Got {len(hourly_data[sym])} bars from {hourly_data[sym][0]['t']} → {hourly_data[sym][-1]['t']}")
+    df_by_symbol: Dict[str, pd.DataFrame] = {}
+    for s in syms:
+        print(f"Downloading {s} {args.interval}…")
+        ohlc = fetch_klines(s, args.interval, start_ms, end_ms)
+        print(f"  Got {len(ohlc)} bars from {ohlc.index[0]} → {ohlc.index[-1]}")
+        if len(ohlc) < 2000:
+            raise RuntimeError(f"Only {len(ohlc)} hourly bars returned; expected many more.")
+        ohlc = add_returns_zscore(ohlc, args.ret_lookback)
+        ohlc = add_atr(ohlc, args.atr_len)
+        df_by_symbol[s] = ohlc
 
-    for sym in SYMBOLS:
-        data = hourly_data[sym]
-        for zt in THRESHOLDS:
-            for hh in HOLD_HOURS:
-                t = backtest(sym, data, zt, hh)
-                if not t:
-                    continue
-                roi = (t[-1]["after"] / 100) - 1
-                results.append({
-                    "sym": sym, "thresh": zt, "hold": hh,
-                    "trades": len(t),
-                    "roi": roi,
-                    "final": t[-1]["after"], "tradeset": t
-                })
+    z_grid = [float(x) for x in args.z_grid.split(",")]
+    max_hold_grid = [int(x) for x in args.max_hold_grid.split(",")]
 
-    # rank by final balance
-    top = sorted(results, key=lambda x: x["final"], reverse=True)[:10]
-    print("\n=== Top 10 configurations (1× leverage) ===")
-    for i, r in enumerate(top, 1):
-        print(f"{i:2d}. {r['sym']} z≥{r['thresh']} hold={r['hold']}h → {r['final']:.2f} ({r['roi']*100:.2f}%)  trades={r['trades']}")
+    def parse_pairs(spec: str) -> List[Tuple[float, float]]:
+        out = []
+        for part in spec.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "x" not in part:
+                raise ValueError(f"Bad TP/SL pair: {part}")
+            a, b = part.split("x")
+            out.append((float(a), float(b)))
+        return out
 
-    best = top[0]
-    print(f"\n=== Best Config Detailed Trades ({best['sym']} z≥{best['thresh']} hold={best['hold']}h) ===")
-    for i, t in enumerate(best["tradeset"], 1):
-        print(f"{i:2d} {t['symbol']} {t['dir']:5}  {t['entry_t']}  {t['exit_t']}  ROI={t['roi']:.2f}%  After=${t['after']:.2f}")
+    pct_pairs = parse_pairs(args.pct_tpsl)
+    atr_pairs = parse_pairs(args.atr_tpsl)
 
-    lev_final = best["final"] * (10 / 1)
-    print(f"\nWith 10× leverage: Final ≈ ${lev_final:.2f} (ROI ×10 before compounding risk).")
+    summary, best_trades_by_symbol, best_cfg_by_symbol = sweep_configs(
+        df_by_symbol=df_by_symbol,
+        symbols=syms,
+        fee_bps=args.fee_bps,
+        min_hold=args.min_hold_bars,
+        ret_lookback=args.ret_lookback,
+        max_hold_grid=max_hold_grid,
+        z_grid=z_grid,
+        pct_tp_sl_grid=pct_pairs,
+        atr_tp_sl_grid=atr_pairs,
+        atr_len=args.atr_len,
+        top_k=args.top_k
+    )
+
+    print_top(summary, f"Top {args.top_k} configurations (fees={args.fee_bps}bps/side, min-hold={args.min_hold_bars}, lev=1×)", k=args.top_k)
+
+    for sym in syms:
+        cfg = best_cfg_by_symbol.get(sym)
+        if not cfg:
+            continue
+        print(f"\n=== Best Config Detailed ( {sym} ) ===")
+        if cfg.scheme == "pct":
+            extra = f"TP={cfg.tp*100:.1f}% SL={cfg.sl*100:.1f}%"
+        else:
+            extra = f"TP={cfg.tp}×ATR SL={cfg.sl}×ATR"
+        print(f"{sym} {cfg.scheme} z≥{cfg.z_th} hold=[{cfg.min_hold},{cfg.max_hold}] {extra}")
+        trades = best_trades_by_symbol.get(sym, [])[:20]
+        for n, t in enumerate(trades, 1):
+            print(f"{n:2d} {sym:7s} {t.side:5s} {t.t_entry} → {t.t_exit} ROI={t.roi*100:+.2f}%  After=${t.equity_after:,.2f} {t.reason}")
+
+    save_outputs(summary, best_trades_by_symbol, best_cfg_by_symbol, args.outdir)
+    print(f"\nSaved summary and best-trade logs to: {args.outdir}")
 
 if __name__ == "__main__":
     main()
