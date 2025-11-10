@@ -19,12 +19,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas scipy ccxt requests matplotlib tabulate
+          pip install numpy pandas scipy ccxt requests matplotlib tabulate yfinance
 
       - name: Run backtest
-        env:
-          # Set a default exchange if your script supports it (optional)
-          EXCHANGE: binance
         run: |
           python .github/analyze_hourly_reversal.py \
             --symbols BTCUSDT,ETHUSDT,SOLUSDT \
