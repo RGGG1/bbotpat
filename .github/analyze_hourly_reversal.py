@@ -41,8 +41,6 @@ def fetch_klines(symbol: str, interval: str, start_ms: int, end_ms: int) -> pd.D
     """
     Robustly fetch klines from Binance with pagination.
     """
-    url = f"{BINANCE_BASE}/api/v3/klines}"
-    # fix accidental brace if copy-pasted
     url = f"{BINANCE_BASE}/api/v3/klines"
     limit = 1000
     rows = []
