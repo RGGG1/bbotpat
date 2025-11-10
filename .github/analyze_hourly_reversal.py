@@ -1,311 +1,250 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+analyze_hourly_reversal.py
+v1.2 — Hourly adaptive reversal analyzer
 
-import time, math, requests
-from statistics import pstdev
-from datetime import datetime, timezone, timedelta
+Goal:
+- Fetch Binance hourly klines since Jan 2023 for BTC/ETH/SOL.
+- Test z-score thresholds (1.5–3.5) and holding periods (12–96h)
+  for contrarian entry logic (overbought → short, oversold → long).
+- Compute per-trade ROI, MAE, MFE, and compounded bankroll at 1× and 10× leverage.
+- Print summary and best-performing configurations.
 
-# =================== Config ===================
-SYMBOL       = "BTCUSDT"                                 # change to ETHUSDT / SOLUSDT to test others
-START        = datetime(2023,1,1,tzinfo=timezone.utc)
-END          = datetime.utcnow().replace(tzinfo=timezone.utc) - timedelta(hours=1)
-FEE_BPS      = 10        # 0.10% taker per side
-TIME_STOP_H  = 96        # cap holding window
-MIN_COOL_H   = 24        # cooldown after any exit before a new entry
-START_EQUITY = 100.0
+Output:
+  Top results by compounded ROI and a detailed list of the top config’s trades.
+"""
 
-# Parameter grid (kept compact & sane)
-LOOKBACKS   = [72, 120, 168]           # hours for z of returns (~3/5/7 days)
-Z_THRESHES  = [2.0, 2.25, 2.5, 2.75]   # |z| threshold
-RSI_LEN     = [14, 21]
-RSI_GATES   = [(30, 70), (25, 75)]
-BB_LEN      = [48, 72]                 # Bollinger basis length
-BB_DEV      = [2.0]                    # std devs
-ATR_LEN     = [24, 48]                 # ATR hours
-TP_ATR      = [1.0, 1.5, 2.0]          # take profit in ATRs
-SL_ATR      = [0.8, 1.0, 1.2]          # stop in ATRs
+import requests
+import time
+from datetime import datetime, timedelta, timezone
+import statistics as stats
 
-# 200h slope gate: require flat-ish regime (abs % slope over window <= gate)
-SLOPE_N_H    = 200
-SLOPE_DELTAH = 24
-SLOPE_GATE   = 0.02    # 2% over 24h vs 200h mean => skip if stronger trend
-
+# ───────────────────────────────────────────────────────────────
+# Configuration
+# ───────────────────────────────────────────────────────────────
 BASES = [
-    "https://data-api.binance.vision",
     "https://api.binance.com",
     "https://api1.binance.com",
     "https://api2.binance.com",
     "https://api3.binance.com",
+    "https://data-api.binance.vision",
 ]
-HEADERS = {"User-Agent":"hourly-reversal/1.1 (+bbot)"}
+HEADERS = {"User-Agent": "hourly-reversal-analyzer/1.2 (+github actions)"}
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+START_DATE = datetime(2023, 1, 1, tzinfo=timezone.utc)
+END_DATE = datetime.now(timezone.utc)
+THRESHOLDS = [1.5, 2.0, 2.5, 3.0, 3.5]
+HOLD_HOURS = [12, 24, 48, 72, 96]
+STOP_PCT = 0.03
 
-# =================== Data =====================
+# ───────────────────────────────────────────────────────────────
+# Data fetcher (robust pagination)
+# ───────────────────────────────────────────────────────────────
 def binance_klines_1h(symbol, start_dt, end_dt):
-    out=[]
-    start_ms=int(start_dt.timestamp()*1000)
-    hard_end_ms=int(end_dt.timestamp()*1000)
-    last_err=None; backoff=0.25
-    while True:
-        params={"symbol":symbol,"interval":"1h","limit":1500,"startTime":start_ms}
-        got=None
+    """
+    Robust 1h pagination — continues strictly by time until end_dt.
+    """
+    PAGE_LIMIT = 1000
+    out = []
+    start_ms = int(start_dt.timestamp() * 1000)
+    hard_end_ms = int(end_dt.timestamp() * 1000)
+    last_err = None
+    backoff = 0.25
+
+    while start_ms <= hard_end_ms:
+        params = {
+            "symbol": symbol,
+            "interval": "1h",
+            "limit": PAGE_LIMIT,
+            "startTime": start_ms,
+        }
+        got = None
         for base in BASES:
             try:
-                r=requests.get(f"{base}/api/v3/klines", params=params, headers=HEADERS, timeout=30)
-                if r.status_code in (451,403): last_err=Exception(f"{r.status_code} {r.reason}"); continue
+                r = requests.get(f"{base}/api/v3/klines", params=params, headers=HEADERS, timeout=30)
+                if r.status_code in (451, 403):
+                    last_err = Exception(f"{r.status_code} {r.reason}")
+                    continue
                 r.raise_for_status()
-                got=r.json(); break
+                got = r.json()
+                break
             except Exception as e:
-                last_err=e
+                last_err = e
+                continue
+
         if got is None:
-            time.sleep(backoff); backoff=min(2.0, backoff*1.7); continue
-        if not got: break
+            time.sleep(backoff)
+            backoff = min(2.0, backoff * 1.7)
+            continue
+
+        if not got:
+            break
+
         for k in got:
-            ct=int(k[6])//1000
-            if ct>hard_end_ms: break
+            ct = int(k[6]) // 1000
+            if ct > hard_end_ms:
+                break
             out.append({
                 "t": datetime.utcfromtimestamp(ct).replace(tzinfo=timezone.utc),
                 "o": float(k[1]), "h": float(k[2]), "l": float(k[3]), "c": float(k[4])
             })
-        start_ms = int(got[-1][6])+1
-        if len(got)<1500 or start_ms>hard_end_ms: break
-    # dedupe by time
-    dd={}
-    for x in out: dd[x["t"]]=x
-    arr=sorted(dd.values(), key=lambda x:x["t"])
-    return [x for x in arr if start_dt<=x["t"]<=end_dt]
 
-# ================= Indicators =================
-def rsi(closes, n=14):
-    rsis=[None]*len(closes)
-    gains=[0.0]; losses=[0.0]
-    for i in range(1,len(closes)):
-        d=closes[i]-closes[i-1]
-        gains.append(max(d,0.0)); losses.append(max(-d,0.0))
-    if len(closes)<=n: return rsis
-    avg_gain = sum(gains[1:n+1])/n
-    avg_loss = sum(losses[1:n+1])/n
-    rs = (avg_gain/avg_loss) if avg_loss>0 else float('inf')
-    rsis[n]= 100 - 100/(1+rs) if avg_loss>0 else 100.0
-    for i in range(n+1,len(closes)):
-        avg_gain = (avg_gain*(n-1) + gains[i])/n
-        avg_loss = (avg_loss*(n-1) + losses[i])/n
-        rs = (avg_gain/avg_loss) if avg_loss>0 else float('inf')
-        rsis[i]= 100 - 100/(1+rs) if avg_loss>0 else 100.0
-    return rsis
+        last_ct_ms = int(got[-1][6])
+        next_ms = last_ct_ms + 1
+        if next_ms <= start_ms:
+            next_ms = start_ms + 60 * 60 * 1000
+        start_ms = next_ms
+        time.sleep(0.05)
 
-def bollinger(closes, n=20, dev=2.0):
-    mu=[None]*len(closes); sd=[None]*len(closes)
-    for i in range(len(closes)):
-        if i+1<n: continue
-        w=closes[i+1-n:i+1]
-        m = sum(w)/n
-        v = sum((x-m)**2 for x in w)/n
-        mu[i]=m; sd[i]=math.sqrt(v)
-    upper=[None if mu[i] is None else mu[i]+dev*sd[i] for i in range(len(closes))]
-    lower=[None if mu[i] is None else mu[i]-dev*sd[i] for i in range(len(closes))]
-    return mu,upper,lower
+    ded = {}
+    for x in out:
+        ded[x["t"]] = x
+    arr = sorted(ded.values(), key=lambda x: x["t"])
+    return [x for x in arr if start_dt <= x["t"] <= end_dt]
 
-def atr(ohlc, n=14):
-    trs=[0.0]
-    for i in range(1,len(ohlc)):
-        h,l,c_prev = ohlc[i]["h"], ohlc[i]["l"], ohlc[i-1]["c"]
-        tr = max(h-l, abs(h-c_prev), abs(l-c_prev))
-        trs.append(tr)
-    if len(ohlc)<=n: return [None]*len(ohlc)
-    atrs=[None]*len(ohlc)
-    sm = sum(trs[1:n+1])
-    atrs[n]= sm/n
-    for i in range(n+1,len(ohlc)):
-        atrs[i]= (atrs[i-1]*(n-1)+trs[i])/n
-    return atrs
+# ───────────────────────────────────────────────────────────────
+# Calculations
+# ───────────────────────────────────────────────────────────────
+def pct_returns(closes):
+    return [closes[i] / closes[i-1] - 1.0 for i in range(1, len(closes))]
 
-def hourly_returns(closes):
-    return [None] + [closes[i]/closes[i-1]-1.0 for i in range(1,len(closes))]
+def zscore_series(r, look=20):
+    zs = []
+    for i in range(len(r)):
+        if i + 1 < look:
+            zs.append(None)
+            continue
+        window = r[i + 1 - look : i + 1]
+        mu = sum(window) / len(window)
+        sd = stats.pstdev(window)
+        zs.append((r[i] - mu) / sd if sd else None)
+    return zs
 
-def z_of_returns(ret, look):
-    z=[None]*len(ret)
-    for i in range(len(ret)):
-        if i<look: continue
-        w=[x for x in ret[i-look+1:i+1] if x is not None]
-        if len(w)<look: continue
-        mu = sum(w)/look
-        sd = pstdev(w) if look>1 else 0.0
-        if not sd: continue
-        last = ret[i]
-        z[i] = (last - mu)/sd
-    return z
+# ───────────────────────────────────────────────────────────────
+# Backtest core
+# ───────────────────────────────────────────────────────────────
+def backtest(symbol, data, thresh, hold_h):
+    closes = [x["c"] for x in data]
+    times = [x["t"] for x in data]
+    r = pct_returns(closes)
+    zs = zscore_series(r, 20)
+    trades = []
+    bal = 100.0
 
-def sma(values, n):
-    out=[None]*len(values)
-    run=0.0
-    for i,v in enumerate(values):
-        if v is None: return out
-        run += v
-        if i>=n: run -= values[i-n]
-        if i>=n-1: out[i]= run/n
-    return out
+    i = 20
+    while i < len(r):
+        z = zs[i]
+        if z is None:
+            i += 1
+            continue
+        ret = r[i]
+        dir = None
+        if z > thresh and ret > 0:
+            dir = "SHORT"
+        elif z < -thresh and ret < 0:
+            dir = "LONG"
 
-# ================ Backtest ====================
-def backtest(ohlc, params):
-    lb, z_thr, rsiN, rsi_lo, rsi_hi, bbN, bbDev, atrN, tp_k, sl_k = params
-    closes=[x["c"] for x in ohlc]
-    rs = rsi(closes, rsiN)
-    mu,bbU,bbL = bollinger(closes, bbN, bbDev)
-    atrs = atr(ohlc, atrN)
-    rets = hourly_returns(closes)
-    zs   = z_of_returns(rets, lb)
+        if dir:
+            entry = closes[i+1]
+            entry_t = times[i+1]
+            stop_price = entry * (1 - STOP_PCT if dir == "LONG" else 1 + STOP_PCT)
+            target = entry * (1 + 0.02 if dir == "LONG" else 1 - 0.02)
+            exit_idx = min(i + 1 + hold_h, len(closes) - 1)
+            exit_t = times[exit_idx]
+            exit_price = closes[exit_idx]
+            mae = mfe = roi = 0
+            for j in range(i+1, exit_idx+1):
+                low, high = data[j]["l"], data[j]["h"]
+                if dir == "LONG":
+                    change = (high/entry - 1)*100
+                    mfe = max(mfe, change)
+                    mae = min(mae, (low/entry - 1)*100)
+                    if low <= stop_price:
+                        roi = -STOP_PCT*100
+                        exit_price = stop_price
+                        exit_t = times[j]
+                        break
+                    if high >= target:
+                        roi = 2.0
+                        exit_price = target
+                        exit_t = times[j]
+                        break
+                else:
+                    change = (entry/low - 1)*100
+                    mfe = max(mfe, change)
+                    mae = min(mae, (entry/high - 1)*100)
+                    if high >= stop_price:
+                        roi = -STOP_PCT*100
+                        exit_price = stop_price
+                        exit_t = times[j]
+                        break
+                    if low <= target:
+                        roi = 2.0
+                        exit_price = target
+                        exit_t = times[j]
+                        break
+            if roi == 0:
+                roi = (exit_price/entry - 1)*100 if dir == "LONG" else (entry/exit_price - 1)*100
 
-    # slope filter precompute
-    base = sma(closes, SLOPE_N_H)
-    def flat_regime(i):
-        if i is None or i < max(SLOPE_N_H, SLOPE_DELTAH): return False
-        if base[i] is None or base[i-SLOPE_DELTAH] is None: return False
-        pct = abs(base[i] - base[i-SLOPE_DELTAH]) / base[i-SLOPE_DELTAH]
-        return pct <= SLOPE_GATE
+            bal *= (1 + roi/100)
+            trades.append({
+                "symbol": symbol,
+                "dir": dir,
+                "entry": entry,
+                "exit": exit_price,
+                "entry_t": entry_t,
+                "exit_t": exit_t,
+                "roi": roi,
+                "mae": mae,
+                "mfe": mfe,
+                "after": bal,
+            })
+            i = exit_idx + 1
+        else:
+            i += 1
+    return trades
 
-    def trade_logic(i):
-        """Return 'LONG' or 'SHORT' or None at hour i (close of bar i)."""
-        if zs[i] is None or rs[i] is None or bbU[i] is None or atrs[i] is None:
-            return None
-        if not flat_regime(i):      # skip in strong trend regimes
-            return None
-        sig=None
-        # contrarian: big +z -> SHORT; big -z -> LONG; gated by RSI & bands
-        if zs[i] >= z_thr and rs[i] >= rsi_hi and closes[i] >= bbU[i]:
-            sig="SHORT"
-        elif -zs[i] >= z_thr and rs[i] <= rsi_lo and closes[i] <= bbL[i]:
-            sig="LONG"
-        return sig
-
-    # two runs: 1× and 10×
-    def run_with_leverage(lev):
-        equity=START_EQUITY
-        peak=equity; maxdd=0.0
-        in_pos=False; side=None; entry=None; start_i=None
-        tp=None; sl=None
-        trades=[]
-        fee = FEE_BPS/10000.0
-        last_exit_i = -10**9  # far in past for cooldown logic
-
-        for i in range(len(ohlc)):
-            # exit checks (if in trade) on close of bar i
-            if in_pos:
-                px = closes[i]
-                roi = (px/entry-1.0) if side=="LONG" else (entry/px-1.0)
-                gross = lev*roi
-                hit_tp = (roi >= tp)
-                hit_sl = (roi <= -sl)
-                timed  = (i - start_i) >= TIME_STOP_H
-
-                if hit_tp or hit_sl or timed:
-                    # fees: entry (already taken) + exit:
-                    equity = equity*(1+gross) - equity*(1+gross)*fee
-                    trades.append({
-                        "entry_t": ohlc[start_i]["t"], "exit_t": ohlc[i]["t"],
-                        "side":side, "lev":lev, "entry":entry, "exit":px,
-                        "tp%":tp*100, "sl%":sl*100, "roi%":gross*100,
-                        "after":equity, "reason":"tp" if hit_tp else ("sl" if hit_sl else "expiry")
-                    })
-                    in_pos=False; side=None; entry=None; start_i=None
-                    last_exit_i = i
-                    peak=max(peak,equity); maxdd=max(maxdd, (peak-equity)/peak)
-                    # (fall through to allow same-bar new entry only if cooldown == 0)
-
-            # entry check
-            if not in_pos and (i - last_exit_i) >= MIN_COOL_H:
-                sig = trade_logic(i)
-                if sig:
-                    entry = closes[i]
-                    atr_at_entry = atrs[i]
-                    if atr_at_entry is None or atr_at_entry<=0: continue
-                    tp = (tp_k * atr_at_entry) / entry
-                    sl = (sl_k * atr_at_entry) / entry
-                    side=sig; in_pos=True; start_i=i
-                    # entry fee
-                    equity -= equity*fee
-                    peak=max(peak,equity)
-
-        final = equity
-        return final, maxdd, trades
-
-    final_1x, dd_1x, trades_1x = run_with_leverage(1)
-    final_10x, dd_10x, trades_10x = run_with_leverage(10)
-    return {
-        "final_1x":final_1x, "dd_1x":dd_1x, "trades_1x":trades_1x,
-        "final_10x":final_10x, "dd_10x":dd_10x, "trades_10x":trades_10x
-    }
-
-# --------- drawdown-penalized ranking ----------
-def score(res):
-    # Penalize drawdown more than linearly; keep simple & transparent.
-    # score = Final(1x) / (1 + 4*MaxDD_1x)
-    return res["final_1x"] / (1.0 + 4.0*max(0.0, res["dd_1x"]))
-
-# ================ Runner ======================
+# ───────────────────────────────────────────────────────────────
+# Main runner
+# ───────────────────────────────────────────────────────────────
 def main():
-    print(f"Downloading {SYMBOL} 1h…")
-    ohlc = binance_klines_1h(SYMBOL, START, END)
-    if len(ohlc) < 2000:
-        raise RuntimeError(f"Only {len(ohlc)} hourly bars returned; expected many more.")
+    results = []
+    print("Fetching hourly data…")
+    hourly_data = {}
+    for sym in SYMBOLS:
+        print(f"Downloading {sym} 1h…")
+        hourly_data[sym] = binance_klines_1h(sym, START_DATE, END_DATE)
+        print(f"  Got {len(hourly_data[sym])} bars from {hourly_data[sym][0]['t']} → {hourly_data[sym][-1]['t']}")
 
-    closes=[x["c"] for x in ohlc]
-    print(f"Bars: {len(ohlc)} | First: {ohlc[0]['t']}  Last: {ohlc[-1]['t']}  | First close: {closes[0]:.2f}")
+    for sym in SYMBOLS:
+        data = hourly_data[sym]
+        for zt in THRESHOLDS:
+            for hh in HOLD_HOURS:
+                t = backtest(sym, data, zt, hh)
+                if not t:
+                    continue
+                roi = (t[-1]["after"] / 100) - 1
+                results.append({
+                    "sym": sym, "thresh": zt, "hold": hh,
+                    "trades": len(t),
+                    "roi": roi,
+                    "final": t[-1]["after"], "tradeset": t
+                })
 
-    # grid search
-    print("\nSearching parameter grid…")
-    results=[]
-    for lb in LOOKBACKS:
-        for zt in Z_THRESHES:
-            for rlen in RSI_LEN:
-                for rlo,rhi in RSI_GATES:
-                    for bbl in BB_LEN:
-                        for bbdev in BB_DEV:
-                            for alen in ATR_LEN:
-                                for tp_k in TP_ATR:
-                                    for sl_k in SL_ATR:
-                                        params=(lb,zt,rlen,rlo,rhi,bbl,bbdev,alen,tp_k,sl_k)
-                                        try:
-                                            res = backtest(ohlc, params)
-                                        except Exception:
-                                            continue
-                                        results.append((score(res), res, params))
+    # rank by final balance
+    top = sorted(results, key=lambda x: x["final"], reverse=True)[:10]
+    print("\n=== Top 10 configurations (1× leverage) ===")
+    for i, r in enumerate(top, 1):
+        print(f"{i:2d}. {r['sym']} z≥{r['thresh']} hold={r['hold']}h → {r['final']:.2f} ({r['roi']*100:.2f}%)  trades={r['trades']}")
 
-    if not results:
-        print("No results — something went wrong with the grid or data.")
-        return
+    best = top[0]
+    print(f"\n=== Best Config Detailed Trades ({best['sym']} z≥{best['thresh']} hold={best['hold']}h) ===")
+    for i, t in enumerate(best["tradeset"], 1):
+        print(f"{i:2d} {t['symbol']} {t['dir']:5}  {t['entry_t']}  {t['exit_t']}  ROI={t['roi']:.2f}%  After=${t['after']:.2f}")
 
-    # rank by penalized score
-    results.sort(key=lambda x: x[0], reverse=True)
-    top = results[:10]
+    lev_final = best["final"] * (10 / 1)
+    print(f"\nWith 10× leverage: Final ≈ ${lev_final:.2f} (ROI ×10 before compounding risk).")
 
-    print("\n=== Top 10 configs (penalized by 4× MaxDD) ===")
-    print("Rank  Score    Final(1×)  MaxDD(1×)   Final(10×)  MaxDD(10×)   Params")
-    for i,(sc,res,params) in enumerate(top,1):
-        print(f"{i:>4}  {sc:7.2f}  {res['final_1x']:>9.2f}   {res['dd_1x']*100:>8.2f}%   "
-              f"{res['final_10x']:>10.2f}   {res['dd_10x']*100:>9.2f}%   {params}")
-
-    # take best and print trades for both 1× and 10×
-    best_sc, best_res, best_params = top[0]
-    print("\nBest params:", best_params)
-    print(f"Score: {best_sc:.2f} | Final(1×) ${best_res['final_1x']:.2f}  MaxDD(1×) {best_res['dd_1x']*100:.2f}%")
-    print(f"                     Final(10×) ${best_res['final_10x']:.2f} MaxDD(10×) {best_res['dd_10x']*100:.2f}%")
-
-    print("\n— Trades (1×) —")
-    print(f"{'#':>3}  {'Side':<5}  {'Entry UTC':<16}  {'Exit UTC':<16}  {'TP%':>6}  {'SL%':>6}  {'ROI%':>7}  {'After$':>9}  {'Exit'}")
-    for i,tr in enumerate(best_res["trades_1x"],1):
-        print(f"{i:>3}  {tr['side']:<5}  {tr['entry_t'].strftime('%Y-%m-%d %H:%M'):16}  "
-              f"{tr['exit_t'].strftime('%Y-%m-%d %H:%M'):16}  {tr['tp%']:6.2f}  {tr['sl%']:6.2f}  "
-              f"{tr['roi%']:7.2f}  {tr['after']:9.2f}  {tr['reason']}")
-
-    if best_res["trades_10x"]:
-        print("\n— Trades (10×) —")
-        print(f"{'#':>3}  {'Side':<5}  {'Entry UTC':<16}  {'Exit UTC':<16}  {'TP%':>6}  {'SL%':>6}  {'ROI%':>7}  {'After$':>9}  {'Exit'}")
-        for i,tr in enumerate(best_res["trades_10x"],1):
-            print(f"{i:>3}  {tr['side']:<5}  {tr['entry_t'].strftime('%Y-%m-%d %H:%M'):16}  "
-                  f"{tr['exit_t'].strftime('%Y-%m-%d %H:%M'):16}  {tr['tp%']:6.2f}  {tr['sl%']:6.2f}  "
-                  f"{tr['roi%']:7.2f}  {tr['after']:9.2f}  {tr['reason']}")
-    print(f"\nSummary (1×): Final ${best_res['final_1x']:.2f} | MaxDD {best_res['dd_1x']*100:.2f}%")
-    print(f"Summary (10×): Final ${best_res['final_10x']:.2f} | MaxDD {best_res['dd_10x']*100:.2f}%")
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
