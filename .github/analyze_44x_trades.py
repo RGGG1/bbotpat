@@ -14,7 +14,7 @@ COINS = [
 ]
 
 LOOKBACK    = 20                 # z-score window (days)
-HOLD_DAYS   = 4                  # 96h cap
+HOLD_DAYS   = 0.35                  # 96h cap
 SL          = 0.005               # 3% stop (underlying)
 START_DATE  = datetime(2023,1,1,tzinfo=timezone.utc)
 
