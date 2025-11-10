@@ -245,4 +245,35 @@ def backtest(start_str="2023-01-01", end_str=None):
 
     # Force close last open position
     if position:
-        last_bar = sym_data[position["symbol"]][all]()
+        last_bar = sym_data[position["symbol"]][all_dates[-1]]
+        if position["side"] == "LONG":
+            pnl = (last_bar["close"] - position["entry_price"]) / position["entry_price"]
+        else:
+            pnl = (position["entry_price"] - last_bar["close"]) / position["entry_price"]
+        roi = pnl * LEVERAGE
+        equity *= (1 + roi)
+        trades.append({
+            "symbol": position["symbol"], "side": position["side"],
+            "entry_date": position["entry_date"].isoformat(),
+            "entry_price": round(position["entry_price"], 2),
+            "exit_date": all_dates[-1].isoformat(),
+            "exit_price": round(last_bar["close"], 2),
+            "reason": "FORCED_LAST_DAY",
+            "raw_return": round(pnl * 100, 3),
+            "roi_levered": round(roi * 100, 3),
+            "equity_after": round(equity, 2),
+        })
+
+    # ────────────────────────────────────────────────
+    # Save & report
+    # ────────────────────────────────────────────────
+    df = pd.DataFrame(trades)
+    df.to_csv("trades.csv", index=False)
+    print(df.tail(10).to_string(index=False))
+    print(f"\nTotal trades: {len(df)}")
+    print(f"Final equity: ${equity:.2f} (start $100.00)")
+    print("Full trade list saved to trades.csv")
+
+
+if __name__ == "__main__":
+    backtest("2023-01-01")
