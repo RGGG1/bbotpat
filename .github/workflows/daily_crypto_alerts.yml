@@ -1,27 +1,47 @@
 name: Daily Crypto Alerts
 
 on:
-  workflow_dispatch:         # <-- required for API-triggered runs
-  # (optional) keep your GitHub cron as a backup:
+  workflow_dispatch:         # allow manual/API-triggered runs
   # schedule:
-  #   - cron: '31 23 * * *'    # 00:05 UTC
+  #   - cron: '31 23 * * *'  # 00:05 UTC (optional)
 
 concurrency:
   group: daily-crypto-alerts
   cancel-in-progress: true
 
 jobs:
-  run-alert:
+  run-alerts:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - script: alerts_binance.py
+            label: x44roi
+          - script: alerts_10.py
+            label: x10trades18xroi
+
+    env:
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+      ALERTS_NAME:  ${{ matrix.label }}
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: pip install requests
-      - name: Run alert script (Binance)
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
-        run: python alerts_binance.py
-        
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests
+          fi
+
+      - name: Run ${{ matrix.label }} alerts
+        run: python ${{ matrix.script }}
