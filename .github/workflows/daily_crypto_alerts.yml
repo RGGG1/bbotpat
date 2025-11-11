@@ -1,9 +1,9 @@
 name: Daily Crypto Alerts
 
 on:
-  workflow_dispatch:         # allow manual/API-triggered runs
+  workflow_dispatch:
   # schedule:
-  #   - cron: '31 23 * * *'  # 00:05 UTC (optional)
+  #   - cron: '31 23 * * *'
 
 concurrency:
   group: daily-crypto-alerts
@@ -27,21 +27,20 @@ jobs:
       ALERTS_NAME:  ${{ matrix.label }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
-            pip install requests
+            pip install requests pandas numpy
           fi
 
-      - name: Run ${{ matrix.label }} alerts
+      - name: Run ${{ matrix.label }}
         run: python ${{ matrix.script }}
