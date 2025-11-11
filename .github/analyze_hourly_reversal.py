@@ -3,17 +3,24 @@
 
 """
 Hourly Reversal Backtest (No Leverage, Fee-Aware, No Same-Bar Exits)
+Resilient data fetch: Binance -> ccxt -> yfinance (chunked to avoid 730d limit)
 
-Usage example:
+Examples:
   python .github/analyze_hourly_reversal.py \
     --symbols BTCUSDT,ETHUSDT,SOLUSDT \
-    --start 2023-01-01 --end 2025-11-10 \
+    --start 2023-01-01 --end now \
     --fee-bps 8 --min-move-bps 50 \
     --sl-mults 0.75,1.00,1.50,2.00 \
     --tp-mults 0.75,1.25,1.50,2.00
+
+Force a provider (optional):
+  --provider binance    # only Binance
+  --provider ccxt       # only ccxt (OKX/Bybit/Kraken/KuCoin/Bitfinex/BinanceUS/Coinbase)
+  --provider yf         # only yfinance (with chunking)
+  --provider auto       # try all (default)
 """
 
-import sys, time, math, json, argparse, os
+import sys, time, math, json, argparse, os, re
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
@@ -23,9 +30,9 @@ import pandas as pd
 import requests
 from tabulate import tabulate
 
-# ---------- Time helpers ----------
 UTC = timezone.utc
 
+# -------- Utilities: time & parsing --------
 def to_ms(dt: datetime) -> int:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
@@ -34,7 +41,36 @@ def to_ms(dt: datetime) -> int:
 def from_ms(ms: int) -> datetime:
     return datetime.fromtimestamp(ms / 1000, tz=UTC)
 
-# ---------- Optional deps ----------
+def parse_date_like(s: str, anchor: Optional[datetime] = None) -> datetime:
+    """Parse 'YYYY-MM-DD', 'now', 'today', 'yesterday', or rel like '-30d', '-18m', '-2y'."""
+    s = str(s).strip().lower()
+    now = datetime.now(tz=UTC) if anchor is None else anchor
+    if s in ("now",):
+        return now
+    if s in ("today",):
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if s in ("yesterday",):
+        t = now - timedelta(days=1)
+        return t.replace(hour=0, minute=0, second=0, microsecond=0)
+    # relative: -Nd / -Nm / -Ny
+    m = re.fullmatch(r"-\s*(\d+)\s*([dmy])", s)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2)
+        if unit == "d":
+            return now - timedelta(days=n)
+        elif unit == "m":
+            # approx months as 30 days to keep deps light
+            return now - timedelta(days=30 * n)
+        elif unit == "y":
+            return now - timedelta(days=365 * n)
+    # absolute date
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=UTC)
+    except ValueError as e:
+        raise ValueError(f"Could not parse date '{s}'. Use YYYY-MM-DD, now, today, yesterday, or -Nd/-Nm/-Ny.") from e
+
+# -------- Optional deps --------
 try:
     import ccxt
     HAVE_CCXT = True
@@ -47,11 +83,10 @@ try:
 except Exception:
     HAVE_YF = False
 
-# ---------- Data fetching (Binance -> ccxt -> yfinance) ----------
+# -------- Data fetching --------
 BINANCE_BASE = "https://api.binance.com"
 
 def klines_to_df(klines: List[List]) -> pd.DataFrame:
-    # Binance format: [openTime, open, high, low, close, volume, closeTime, ...]
     cols = ["date", "open", "high", "low", "close", "volume"]
     arr = []
     for k in klines:
@@ -59,30 +94,36 @@ def klines_to_df(klines: List[List]) -> pd.DataFrame:
     df = pd.DataFrame(arr, columns=cols).sort_values("date").reset_index(drop=True)
     return df
 
-def fetch_binance(symbol: str, interval: str, start_ms: int, end_ms: int) -> List[List]:
+def fetch_binance(symbol: str, interval: str, start_ms: int, end_ms: int, max_retries: int = 5) -> List[List]:
     url = f"{BINANCE_BASE}/api/v3/klines"
-    params = {
-        "symbol": symbol,
-        "interval": interval,
-        "startTime": start_ms,
-        "endTime": end_ms,
-        "limit": 1000,
-    }
+    params = {"symbol": symbol, "interval": interval, "startTime": start_ms, "endTime": end_ms, "limit": 1000}
+    headers = {"User-Agent": "Mozilla/5.0 (backtest/ci)"}
     out = []
     cursor = start_ms
     while True:
         params["startTime"] = cursor
-        r = requests.get(url, params=params, timeout=30)
-        if r.status_code == 451:
-            raise RuntimeError("BINANCE_451")
-        if r.status_code != 200:
-            raise RuntimeError(f"Binance error {r.status_code}: {r.text}")
+        retries = 0
+        while True:
+            r = requests.get(url, params=params, headers=headers, timeout=30)
+            if r.status_code == 451:
+                raise RuntimeError("BINANCE_451")
+            if r.status_code == 429:
+                # rate limited: exponential backoff
+                sleep_s = min(2 ** retries, 20)
+                time.sleep(sleep_s)
+                retries += 1
+                if retries > max_retries:
+                    raise RuntimeError("Binance 429 rate limit (max retries)")
+                continue
+            if r.status_code != 200:
+                raise RuntimeError(f"Binance error {r.status_code}: {r.text}")
+            break
         batch = r.json()
         if not batch:
             break
         out.extend(batch)
         next_ms = int(batch[-1][6])  # closeTime
-        cursor = next_ms + 1  # step past last close to avoid duplicates
+        cursor = next_ms + 1
         if cursor >= end_ms:
             break
         if len(batch) < 1000:
@@ -90,7 +131,6 @@ def fetch_binance(symbol: str, interval: str, start_ms: int, end_ms: int) -> Lis
         time.sleep(0.05)
     return out
 
-# Exchange symbol mapping for ccxt
 _EX_SYMBOLS = {
     "BTCUSDT": {
         "okx":       "BTC/USDT",
@@ -158,7 +198,7 @@ def fetch_ccxt_any(symbol_key: str, start_dt: datetime, end_dt: datetime) -> Tup
                 if next_ts <= since:
                     break
                 since = next_ts
-                time.sleep(ex.rateLimit / 1000.0 if getattr(ex, "rateLimit", 0) else 0.2)
+                time.sleep(ex.rateLimit / 1000.0 if getattr(ex, "rateLimit", 0) else 0.25)
             if not all_rows:
                 continue
 
@@ -172,60 +212,104 @@ def fetch_ccxt_any(symbol_key: str, start_dt: datetime, end_dt: datetime) -> Tup
             continue
     return pd.DataFrame(), None
 
-def fetch_yf(symbol_key: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
+def _yf_symbol(symbol_key: str) -> Optional[str]:
+    return {"BTCUSDT":"BTC-USD","ETHUSDT":"ETH-USD","SOLUSDT":"SOL-USD"}.get(symbol_key)
+
+def fetch_yf_chunked(symbol_key: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
     if not HAVE_YF:
         return pd.DataFrame()
-    ymap = {"BTCUSDT":"BTC-USD","ETHUSDT":"ETH-USD","SOLUSDT":"SOL-USD"}
-    sym = ymap.get(symbol_key)
+    sym = _yf_symbol(symbol_key)
     if not sym:
         return pd.DataFrame()
-    # yfinance only has 1h <= ~730 days; clamp to last 720
-    clamp_start = max(start_dt, end_dt - timedelta(days=720))
-    df = yf.download(sym, start=clamp_start, end=end_dt, interval="60m", progress=False)
-    if df is None or df.empty:
+    # Yahoo 1h limit ~730 days; pull in <=720-day chunks
+    max_span_days = 720
+    out_chunks = []
+    cur_start = start_dt
+    while cur_start < end_dt:
+        cur_end = min(cur_start + timedelta(days=max_span_days), end_dt)
+        df = yf.download(sym, start=cur_start, end=cur_end, interval="60m", progress=False)
+        if df is None or df.empty:
+            cur_start = cur_end  # advance to avoid infinite loop
+            continue
+        df = df.rename(columns={"Open":"open","High":"high","Low":"low","Close":"close","Volume":"volume"})
+        if df.index.tz is None:
+            df.index = df.index.tz_localize(UTC)
+        else:
+            df.index = df.index.tz_convert(UTC)
+        chunk = df.reset_index().rename(columns={"index":"date","Datetime":"date"})
+        chunk = chunk[["date","open","high","low","close","volume"]]
+        out_chunks.append(chunk)
+        # advance 1 hour after last index to avoid overlap
+        if not chunk.empty:
+            last_dt = chunk["date"].iloc[-1]
+            cur_start = last_dt + timedelta(hours=1)
+        else:
+            cur_start = cur_end
+        time.sleep(0.2)  # be a bit polite
+    if not out_chunks:
         return pd.DataFrame()
-    df = df.rename(columns={"Open":"open","High":"high","Low":"low","Close":"close","Volume":"volume"})
-    if df.index.tz is None:
-        df.index = df.index.tz_localize(UTC)
-    else:
-        df.index = df.index.tz_convert(UTC)
-    out = df.reset_index().rename(columns={"index":"date","Datetime":"date"})
-    out = out[["date","open","high","low","close","volume"]].sort_values("date").reset_index(drop=True)
+    out = pd.concat(out_chunks, ignore_index=True)
+    out = out.drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+    out = out[(out["date"] >= start_dt) & (out["date"] < end_dt)].reset_index(drop=True)
     return out
 
-def fetch_data(symbol_key: str, start_dt: datetime, end_dt: datetime) -> pd.DataFrame:
-    print(f"Downloading {symbol_key} 1h from Binance…")
-    try:
+def fetch_data(symbol_key: str, start_dt: datetime, end_dt: datetime, provider: str = "auto") -> pd.DataFrame:
+    prov = provider.lower().strip()
+    tried = []
+
+    def _try_binance():
+        print(f"  [binance] {symbol_key} 1h")
         kl = fetch_binance(symbol_key, "1h", to_ms(start_dt), to_ms(end_dt))
         df = klines_to_df(kl)
-        print(f"  Got {len(df)} bars {df['date'].min()} → {df['date'].max()} (Binance)")
+        print(f"    got {len(df)} bars {df['date'].min()} → {df['date'].max()}")
         return df
-    except RuntimeError as e:
-        msg = str(e)
-        if "BINANCE_451" in msg or "451" in msg:
-            print("  Binance failed (BINANCE_451), fallback to ccxt/yfinance")
+
+    def _try_ccxt():
+        print(f"  [ccxt] {symbol_key} 1h (multi-exchange)")
+        df, ex_id = fetch_ccxt_any(symbol_key, start_dt, end_dt)
+        if df.empty:
+            print("    no data from ccxt sources")
         else:
-            print(f"  Binance failed ({msg}), fallback to ccxt/yfinance")
+            print(f"    got {len(df)} bars via {ex_id} {df['date'].min()} → {df['date'].max()}")
+        return df
 
-    if HAVE_CCXT:
-        df_ccxt, ex_id = fetch_ccxt_any(symbol_key, start_dt, end_dt)
-        if not df_ccxt.empty:
-            print(f"  Got {len(df_ccxt)} bars via ccxt ({ex_id}) {df_ccxt['date'].min()} → {df_ccxt['date'].max()}")
-            return df_ccxt
+    def _try_yf():
+        print(f"  [yfinance] {symbol_key} 1h (chunked)")
+        df = fetch_yf_chunked(symbol_key, start_dt, end_dt)
+        if df.empty:
+            print("    got 0 bars from yfinance")
         else:
-            print("  ccxt sources exhausted, fallback to yfinance")
-    else:
-        print("  ccxt not installed, fallback to yfinance")
+            print(f"    got {len(df)} bars {df['date'].min()} → {df['date'].max()}")
+        return df
 
-    df_yf = fetch_yf(symbol_key, start_dt, end_dt)
-    if not df_yf.empty:
-        print(f"  Got {len(df_yf)} bars via yfinance {df_yf['date'].min()} → {df_yf['date'].max()} (partial range)")
-        return df_yf
+    order_map = {
+        "binance": [_try_binance],
+        "ccxt": [_try_ccxt],
+        "yf": [_try_yf],
+        "auto": [_try_binance, _try_ccxt, _try_yf],
+    }
+    fns = order_map.get(prov, order_map["auto"])
 
-    print("  Got 0 bars (all sources failed).")
+    for fn in fns:
+        name = fn.__name__
+        tried.append(name)
+        try:
+            df = fn()
+            if not df.empty:
+                return df
+        except RuntimeError as e:
+            msg = str(e)
+            if "BINANCE_451" in msg or "451" in msg:
+                print("    binance region-blocked (451); continuing")
+            else:
+                print(f"    provider error: {msg}; continuing")
+        except Exception as e:
+            print(f"    provider exception: {e}; continuing")
+
+    print(f"  all providers failed (tried: {', '.join(tried)})")
     return pd.DataFrame()
 
-# ---------- Indicators ----------
+# -------- Indicators --------
 def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     high = df["high"].astype(float).values
     low = df["low"].astype(float).values
@@ -240,7 +324,7 @@ def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     atr_vals = pd.Series(tr).ewm(span=period, adjust=False).mean().values
     return pd.Series(atr_vals, index=df.index)
 
-# ---------- Strategy + Backtest ----------
+# -------- Strategy --------
 @dataclass
 class Trade:
     entry_time: datetime
@@ -262,13 +346,13 @@ def run_strategy(
 ) -> Dict:
     """
     Mean-reversion "hourly reversal":
-      - If previous bar's return >= +threshold => short at next open
-      - If previous bar's return <= -threshold => long  at next open
+      - If previous bar's return >= +threshold => short next open
+      - If previous bar's return <= -threshold => long  next open
     Entry at next bar's open.
     SL/TP sized by ATR * multipliers.
-    No same-bar exits: exits start evaluating from the bar AFTER entry.
+    No same-bar exits: exits start from the bar AFTER entry.
 
-    No leverage. Fees applied per side: equity *= (1 - fee_rate) on entry and on exit.
+    No leverage. Fees per side: equity *= (1 - fee_rate) at entry and exit.
     """
     if df.empty or len(df) < atr_period + 5:
         return {
@@ -292,42 +376,31 @@ def run_strategy(
     trade: Optional[Trade] = None
     last_entry_idx = None
 
-    # We will evaluate entries at bar i if bar i-1 move >= threshold
-    for i in range(1, len(df)-1):  # leave room for next open entry and at least one bar for exit checks
+    for i in range(1, len(df)-1):
         row_prev = df.iloc[i-1]
         row = df.iloc[i]
-        row_next = df.iloc[i+1]  # for entry at its open
+        row_next = df.iloc[i+1]
 
-        # manage open position first
         if in_pos:
-            # No same-bar exit: earliest exit bar is entry_idx + 1
+            # no same-bar exit: allow exits only strictly after entry index
             if i > last_entry_idx:
-                # Check intrabar hits: assume classic OHLC assumption: if long, SL (below) checked before TP?
-                # To be neutral, we check both; but ordering can bias. We'll assume worst-case for us:
-                h = row["high"]
-                l = row["low"]
+                h = row["high"]; l = row["low"]
                 if trade.direction == +1:
                     hit_sl = l <= trade.sl
                     hit_tp = h >= trade.tp
                 else:
-                    hit_sl = h >= trade.sl  # for short, sl is ABOVE
-                    hit_tp = l <= trade.tp  # for short, tp is BELOW
-
+                    hit_sl = h >= trade.sl
+                    hit_tp = l <= trade.tp
                 if hit_sl and hit_tp:
-                    # Ambiguous: choose the one closer to the open (conservative)
-                    # We'll assume the stop (worse outcome) was hit first.
+                    # conservative: assume stop hit first
                     hit_tp = False
-
                 if hit_sl or hit_tp:
-                    # Exit at the level hit
                     px = trade.sl if hit_sl else trade.tp
                     trade.exit_time = row["date"]
                     trade.exit_price = px
                     trade.reason = "SL" if hit_sl else "TP"
-                    # PnL (no leverage): return = direction * (exit/entry - 1)
                     gross_ret = trade.direction * (px / trade.entry_price - 1.0)
-                    # fees: entry and exit
-                    equity *= (1.0 - fee_rate)
+                    equity *= (1.0 - fee_rate)  # entry fee already applied at entry; keep symmetry for safety
                     equity *= (1.0 + gross_ret)
                     equity *= (1.0 - fee_rate)
                     trades.append(trade)
@@ -335,39 +408,30 @@ def run_strategy(
                     trade = None
                     equity_path.append(equity)
                     continue
-            # if still in position at the last bar, we'll flat later
 
-        # if not in position, consider a new entry at NEXT bar's open
         if not in_pos:
-            move = row_prev["close"]
-            move2 = row["close"]
-            ret_prev = (move2 / move - 1.0) * 10000.0  # in bps
-            if ret_prev >= min_move_bps:
-                # Short at next bar open
+            ret_prev_bps = (row["close"] / row_prev["close"] - 1.0) * 10000.0
+            if ret_prev_bps >= min_move_bps:
                 entry_px = row_next["open"]
-                rng_atr = df.loc[i, "atr"]
-                sl = entry_px + sl_mult * rng_atr
-                tp = entry_px - tp_mult * rng_atr
-                trade = Trade(entry_time=row_next["date"], direction=-1,
-                              entry_price=entry_px, sl=sl, tp=tp)
+                rng = df.loc[i, "atr"]
+                sl = entry_px + sl_mult * rng
+                tp = entry_px - tp_mult * rng
+                trade = Trade(entry_time=row_next["date"], direction=-1, entry_price=entry_px, sl=sl, tp=tp)
                 equity *= (1.0 - fee_rate)  # entry fee
                 in_pos = True
                 last_entry_idx = i+1
                 equity_path.append(equity)
-            elif ret_prev <= -min_move_bps:
-                # Long at next bar open
+            elif ret_prev_bps <= -min_move_bps:
                 entry_px = row_next["open"]
-                rng_atr = df.loc[i, "atr"]
-                sl = entry_px - sl_mult * rng_atr
-                tp = entry_px + tp_mult * rng_atr
-                trade = Trade(entry_time=row_next["date"], direction=+1,
-                              entry_price=entry_px, sl=sl, tp=tp)
-                equity *= (1.0 - fee_rate)  # entry fee
+                rng = df.loc[i, "atr"]
+                sl = entry_px - sl_mult * rng
+                tp = entry_px + tp_mult * rng
+                trade = Trade(entry_time=row_next["date"], direction=+1, entry_price=entry_px, sl=sl, tp=tp)
+                equity *= (1.0 - fee_rate)
                 in_pos = True
                 last_entry_idx = i+1
                 equity_path.append(equity)
 
-    # if still in position at the end, flat on final close (after last bar)
     if in_pos and trade is not None:
         last_row = df.iloc[-1]
         px = last_row["close"]
@@ -376,17 +440,14 @@ def run_strategy(
         trade.reason = "EOD"
         gross_ret = trade.direction * (px / trade.entry_price - 1.0)
         equity *= (1.0 + gross_ret)
-        equity *= (1.0 - fee_rate)  # exit fee
+        equity *= (1.0 - fee_rate)
         trades.append(trade)
         equity_path.append(equity)
 
-    # stats
     rets = []
     wins = 0
     for t in trades:
         r = t.direction * (t.exit_price / t.entry_price - 1.0)
-        # fees per side reduce return multiplicatively; approximate as:
-        # (1 - fee)*(1 + r)*(1 - fee) - 1  => but we already applied fees to equity path.
         rets.append(r)
         if r > 0:
             wins += 1
@@ -405,7 +466,10 @@ def run_strategy(
         "win_rate": win_rate,
     }
 
-# ---------- Grid search runner ----------
+# -------- Grid search --------
+def parse_csv_floats(s: str) -> List[float]:
+    return [float(x.strip()) for x in s.split(",") if x.strip()]
+
 def grid_search(
     df: pd.DataFrame,
     min_move_bps: float,
@@ -432,36 +496,36 @@ def grid_search(
             if (best is None) or (res["final_equity"] > best["final_equity"]):
                 best = res
                 best_params = (sl, tp)
-    # sort leaderboard by final equity desc
     leaderboard.sort(key=lambda x: x[2], reverse=True)
     return best, best_params, leaderboard
 
-# ---------- CLI / Main ----------
-def parse_csv_floats(s: str) -> List[float]:
-    return [float(x.strip()) for x in s.split(",") if x.strip()]
-
+# -------- CLI / Main --------
 def main():
     parser = argparse.ArgumentParser(description="Hourly reversal backtest (no leverage, fee-aware, no same-bar exits).")
-    parser.add_argument("--symbols", type=str, default="BTCUSDT,ETHUSDT,SOLUSDT", help="Comma-separated symbols (Binance-style keys for mapping).")
-    parser.add_argument("--start", type=str, default="2023-01-01", help="Start date (YYYY-MM-DD, UTC).")
-    parser.add_argument("--end", type=str, default=datetime.now(tz=UTC).strftime("%Y-%m-%d"), help="End date (YYYY-MM-DD, UTC, exclusive).")
+    parser.add_argument("--symbols", type=str, default="BTCUSDT,ETHUSDT,SOLUSDT", help="Comma-separated symbols (Binance-style keys).")
+    parser.add_argument("--start", type=str, default="2023-01-01", help="Start date: YYYY-MM-DD, now, today, yesterday, or -Nd/-Nm/-Ny.")
+    parser.add_argument("--end", type=str, default="now", help="End date: YYYY-MM-DD, now, today, yesterday, or -Nd/-Nm/-Ny.")
     parser.add_argument("--fee-bps", type=float, default=8.0, help="Per-side trading fee in bps (e.g., 8 = 0.08%). No leverage.")
-    parser.add_argument("--min-move-bps", type=float, default=50.0, help="Prior-bar absolute move threshold (in bps) to trigger reversal entry.")
+    parser.add_argument("--min-move-bps", type=float, default=50.0, help="Prior-bar absolute move threshold (bps) to trigger reversal entry.")
     parser.add_argument("--sl-mults", type=parse_csv_floats, default=parse_csv_floats("0.75,1.00,1.50,2.00"), help="CSV of ATR SL multipliers.")
     parser.add_argument("--tp-mults", type=parse_csv_floats, default=parse_csv_floats("0.75,1.25,1.50,2.00"), help="CSV of ATR TP multipliers.")
     parser.add_argument("--atr-period", type=int, default=14, help="ATR period.")
+    parser.add_argument("--provider", type=str, default="auto", help="Data source: auto|binance|ccxt|yf")
     args = parser.parse_args()
 
     syms = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
-    start_dt = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=UTC)
-    end_dt = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=UTC) + timedelta(days=1)  # make end exclusive
+    start_dt = parse_date_like(args.start)
+    end_dt_inclusive = parse_date_like(args.end)
+    # make end exclusive for fetching ranges
+    end_dt = end_dt_inclusive + timedelta(days=1) if end_dt_inclusive.hour == 0 and end_dt_inclusive.minute == 0 and end_dt_inclusive.second == 0 else end_dt_inclusive
+    end_dt = min(end_dt, datetime.now(tz=UTC))  # don't ask the future
 
     print("Running hourly reversal backtest...")
     results_summary = []
 
     for s in syms:
         print(f"\n=== {s} ===")
-        df = fetch_data(s, start_dt, end_dt)
+        df = fetch_data(s, start_dt, end_dt, provider=args.provider)
         if df.empty:
             print("  No data. Skipping.")
             results_summary.append([s, 0, 0.0, 0.0, 0.0, 100.0, "n/a"])
@@ -482,7 +546,6 @@ def main():
         print(f"    Trades: {ntr}, Win%: {best['win_rate']:.1f}%, AvgR: {best['avg_ret']*100:.2f}%, MedR: {best['med_ret']*100:.2f}%")
         print(f"    Final equity: ${best['final_equity']:.2f}")
 
-        # small leaderboard preview (top 5)
         topn = min(5, len(board))
         hdr = ["SLxATR", "TPxATR", "FinalEq", "#Trades", "Win%"]
         rows = [(sl, tp, f"{feq:.2f}", n, f"{wr:.1f}") for (sl, tp, feq, n, wr) in board[:topn]]
@@ -490,7 +553,6 @@ def main():
 
         results_summary.append([s, ntr, best["win_rate"], best["avg_ret"]*100.0, best["med_ret"]*100.0, best["final_equity"], f"{best_sl:.2f}/{best_tp:.2f}"])
 
-    # Portfolio-style summary table
     print("\n=== Summary ===")
     hdr = ["Symbol", "#Trades", "Win%", "AvgR %", "MedR %", "FinalEq $", "Best SL/TP (xATR)"]
     print(tabulate(results_summary, headers=hdr, tablefmt="github"))
