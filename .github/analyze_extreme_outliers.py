@@ -2,798 +2,534 @@
 # -*- coding: utf-8 -*-
 
 """
-Extreme Outlier Hourly Reversal Backtest (No Leverage, Fee-Aware, No Same-Bar Exits)
-with:
-  - Time-of-day gating (UTC hours whitelist)
-  - Dynamic TP/SL scaling by |Z|
-  - Regime filter via rolling volatility percentile
-  - Cross-symbol confirmation (e.g., suppress SOL long if BTC is overbought)
-
-Data:
-  - CCXT via OKX by default (region-friendly), purely hourly OHLCV.
-  - No Binance / Yahoo fallback to avoid rate/region issues.
-
-Install (locally or in CI):
-  pip install --upgrade pip
-  pip install pandas numpy ccxt python-dateutil
-
-Usage example:
-  python .github/analyze_extreme_outliers.py \
-      --symbols BTCUSDT ETHUSDT SOLUSDT \
-      --start 2023-01-01 --end now \
-      --fee-bps 8 --exchange okx --side both \
-      --utc-hours 0,1,2,12,13,14,15,16,17,18,23 \
-      --vol-pctl-min 40 --vol-lookback 336 \
-      --dynamic-z-ref 3.5 --dynamic-scale-min 0.8 --dynamic-scale-max 1.6 \
-      --confirm-map SOLUSDT:BTCUSDT --confirm-z 2.5 --confirm-mode opposite \
-      --print-top 7
+Extreme outlier reversal backtest (hourly), with robust CCXT fetching, caching, and retries.
+- No leverage (fees not leveraged)
+- No same-bar exits
+- ATR-based SL/TP (grid search)
+- Optional dynamic scaling of z-thresholds by volatility regime
+- Cross-confirmation (e.g., ETH/SOL require BTC to be opposite/extreme)
+- Multi-exchange CCXT fallback (OKX -> Bybit -> Coinbase)
+- Local parquet cache to speed up CI runs
 """
 
-from __future__ import annotations
-
 import argparse
-import json
+import os
+import sys
+import time
 import math
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Tuple, Optional, Set
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-try:
-    import ccxt
-except Exception as e:
-    raise SystemExit("ccxt is required. Install with: pip install ccxt") from e
+# ---- Constants & small utils -------------------------------------------------
 
 UTC = timezone.utc
+CACHE_DIR = os.environ.get("CANDLE_CACHE_DIR", ".cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
 
-
-# ---------------------------
-# Utilities
-# ---------------------------
-
-def parse_date(s: str) -> datetime:
-    """Parse YYYY-MM-DD or 'now' (UTC)."""
+def parse_iso_date(s: str) -> datetime:
     if s.lower() == "now":
-        return datetime.now(tz=UTC)
+        return datetime.now(UTC)
     return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=UTC)
 
-
-def symbol_to_ccxt(sym: str) -> str:
-    """Convert common 'BTCUSDT' to CCXT 'BTC/USDT' if needed."""
-    if "/" in sym:
-        return sym
-    if sym.endswith("USDT"):
-        return sym[:-4] + "/USDT"
-    if sym.endswith("USD"):
-        return sym[:-3] + "/USD"
-    # Fallback: try to insert slash before last 3-4 chars
-    if len(sym) > 4:
-        return sym[:-4] + "/" + sym[-4:]
-    return sym
-
-
-def rolling_zscore(series: pd.Series, window: int) -> pd.Series:
-    """Z-score with rolling mean/std (unbiased)."""
-    mean = series.rolling(window, min_periods=window).mean()
-    std = series.rolling(window, min_periods=window).std(ddof=1)
-    z = (series - mean) / std
-    return z.replace([np.inf, -np.inf], np.nan)
-
-
-def true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        (high - low).abs(),
-        (high - prev_close).abs(),
-        (low - prev_close).abs()
-    ], axis=1).max(axis=1)
-    return tr
-
-
-def wilder_smooth(series: pd.Series, period: int) -> pd.Series:
-    """Wilder's smoothing (EMA-like) for ATR."""
-    if len(series) == 0:
-        return series
-    out = series.copy()
-    first = min(period, len(series))
-    out.iloc[:first] = series.iloc[:first].mean()
-    for i in range(first, len(series)):
-        out.iloc[i] = (out.iloc[i - 1] * (period - 1) + series.iloc[i]) / period
-    return out
-
-
-def compute_atr(df: pd.DataFrame, period: int) -> pd.Series:
-    tr = true_range(df["high"], df["low"], df["close"])
-    return wilder_smooth(tr, period)
-
-
-def bollinger_bands(close: pd.Series, period: int, k: float) -> Tuple[pd.Series, pd.Series]:
-    ma = close.rolling(period, min_periods=period).mean()
-    sd = close.rolling(period, min_periods=period).std(ddof=1)
-    upper = ma + k * sd
-    lower = ma - k * sd
-    return lower, upper
-
-
-def realized_vol(close: pd.Series, lookback: int) -> pd.Series:
-    """Rolling annualized-ish RV proxy over 'lookback' hours (use simple std)."""
-    ret1 = np.log(close / close.shift(1))
-    rv = ret1.rolling(lookback, min_periods=lookback).std(ddof=1) * np.sqrt(24 * 365)
-    return rv
-
-
-def to_pctl(series: pd.Series, lookback: int) -> pd.Series:
-    """Rolling percentile rank (0-100)."""
-    def pct_rank(x):
-        last = x.iloc[-1]
-        rank = (x <= last).mean()
-        return rank * 100.0
-    return series.rolling(lookback, min_periods=lookback).apply(pct_rank, raw=False)
-
-
-# ---------------------------
-# Data Fetch (CCXT / OKX)
-# ---------------------------
-
-def fetch_ohlcv_ccxt(
-    exchange_id: str,
-    symbol: str,
-    timeframe: str,
-    since: int,
-    until: int,
-    limit: int = 1000
-) -> List[List[float]]:
-    """
-    Paginate hourly OHLCV via CCXT from 'since' (ms) up to 'until' (ms), inclusive when aligned.
-    """
-    ex = getattr(ccxt, exchange_id)()
-    ex.load_markets()
-    out: List[List[float]] = []
-    tf_ms = ex.parse_timeframe(timeframe) * 1000
-    t = since
-
-    while True:
-        batch = ex.fetch_ohlcv(symbol, timeframe=timeframe, since=t, limit=limit)
-        if not batch:
-            break
-        # Filter to 'until'
-        batch = [row for row in batch if row[0] <= until]
-        if not batch:
-            break
-        out.extend(batch)
-        t_next = batch[-1][0] + tf_ms
-        if t_next > until:
-            break
-        if t_next <= t:
-            break
-        t = t_next
-
-    return out
-
-
-def get_hourly_df(symbol_raw: str, start_dt: datetime, end_dt: datetime,
-                  exchange_id: str = "okx") -> pd.DataFrame:
-    sym = symbol_to_ccxt(symbol_raw)
-    since = int(start_dt.timestamp() * 1000)
-    until = int(end_dt.timestamp() * 1000)
-    data = fetch_ohlcv_ccxt(exchange_id, sym, "1h", since, until, limit=1000)
-    if not data:
-        raise RuntimeError(f"No OHLCV returned for {symbol_raw} via {exchange_id}.")
-
-    df = pd.DataFrame(data, columns=["ts", "open", "high", "low", "close", "volume"])
-    df["ts"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
-    df = df.drop_duplicates("ts").set_index("ts").sort_index()
-    return df
-
-
-# ---------------------------
-# Strategy: Extreme Outlier Reversal (XOR) + refinements
-# ---------------------------
-
-@dataclass
-class Params:
-    ret_lookback: int
-    ret_horizons: Tuple[int, ...]
-    ret_z: float
-    vol_lookback: int
-    vol_z: float
-    bb_period: int
-    bb_k: float
-    atr_period: int
-    sl_atr: float
-    tp_atr: float
-    cooldown_bars: int
-    min_hold_bars: int
-    side: str
-    # NEW
-    utc_hours: Optional[Set[int]]                 # None = no gating
-    vol_pctl_min: Optional[float]                 # regime filter minimum percentile (0-100) or None
-    vol_pctl_lookback: Optional[int]
-    dynamic_z_ref: Optional[float]                # reference |Z| for scaling
-    dynamic_scale_min: float                      # clamp lower bound for scale
-    dynamic_scale_max: float                      # clamp upper bound for scale
-    confirm_symbol: Optional[str]                 # symbol name for cross confirmation (e.g., BTCUSDT)
-    confirm_z: Optional[float]                    # z threshold on confirm symbol
-    confirm_mode: Optional[str]                   # 'opposite' or 'same' (see logic below)
-
-
-@dataclass
-class Result:
-    final_equity: float
-    n_trades: int
-    win_rate: float
-    avg_r_pct: float
-    med_r_pct: float
-    params: Params
-
-
-def prepare_features(df: pd.DataFrame, p: Params) -> pd.DataFrame:
-    out = df.copy()
-    out["atr"] = compute_atr(out, p.atr_period)
-
-    # Returns and horizons
-    out["ret1"] = np.log(out["close"] / out["close"].shift(1))
-    for h in p.ret_horizons:
-        out[f"ret_{h}h"] = out["ret1"].rolling(h, min_periods=h).sum()
-
-    # Z-scores
-    for h in p.ret_horizons:
-        r = out[f"ret_{h}h"]
-        out[f"z_{h}h"] = rolling_zscore(r, p.ret_lookback)
-
-    # Volume Z-score
-    out["vol_z"] = rolling_zscore(out["volume"], p.vol_lookback)
-
-    # Bollinger
-    lower, upper = bollinger_bands(out["close"], p.bb_period, p.bb_k)
-    out["bb_lower"] = lower
-    out["bb_upper"] = upper
-
-    # Realized vol & percentile for regime filtering
-    if p.vol_pctl_lookback:
-        rv = realized_vol(out["close"], p.vol_pctl_lookback)
-        out["rv"] = rv
-        out["rv_pctl"] = to_pctl(rv, p.vol_pctl_lookback)
-    else:
-        out["rv_pctl"] = np.nan
-
-    return out
-
-
-def signal_row(row: pd.Series, horizons: Tuple[int, ...], z_thr: float) -> int:
-    """
-    Return +1 (long), -1 (short), or 0 (none) based on extreme z-scores and band breach.
-    Require any horizon to exceed |z_thr|.
-    """
-    z_values = [row.get(f"z_{h}h", np.nan) for h in horizons]
-    if np.any(np.isnan(z_values)):
-        return 0
-    z_min = np.nanmin(z_values)
-    z_max = np.nanmax(z_values)
-
-    long_ok = (z_min <= -z_thr) and (row["close"] <= row.get("bb_lower", np.nan))
-    short_ok = (z_max >= z_thr) and (row["close"] >= row.get("bb_upper", np.nan))
-
-    if long_ok and not short_ok:
-        return +1
-    if short_ok and not long_ok:
-        return -1
-    return 0
-
-
-def dynamic_scale_from_z(abs_z: float, z_ref: float, smin: float, smax: float) -> float:
-    """Scale proportional to |z| / z_ref, clamped."""
-    if z_ref is None or z_ref <= 0:
-        return 1.0
-    raw = abs_z / z_ref
-    return max(smin, min(smax, raw))
-
-
-def compute_bar_z_extreme(row: pd.Series, horizons: Tuple[int, ...]) -> float:
-    """Return the *most extreme* |z| across horizons for this bar (nan-safe)."""
-    zs = [row.get(f"z_{h}h", np.nan) for h in horizons]
-    zs = [z for z in zs if np.isfinite(z)]
-    if not zs:
-        return float("nan")
-    return float(max(abs(z) for z in zs))
-
-
-def backtest(df: pd.DataFrame,
-             p: Params,
-             fee_bps_side: float,
-             confirm_df: Optional[pd.DataFrame] = None) -> Result:
-    """
-    Discrete 1h bars, next-open entry, ATR-based SL/TP, no same-bar exit.
-    Fee model: subtract (fee_bps_side * 2) bps per round-trip on notional.
-    Enhancements: time gating, regime filter, dynamic scaling, cross-symbol confirmation.
-    """
-    data = prepare_features(df, p)
-
-    # If cross-confirmation is used, prepare its features minimally (only z-values and bands)
-    if confirm_df is not None:
-        c = confirm_df.copy()
-        # match index via outer join later; compute 1/3/6h returns using the same lookbacks/horizons
-        c["ret1"] = np.log(c["close"] / c["close"].shift(1))
-        for h in p.ret_horizons:
-            c[f"ret_{h}h"] = c["ret1"].rolling(h, min_periods=h).sum()
-            c[f"z_{h}h"] = rolling_zscore(c[f"ret_{h}h"], p.ret_lookback)
-        # We don't require its Bollinger/vol_z for confirmation
-        confirm_df = c
-
-    # Build primary signals with all gating
-    sig = []
-    for ts, row in data.iterrows():
-        # Time-of-day gating
-        if p.utc_hours is not None and ts.hour not in p.utc_hours:
-            sig.append(0); continue
-
-        # Regime filter
-        if p.vol_pctl_min is not None and np.isfinite(row.get("rv_pctl", np.nan)):
-            if row["rv_pctl"] < p.vol_pctl_min:
-                sig.append(0); continue
-
-        # Require ATR + bands ready
-        if np.isnan(row["atr"]) or np.isnan(row["bb_lower"]) or np.isnan(row["bb_upper"]):
-            sig.append(0); continue
-
-        # Require volume attention
-        if not (row.get("vol_z", 0) >= p.vol_z):
-            sig.append(0); continue
-
-        s = signal_row(row, p.ret_horizons, p.ret_z)
-
-        # Side restriction
-        if p.side == "long" and s == -1: s = 0
-        if p.side == "short" and s == +1: s = 0
-
-        # Cross-symbol confirmation (optional)
-        if s != 0 and confirm_df is not None and p.confirm_z is not None and p.confirm_mode in ("opposite", "same"):
-            # Get confirm bar; align on timestamp
-            if ts in confirm_df.index:
-                crow = confirm_df.loc[ts]
-                # Max |z| and sign on confirm symbol
-                czs = [crow.get(f"z_{h}h", np.nan) for h in p.ret_horizons]
-                czs = [z for z in czs if np.isfinite(z)]
-                if czs:
-                    cmax = max(czs)
-                    cmin = min(czs)
-                    cabs = max(abs(c) for c in czs)
-                    # Modes:
-                    #  - 'opposite': for LONG on target, require confirm symbol NOT strongly overbought
-                    #                (i.e., max z < confirm_z). For SHORT, require NOT strongly oversold
-                    #                (i.e., min z > -confirm_z). This avoids fading when the leader is also extreme in the same direction.
-                    #  - 'same':     require confirm symbol to be extreme in the *same* direction
-                    if p.confirm_mode == "opposite":
-                        if s > 0 and cmax >= p.confirm_z:  # confirm is very positive -> skip long fade
-                            s = 0
-                        if s < 0 and cmin <= -p.confirm_z: # confirm is very negative -> skip short fade
-                            s = 0
-                    elif p.confirm_mode == "same":
-                        if s > 0 and cmin > -p.confirm_z:
-                            s = 0
-                        if s < 0 and cmax < p.confirm_z:
-                            s = 0
-                else:
-                    s = 0  # no confirm data for this ts -> skip
-            else:
-                s = 0  # not aligned -> skip
-
-        sig.append(s)
-
-    data["sig"] = sig
-
-    equity = 100.0
-    n_trades = 0
-    wins = 0
-    rets_pct: List[float] = []
-    fee_rt = (fee_bps_side * 2.0) / 1e4  # round-trip as fraction
-
-    i = 0
-    idx = data.index
-    n = len(data)
-    cooldown_until: Optional[pd.Timestamp] = None
-
-    while i < n - 1:
-        ts = idx[i]
-        if cooldown_until is not None and ts < cooldown_until:
-            i += 1
-            continue
-
-        s = data["sig"].iloc[i]
-        if s == 0:
-            i += 1
-            continue
-
-        # Entry next bar open
-        entry_i = i + 1
-        if entry_i >= n:
-            break
-        entry = float(data["open"].iloc[entry_i])
-        atr = float(data["atr"].iloc[i])
-        if not math.isfinite(entry) or not math.isfinite(atr) or atr <= 0:
-            i += 1
-            continue
-
-        # Dynamic scaling for SL/TP by |Z|
-        scale = 1.0
-        if p.dynamic_z_ref is not None and p.dynamic_z_ref > 0:
-            bar_abs_z = compute_bar_z_extreme(data.iloc[i], p.ret_horizons)
-            if math.isfinite(bar_abs_z):
-                scale = dynamic_scale_from_z(bar_abs_z, p.dynamic_z_ref,
-                                             p.dynamic_scale_min, p.dynamic_scale_max)
-
-        slx = p.sl_atr * scale
-        tpx = p.tp_atr * scale
-
-        # Levels
-        if s > 0:
-            stop = entry - slx * atr
-            take = entry + tpx * atr
-        else:
-            stop = entry + slx * atr
-            take = entry - tpx * atr
-
-        # Walk forward; no same-bar exits: start from entry_i + min_hold_bars
-        j = max(entry_i + p.min_hold_bars, entry_i + 1)
-        exit_price = None
-        exit_i = None
-        while j < n:
-            hi = float(data["high"].iloc[j])
-            lo = float(data["low"].iloc[j])
-
-            if s > 0:
-                hit_tp = hi >= take
-                hit_sl = lo <= stop
-            else:
-                hit_tp = lo <= take
-                hit_sl = hi >= stop
-
-            if hit_tp and hit_sl:
-                # conservative tie-breaker: adverse first
-                exit_price = stop
-                exit_i = j
-                break
-            elif hit_tp:
-                exit_price = take
-                exit_i = j
-                break
-            elif hit_sl:
-                exit_price = stop
-                exit_i = j
-                break
-
-            j += 1
-
-        if exit_price is None:
-            exit_price = float(data["close"].iloc[-1])
-            exit_i = n - 1
-
-        gross_r = (exit_price / entry - 1.0) if s > 0 else (1.0 - exit_price / entry)
-        net_r = gross_r - fee_rt
-        rets_pct.append(net_r * 100.0)
-        equity *= (1.0 + net_r)
-
-        n_trades += 1
-        if net_r > 0:
-            wins += 1
-
-        cooldown_until = idx[min(exit_i + p.cooldown_bars, n - 1)]
-        i = exit_i + 1
-
-    win_rate = (wins / n_trades * 100.0) if n_trades > 0 else 0.0
-    avg_r = float(np.mean(rets_pct)) if rets_pct else 0.0
-    med_r = float(np.median(rets_pct)) if rets_pct else 0.0
-
-    return Result(
-        final_equity=equity,
-        n_trades=n_trades,
-        win_rate=win_rate,
-        avg_r_pct=avg_r,
-        med_r_pct=med_r,
-        params=p
+def to_ms(dt: datetime) -> int:
+    return int(dt.timestamp() * 1000)
+
+def human_dt(ms: int) -> str:
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).isoformat()
+
+def log(msg: str) -> None:
+    print(msg, flush=True)
+
+# ---- Exchange client (ccxt) --------------------------------------------------
+
+def make_ccxt_client(ex_name: str, timeout_ms: int):
+    import ccxt
+    cls = getattr(ccxt, ex_name)
+    return cls({
+        "enableRateLimit": True,
+        "timeout": timeout_ms,
+    })
+
+def ccxt_name_for_symbol(ex: str, sym: str) -> str:
+    # We use USDT perpetual spot tickers. For CCXT spot tickers:
+    # OKX/Bybit/Coinbase use "BTC/USDT", "ETH/USDT", "SOL/USDT".
+    base = sym.upper().replace("USDT", "")
+    return f"{base}/USDT"
+
+def parquet_path(symbol: str, start: datetime, end: datetime, ex: str) -> str:
+    return os.path.join(
+        CACHE_DIR,
+        f"{symbol}_{ex}_{start.date()}_{end.date()}_1h.parquet"
     )
 
+def safe_sleep(seconds: float):
+    try:
+        time.sleep(seconds)
+    except KeyboardInterrupt:
+        raise
 
-# ---------------------------
-# Parameter Search
-# ---------------------------
+def fetch_ccxt_ohlcv_paginated(
+    ex,
+    market: str,
+    timeframe: str,
+    since_ms: int,
+    until_ms: int,
+    limit_per_call: int = 1000,
+    max_retries: int = 6,
+    backoff_base: float = 0.9,
+) -> List[List[float]]:
+    """Fetch OHLCV by walking forward with retries/backoff."""
+    out: List[List[float]] = []
+    cursor = since_ms
+    last_ts = None
+    while True:
+        if cursor >= until_ms:
+            break
 
-def search_params(df: pd.DataFrame,
-                  base_side: str,
-                  fee_bps: float,
-                  confirm_df: Optional[pd.DataFrame],
-                  base_params: Dict) -> Tuple[Result, List[Result]]:
-    """
-    Compact grid over reasonable ranges to find robust regions.
-    Includes gating/regime/dynamic/confirm from base_params.
-    """
-    # Core grid
-    ret_lookbacks = [720, 1440]          # 30d, 60d (1h bars)
-    ret_horizon_sets = [(1, 3, 6)]
-    z_thrs = [3.0, 3.5, 4.0]
-    vol_lookbacks = [720, 1440]
-    vol_zs = [1.0, 1.5]
-    bb_periods = [100, 200]
-    bb_ks = [1.5, 2.0]
-    atr_periods = [14, 21]
-    sl_multiples = [1.5, 2.0, 2.5]
-    tp_multiples = [2.0, 2.5, 3.0]
-    cooldowns = [4, 8]
-    min_hold = [1]
-    sides = [base_side] if base_side in ("long", "short") else ["both"]
-
-    all_results: List[Result] = []
-    best: Optional[Result] = None
-
-    for side in sides:
-        for rl in ret_lookbacks:
-            for rhs in ret_horizon_sets:
-                for zt in z_thrs:
-                    for vlb in vol_lookbacks:
-                        for vz in vol_zs:
-                            for bbp in bb_periods:
-                                for bbk in bb_ks:
-                                    for ap in atr_periods:
-                                        for slx in sl_multiples:
-                                            for tpx in tp_multiples:
-                                                for cd in cooldowns:
-                                                    for mh in min_hold:
-                                                        p = Params(
-                                                            ret_lookback=rl,
-                                                            ret_horizons=rhs,
-                                                            ret_z=zt,
-                                                            vol_lookback=vlb,
-                                                            vol_z=vz,
-                                                            bb_period=bbp,
-                                                            bb_k=bbk,
-                                                            atr_period=ap,
-                                                            sl_atr=slx,
-                                                            tp_atr=tpx,
-                                                            cooldown_bars=cd,
-                                                            min_hold_bars=mh,
-                                                            side=side if side != "both" else "both",
-                                                            # Carry-through refinements
-                                                            utc_hours=base_params.get("utc_hours"),
-                                                            vol_pctl_min=base_params.get("vol_pctl_min"),
-                                                            vol_pctl_lookback=base_params.get("vol_pctl_lookback"),
-                                                            dynamic_z_ref=base_params.get("dynamic_z_ref"),
-                                                            dynamic_scale_min=base_params.get("dynamic_scale_min"),
-                                                            dynamic_scale_max=base_params.get("dynamic_scale_max"),
-                                                            confirm_symbol=base_params.get("confirm_symbol"),
-                                                            confirm_z=base_params.get("confirm_z"),
-                                                            confirm_mode=base_params.get("confirm_mode"),
-                                                        )
-                                                        r = backtest(df, p, fee_bps_side=fee_bps, confirm_df=confirm_df)
-                                                        all_results.append(r)
-                                                        if (best is None) or (r.final_equity > best.final_equity):
-                                                            best = r
-    assert best is not None
-    return best, all_results
-
-
-def summarize_top(results: List[Result], k: int = 5) -> pd.DataFrame:
-    res = sorted(results, key=lambda r: r.final_equity, reverse=True)[:k]
-    rows = []
-    for r in res:
-        pr = r.params
-        rows.append({
-            "FinalEq": round(r.final_equity, 2),
-            "Trades": r.n_trades,
-            "Win%": round(r.win_rate, 1),
-            "AvgR%": round(r.avg_r_pct, 3),
-            "MedR%": round(r.med_r_pct, 3),
-            "Side": pr.side,
-            "Z": pr.ret_z,
-            "retLB": pr.ret_lookback,
-            "volLB": pr.vol_lookback,
-            "BBp": pr.bb_period,
-            "BBk": pr.bb_k,
-            "ATR": pr.atr_period,
-            "SLx": pr.sl_atr,
-            "TPx": pr.tp_atr,
-            "CD": pr.cooldown_bars,
-            "MH": pr.min_hold_bars,
-            "UTC_Hrs": ",".join(map(str, sorted(pr.utc_hours))) if pr.utc_hours else "all",
-            "VolPctlMin": pr.vol_pctl_min if pr.vol_pctl_min is not None else "none",
-            "DynZref": pr.dynamic_z_ref if pr.dynamic_z_ref is not None else "none",
-            "DynMin": pr.dynamic_scale_min,
-            "DynMax": pr.dynamic_scale_max,
-            "Confirm": pr.confirm_symbol if pr.confirm_symbol else "none",
-            "CMode": pr.confirm_mode if pr.confirm_mode else "none",
-            "Cz": pr.confirm_z if pr.confirm_z is not None else "none",
-        })
-    return pd.DataFrame(rows)
-
-
-# ---------------------------
-# CLI
-# ---------------------------
-
-def parse_confirm_map(s: Optional[str]) -> Dict[str, str]:
-    """
-    Parse "A:B,C:D" into {"A": "B", "C": "D"}.
-    """
-    out = {}
-    if not s:
-        return out
-    parts = [p.strip() for p in s.split(",") if p.strip()]
-    for p in parts:
-        if ":" in p:
-            k, v = p.split(":", 1)
-            out[k.strip()] = v.strip()
+        for attempt in range(max_retries):
+            try:
+                # Some exchanges support "until"; ccxt fetchOHLCV signature is (symbol,timeframe,since,limit,params)
+                rows = ex.fetch_ohlcv(market, timeframe=timeframe, since=cursor, limit=limit_per_call)
+                if not rows:
+                    # Avoid infinite loops
+                    cursor += 60 * 60 * 1000
+                    break
+                # ensure strictly increasing and within range
+                dedup = []
+                for r in rows:
+                    ts = int(r[0])
+                    if ts <= (last_ts or -1):
+                        continue
+                    if ts > until_ms:
+                        break
+                    dedup.append(r)
+                    last_ts = ts
+                out.extend(dedup)
+                if len(rows) < limit_per_call:
+                    # likely reached end
+                    cursor = (last_ts or cursor) + 1
+                else:
+                    cursor = (last_ts or cursor) + 1
+                # small pacing to be nice
+                safe_sleep(0.05)
+                break
+            except Exception as e:
+                # request timeout / DDoS / transient => backoff & retry
+                if attempt == max_retries - 1:
+                    raise
+                delay = (2 ** attempt) * backoff_base
+                safe_sleep(delay)
+        # loop continues until end
     return out
 
+def fetch_multi_exchange_hourly(
+    symbol: str,
+    start_dt: datetime,
+    end_dt: datetime,
+    exchanges: List[str],
+    timeout_ms: int,
+    limit_per_call: int,
+    use_cache: bool,
+) -> pd.DataFrame:
+    """Try exchanges in order; cache by exchange for reproducibility."""
+    errs = []
+    for ex_name in exchanges:
+        cache_file = parquet_path(symbol, start_dt, end_dt, ex_name)
+        if use_cache and os.path.isfile(cache_file):
+            df = pd.read_parquet(cache_file)
+            # guard against empty cache
+            if not df.empty:
+                return df
+
+        try:
+            import ccxt  # ensure available before constructing
+            ex = make_ccxt_client(ex_name, timeout_ms)
+            mkt = ccxt_name_for_symbol(ex_name, symbol)
+            # load markets for robust symbol mapping
+            ex.load_markets()
+            if mkt not in ex.markets:
+                # Try alternate symbol resolutions
+                # e.g., Coinbase might use USDT but sometimes liquidity is on USD.
+                alt = mkt.replace("/USDT", "/USD")
+                if alt in ex.markets:
+                    mkt = alt
+            log(f"  [{ex_name}] {symbol} 1h {start_dt.isoformat()} → {end_dt.isoformat()}")
+            rows = fetch_ccxt_ohlcv_paginated(
+                ex, mkt, "1h", to_ms(start_dt), to_ms(end_dt),
+                limit_per_call=limit_per_call
+            )
+            if not rows:
+                raise RuntimeError(f"{ex_name} returned no OHLCV rows.")
+            df = pd.DataFrame(rows, columns=["ts","open","high","low","close","volume"])
+            df["ts"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
+            df = df.set_index("ts").sort_index()
+            # enforce complete hourly alignment (optional)
+            df = df[~df.index.duplicated(keep="first")]
+            if not df.empty and use_cache:
+                df.to_parquet(cache_file)
+            return df
+        except Exception as e:
+            errs.append(f"{ex_name}: {repr(e)}")
+            log(f"    {ex_name} failed: {e}; trying next exchange...")
+            continue
+    raise RuntimeError("All exchanges failed. Errors: " + " | ".join(errs))
+
+# ---- Indicators & signals ----------------------------------------------------
+
+def rolling_atr(df: pd.DataFrame, lookback: int) -> pd.Series:
+    high = df["high"].astype(float)
+    low = df["low"].astype(float)
+    close = df["close"].astype(float)
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        (high - low),
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.rolling(lookback, min_periods=lookback).mean()
+
+def rolling_zscore(x: pd.Series, lookback: int) -> pd.Series:
+    r = x - x.rolling(lookback).mean()
+    std = x.rolling(lookback).std(ddof=0)
+    return r / std
+
+@dataclass
+class DynParams:
+    z_thresh: float
+    scale_lo: float
+    scale_hi: float
+    regime_lookback: int
+    vol_pctl_min: Optional[float]  # e.g. 20 (percentile) or None
+
+def build_signals(
+    df: pd.DataFrame,
+    zlk: int,
+    dyn: DynParams,
+    utc_hours: Optional[List[int]],
+    side: str = "both",
+) -> pd.DataFrame:
+    """Create extreme-outlier entry intent (not applying confirm yet)."""
+    out = df.copy()
+    out["ret1"] = np.log(out["close"]).diff()
+    out["z"] = rolling_zscore(out["ret1"], zlk)
+
+    # Volatility regime via rolling std percentile
+    if dyn.vol_pctl_min is not None:
+        vol = out["ret1"].rolling(dyn.regime_lookback).std(ddof=0)
+        # Percentile filter: compute rolling rank vs trailing dist approx using expanding percentile
+        # Cheap proxy: normalize by expanding max; still useful as a low-pass filter.
+        pctl = (vol / vol.expanding().max()).clip(0, 1) * 100.0
+        out["in_regime"] = pctl >= float(dyn.vol_pctl_min)
+    else:
+        out["in_regime"] = True
+
+    # Dynamic scaling: scale threshold by ATR regime (simple proxy using rolling std of returns)
+    scale = out["ret1"].rolling(dyn.regime_lookback).std(ddof=0)
+    scale_norm = (scale / scale.expanding().median().fillna(method="bfill")).clip(dyn.scale_lo, dyn.scale_hi)
+    out["z_dyn"] = out["z"] / scale_norm
+
+    # Entry intents
+    zt = float(dyn.z_thresh)
+    go_long  = (out["z_dyn"] <= -zt)
+    go_short = (out["z_dyn"] >=  zt)
+
+    if side == "long":
+        go_short = pd.Series(False, index=out.index)
+    elif side == "short":
+        go_long  = pd.Series(False, index=out.index)
+
+    out["want_long"]  = go_long & out["in_regime"]
+    out["want_short"] = go_short & out["in_regime"]
+
+    # Restrict to certain UTC hours if provided
+    if utc_hours:
+        hh = out.index.tz_convert(UTC).hour
+        mask = hh.isin(utc_hours)
+        out["want_long"]  &= mask
+        out["want_short"] &= mask
+
+    return out
+
+def apply_cross_confirm(
+    intents: Dict[str, pd.DataFrame],
+    confirm_map: Dict[str, str],
+    mode: str,
+    z_needed: float
+) -> None:
+    """
+    Modify intents in place using confirmation rules.
+    mode: "opposite" => e.g., if ETH wants long, require BTC z_dyn >= +z_needed
+          "same"     => e.g., if ETH wants long, require BTC z_dyn <= -z_needed
+    """
+    for sym, ref in confirm_map.items():
+        if sym not in intents or ref not in intents:
+            continue
+        A = intents[sym]
+        B = intents[ref]
+        if mode == "opposite":
+            A["want_long"]  &= B["z_dyn"] >= +z_needed
+            A["want_short"] &= B["z_dyn"] <= -z_needed
+        elif mode == "same":
+            A["want_long"]  &= B["z_dyn"] <= -z_needed
+            A["want_short"] &= B["z_dyn"] >= +z_needed
+
+# ---- Backtest core -----------------------------------------------------------
+
+@dataclass
+class Trade:
+    entry_time: pd.Timestamp
+    entry: float
+    side: str  # "long" or "short"
+    sl: float
+    tp: float
+    exit_time: Optional[pd.Timestamp] = None
+    exit: Optional[float] = None
+    r: Optional[float] = None
+
+def backtest_atr_sl_tp(
+    df: pd.DataFrame,
+    intents: pd.DataFrame,
+    atr_lookback: int,
+    sl_mult: float,
+    tp_mult: float,
+    fee_bps: float,
+) -> Tuple[List[Trade], float]:
+    """
+    No leverage; fees unlevered; no same-bar exits (evaluate from next bar).
+    """
+    atr = rolling_atr(df, atr_lookback)
+    close = df["close"].astype(float)
+    high  = df["high"].astype(float)
+    low   = df["low"].astype(float)
+
+    trades: List[Trade] = []
+    equity = 100.0
+
+    pos: Optional[Trade] = None
+
+    for i in range(len(df) - 1):
+        t  = df.index[i]
+        t1 = df.index[i + 1]  # next bar
+
+        if pos is None:
+            # consider entries at close[t] if intent true at t; exits only start at t1
+            if intents["want_long"].iloc[i]:
+                a = atr.iloc[i]
+                if np.isfinite(a) and a > 0:
+                    e = close.iloc[i]
+                    sl = e - sl_mult * a
+                    tp = e + tp_mult * a
+                    pos = Trade(entry_time=t, entry=e, side="long", sl=sl, tp=tp)
+            elif intents["want_short"].iloc[i]:
+                a = atr.iloc[i]
+                if np.isfinite(a) and a > 0:
+                    e = close.iloc[i]
+                    sl = e + sl_mult * a
+                    tp = e - tp_mult * a
+                    pos = Trade(entry_time=t, entry=e, side="short", sl=sl, tp=tp)
+        else:
+            # manage from next bar t1 (no same-bar exits)
+            hi = high.iloc[i + 1]
+            lo = low.iloc[i + 1]
+            ex_price = None
+            if pos.side == "long":
+                # SL first touch priority same-bar? we’re on next bar anyway; check both
+                if lo <= pos.sl:
+                    ex_price = pos.sl
+                if ex_price is None and hi >= pos.tp:
+                    ex_price = pos.tp
+            else:
+                if hi >= pos.sl:
+                    ex_price = pos.sl
+                if ex_price is None and lo <= pos.tp:
+                    ex_price = pos.tp
+
+            if ex_price is not None:
+                # round trip fees: entry + exit
+                fee = (fee_bps / 10000.0)
+                raw_r = (ex_price - pos.entry) / pos.entry if pos.side == "long" else (pos.entry - ex_price) / pos.entry
+                net_r = raw_r - (2 * fee)
+                pos.exit_time = t1
+                pos.exit = ex_price
+                pos.r = net_r * 100.0  # percentage
+                equity *= (1.0 + net_r)
+                trades.append(pos)
+                pos = None
+
+    return trades, equity
+
+def summarize_trades(trades: List[Trade]) -> Dict[str, float]:
+    if not trades:
+        return dict(trades=0, win=0.0, avg=0.0, med=0.0)
+    rs = np.array([t.r for t in trades if t.r is not None], dtype=float)
+    wins = (rs > 0).mean() * 100.0
+    return dict(trades=len(rs), win=wins, avg=float(np.mean(rs)), med=float(np.median(rs)))
+
+# ---- CLI / main --------------------------------------------------------------
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Extreme outlier hourly reversal backtest (robust).")
+    p.add_argument("--symbols", type=str, default="BTCUSDT,ETHUSDT,SOLUSDT")
+    p.add_argument("--start", type=str, default="2024-01-01")
+    p.add_argument("--end", type=str, default="now")
+    p.add_argument("--fee-bps", type=float, default=8.0)
+    p.add_argument("--no-leverage", action="store_true", default=True)
+    p.add_argument("--utc-hours", type=str, default="13,14,15,16,17,18,19,20")
+    p.add_argument("--side", type=str, choices=["both","long","short"], default="both")
+
+    # signal/dynamic
+    p.add_argument("--z-lookback", type=int, default=96)
+    p.add_argument("--z-thresh", type=float, default=2.5)
+    p.add_argument("--dyn-scale-lo", type=float, default=0.8)
+    p.add_argument("--dyn-scale-hi", type=float, default=1.6)
+    p.add_argument("--regime-lookback", type=int, default=336)
+    p.add_argument("--vol-pctl-min", type=float, default=None)
+
+    # cross confirm
+    p.add_argument("--confirm-map", type=str, default="SOLUSDT:BTCUSDT,ETHUSDT:BTCUSDT")
+    p.add_argument("--confirm-mode", type=str, choices=["opposite","same"], default="opposite")
+    p.add_argument("--confirm-z", type=float, default=2.5)
+
+    # risk mgmt
+    p.add_argument("--atr-lookback", type=int, default=48)
+    p.add_argument("--sl-list", type=str, default="2.0,1.5,1.0,0.75")
+    p.add_argument("--tp-list", type=str, default="2.0,1.5")
+
+    # engine limits
+    p.add_argument("--exchanges", type=str, default="okx,bybit,coinbase")
+    p.add_argument("--ccxt-timeout-ms", type=int, default=20000)
+    p.add_argument("--limit-per-call", type=int, default=1000)
+    p.add_argument("--use-cache", action="store_true", default=True)
+    p.add_argument("--max-bars", type=int, default=0, help="0 = no cap")
+    p.add_argument("--max-symbols", type=int, default=0, help="0 = all")
+    return p.parse_args()
 
 def main():
-    ap = argparse.ArgumentParser(description="Extreme Outlier Hourly Reversal Backtest (no leverage, fee-aware).")
-    ap.add_argument("--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT", "SOLUSDT"],
-                    help="Symbols like BTCUSDT or CCXT format BTC/USDT.")
-    ap.add_argument("--start", type=str, default="2023-01-01", help="Start date YYYY-MM-DD.")
-    ap.add_argument("--end", type=str, default="now", help="End date YYYY-MM-DD or 'now'.")
-    ap.add_argument("--fee-bps", type=float, default=8.0, help="Fee per side in bps (no leverage).")
-    ap.add_argument("--exchange", type=str, default="okx", help="CCXT exchange id (default okx).")
-    ap.add_argument("--side", type=str, default="both", choices=["long", "short", "both"],
-                    help="Trade direction.")
+    args = parse_args()
+    syms = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    if args.max_symbols and len(syms) > args.max_symbols:
+        syms = syms[:args.max_symbols]
 
-    # Refinements
-    ap.add_argument("--utc-hours", type=str, default="",
-                    help="Comma-separated UTC hours to trade (e.g., '13,14,15,16'). Empty = all.")
-    ap.add_argument("--vol-pctl-min", type=float, default=None,
-                    help="Regime: minimum realized-vol percentile (0-100). None=off.")
-    ap.add_argument("--vol-lookback", type=int, default=336,
-                    help="Lookback (bars) for realized vol & percentile (default 336 = 2 weeks).")
-    ap.add_argument("--dynamic-z-ref", type=float, default=None,
-                    help="Dynamic scaling reference |Z|. None=off.")
-    ap.add_argument("--dynamic-scale-min", type=float, default=0.8,
-                    help="Clamp min scale for dynamic SL/TP (default 0.8).")
-    ap.add_argument("--dynamic-scale-max", type=float, default=1.6,
-                    help="Clamp max scale for dynamic SL/TP (default 1.6).")
-
-    # Cross-symbol confirmation
-    ap.add_argument("--confirm-map", type=str, default="",
-                    help="Mapping like 'SOLUSDT:BTCUSDT,ETHUSDT:BTCUSDT'. If a symbol appears as key, it'll use the mapped symbol to confirm.")
-    ap.add_argument("--confirm-z", type=float, default=2.5,
-                    help="Z threshold on confirm symbol.")
-    ap.add_argument("--confirm-mode", type=str, default="opposite", choices=["opposite", "same"],
-                    help="Confirmation mode: 'opposite' (avoid fading when leader is same-direction extreme) or 'same' (require same-direction extreme).")
-
-    ap.add_argument("--print-top", type=int, default=5, help="How many top configs to print.")
-    args = ap.parse_args()
-
-    start_dt = parse_date(args.start)
-    end_dt = parse_date(args.end)
-    end_dt = end_dt.replace(minute=0, second=0, microsecond=0)
+    start_dt = parse_iso_date(args.start)
+    end_dt   = parse_iso_date(args.end)
     if end_dt <= start_dt:
-        raise SystemExit("End must be after start.")
+        raise ValueError("end must be after start")
 
-    # Parse utc-hours
-    utc_hours_set: Optional[Set[int]] = None
-    if args.utc_hours.strip():
+    utc_hours = [int(h) for h in args.utc_hours.split(",")] if args.utc_hours else []
+    exchanges = [x.strip() for x in args.exchanges.split(",") if x.strip()]
+
+    log("Running extreme outlier backtest with refinements...")
+    log(f"Range: {start_dt.isoformat()} → {end_dt.isoformat()}  (UTC)")
+    log(f"Exchanges: {','.join(exchanges)}  Fee: {args.fee_bps} bps/side  Side: {args.side}")
+    log(f"UTC hours: {utc_hours}")
+    log(f"Regime filter: vol_pctl_min={args.vol_pctl_min} lookback={args.regime_lookback}")
+    log(f"Dynamic: z_ref={args.z_thresh} scale[{args.dyn_scale_lo},{args.dyn_scale_hi}]")
+    log(f"Cross-confirm map: {args.confirm_map or '{}'}   mode={args.confirm_mode}  z={args.confirm_z}")
+    log("No leverage. No same-bar exits. ATR SL/TP. CCXT only.")
+
+    # Preload confirm symbols once
+    confirm_pairs = {}
+    if args.confirm_map:
+        for kv in args.confirm_map.split(","):
+            a, b = kv.split(":")
+            confirm_pairs[a.strip().upper()] = b.strip().upper()
+
+    all_data: Dict[str, pd.DataFrame] = {}
+    all_intents: Dict[str, pd.DataFrame] = {}
+    results: Dict[str, Dict[str, float]] = {}
+    grid_rows: Dict[str, List[Tuple[float,float,float,int,float]]] = {}
+
+    # Preload any confirm reference symbols (to avoid duplicate fetches per target)
+    confirm_refs = sorted({v for v in confirm_pairs.values()})
+    preload_syms = list(dict.fromkeys(confirm_refs + syms))  # preserve order, unique
+
+    # Fetch & build intents
+    for idx, s in enumerate(preload_syms, 1):
         try:
-            hrs = sorted({int(h.strip()) for h in args.utc_hours.split(",") if h.strip() != ""})
-            for h in hrs:
-                if h < 0 or h > 23:
-                    raise ValueError
-            utc_hours_set = set(hrs)
-        except Exception:
-            raise SystemExit("--utc-hours must be comma-separated integers in [0..23]")
+            log(f"=== {s} ===")
+            df = fetch_multi_exchange_hourly(
+                s, start_dt, end_dt,
+                exchanges=exchanges,
+                timeout_ms=args.ccxt_timeout_ms,
+                limit_per_call=args.limit_per_call,
+                use_cache=args.use_cache,
+            )
+            if args.max-bars if False else False:  # placeholder to avoid linter (not used)
+                pass
+            if args.max_bars and len(df) > args.max_bars:
+                df = df.iloc[-args.max_bars:].copy()
 
-    # Confirm map
-    confirm_map = parse_confirm_map(args.confirm-map if hasattr(args, 'confirm-map') else args.confirm_map)
-
-    print("Running extreme outlier backtest with refinements...")
-    print(f"Range: {start_dt.isoformat()} → {end_dt.isoformat()}  (UTC)")
-    print(f"Exchange: {args.exchange}  Fee: {args.fee_bps} bps/side  Side: {args.side}")
-    if utc_hours_set is None:
-        print("UTC hours: all")
-    else:
-        print(f"UTC hours: {sorted(utc_hours_set)}")
-    print(f"Regime filter: vol_pctl_min={args.vol_pctl_min} lookback={args.vol_lookback}")
-    print(f"Dynamic: z_ref={args.dynamic_z_ref} scale[{args.dynamic_scale_min},{args.dynamic_scale_max}]")
-    if confirm_map:
-        print(f"Cross-confirm map: {confirm_map}   mode={args.confirm_mode}  z={args.confirm_z}")
-    else:
-        print("Cross-confirm: off")
-    print("No leverage. No same-bar exits. ATR SL/TP. CCXT only.\n")
-
-    summary_rows = []
-
-    # Preload any confirm symbols needed (dedupe list)
-    needed_conf_syms = sorted(set(confirm_map.values()))
-    confirm_data: Dict[str, pd.DataFrame] = {}
-    for cs in needed_conf_syms:
-        try:
-            cdf = get_hourly_df(cs, start_dt, end_dt, exchange_id=args.exchange)
-            confirm_data[cs] = cdf
-            print(f"  [confirm] loaded {cs}: {len(cdf):,} bars {cdf.index[0]} → {cdf.index[-1]}")
+            all_data[s] = df
+            dyn = DynParams(
+                z_thresh=args.z_thresh,
+                scale_lo=args.dyn_scale_lo,
+                scale_hi=args.dyn_scale_hi,
+                regime_lookback=args.regime_lookback,
+                vol_pctl_min=args.vol_pctl_min
+            )
+            intents = build_signals(df, args.z_lookback, dyn, utc_hours, side=args.side)
+            all_intents[s] = intents
+            log(f"  got {len(df):,} bars {df.index[0]} → {df.index[-1]}")
         except Exception as e:
-            print(f"  [confirm] FAILED {cs}: {e}")
+            log(f"  Data fetch failed for {s}: {e}")
 
-    for sym in args.symbols:
-        print(f"\n=== {sym} ===")
-        try:
-            df = get_hourly_df(sym, start_dt, end_dt, exchange_id=args.exchange)
-        except Exception as e:
-            print(f"  Data fetch failed for {sym}: {e}")
+    # Cross-confirmation pass (in place)
+    if confirm_pairs:
+        apply_cross_confirm(all_intents, confirm_pairs, args.confirm_mode, float(args.confirm_z))
+
+    # Grid over SL/TP
+    sls = [float(x) for x in args.sl_list.split(",") if x.strip()]
+    tps = [float(x) for x in args.tp_list.split(",") if x.strip()]
+
+    sum_rows = []
+    for s in syms:
+        if s not in all_data or s not in all_intents:
+            log(f"=== {s} ===\n  (skipped; no data)")
             continue
+        df = all_data[s]
+        intents = all_intents[s]
 
-        print(f"  got {len(df):,} bars {df.index[0]} → {df.index[-1]}")
+        best_eq = -1.0
+        best_pair = (None, None)
+        grid = []
+        for sl in sls:
+            for tp in tps:
+                trades, eq = backtest_atr_sl_tp(
+                    df, intents, args.atr_lookback, sl, tp, args.fee_bps
+                )
+                summ = summarize_trades(trades)
+                grid.append((sl, tp, eq, summ["trades"], summ["win"]))
+                if eq > best_eq:
+                    best_eq = eq
+                    best_pair = (sl, tp)
+        grid_rows[s] = grid
 
-        base_params = {
-            "utc_hours": utc_hours_set,
-            "vol_pctl_min": args.vol_pctl_min,
-            "vol_pctl_lookback": args.vol_lookback,
-            "dynamic_z_ref": args.dynamic_z_ref,
-            "dynamic_scale_min": args.dynamic_scale_min,
-            "dynamic_scale_max": args.dynamic_scale_max,
-            "confirm_symbol": confirm_map.get(sym, None),
-            "confirm_z": args.confirm_z if confirm_map.get(sym, None) else None,
-            "confirm_mode": args.confirm_mode if confirm_map.get(sym, None) else None,
-        }
+        # Re-run for best pair to report full stats
+        if best_pair[0] is not None:
+            trades, eq = backtest_atr_sl_tp(
+                df, intents, args.atr_lookback, best_pair[0], best_pair[1], args.fee_bps
+            )
+            summ = summarize_trades(trades)
+            log(f"\n=== {s} (optimal) ===")
+            log(f"  SL x ATR = {best_pair[0]:.2f}, TP x ATR = {best_pair[1]:.2f}")
+            log(f"  Trades: {summ['trades']:,}, Win%: {summ['win']:.1f}%, AvgR: {summ['avg']:.2f}%, MedR: {summ['med']:.2f}%")
+            log(f"  Final equity: ${eq:.2f}")
 
-        cdf = None
-        if base_params["confirm_symbol"]:
-            cdf = confirm_data.get(base_params["confirm_symbol"])
-            if cdf is None:
-                print(f"  (warning) Missing confirm data for {base_params['confirm_symbol']}; confirmation disabled for this symbol.")
-                base_params["confirm_symbol"] = None
-                base_params["confirm_z"] = None
-                base_params["confirm_mode"] = None
+            sum_rows.append(dict(
+                Symbol=s,
+                Trades=summ["trades"],
+                WinPct=round(summ["win"], 2),
+                AvgR=round(summ["avg"], 4),
+                MedR=round(summ["med"], 4),
+                FinalEq=round(eq, 2),
+                Best=f"{best_pair[0]:.2f}/{best_pair[1]:.2f}",
+            ))
 
-        best, all_results = search_params(df, base_side=args.side, fee_bps=args.fee_bps,
-                                          confirm_df=cdf, base_params=base_params)
-
-        print("  Best configuration:")
-        print(f"    Final equity: ${best.final_equity:.2f}  Trades: {best.n_trades}  Win%: {best.win_rate:.1f}%")
-        print(f"    AvgR: {best.avg_r_pct:.3f}%  MedR: {best.med_r_pct:.3f}%")
-        bp = best.params
-        print(f"    Side={bp.side}  Z≥{bp.ret_z}  retLB={bp.ret_lookback}  volLB={bp.vol_lookback}  "
-              f"BB[{bp.bb_period},{bp.bb_k}]  ATR={bp.atr_period}  SLx={bp.sl_atr}  TPx={bp.tp_atr}  "
-              f"CD={bp.cooldown_bars}  MH={bp.min_hold_bars}  "
-              f"UTC={sorted(bp.utc_hours) if bp.utc_hours else 'all'}  "
-              f"RegimeMin={bp.vol_pctl_min if bp.vol_pctl_min is not None else 'none'}  "
-              f"DynZref={bp.dynamic_z_ref if bp.dynamic_z_ref is not None else 'none'}  "
-              f"Dyn[{bp.dynamic_scale_min},{bp.dynamic_scale_max}]  "
-              f"Confirm={bp.confirm_symbol if bp.confirm_symbol else 'none'}:{bp.confirm_mode if bp.confirm_mode else 'none'}@{bp.confirm_z if bp.confirm_z is not None else 'none'}")
-
-        top_df = summarize_top(all_results, k=args.print_top)
-        if not top_df.empty:
-            print(top_df.to_string(index=False))
-
-            # Store for summary
-            summary_rows.append({
-                "Symbol": sym,
-                "BestEq$": round(best.final_equity, 2),
-                "Trades": best.n_trades,
-                "Win%": round(best.win_rate, 1),
-                "AvgR%": round(best.avg_r_pct, 3),
-                "MedR%": round(best.med_r_pct, 3),
-                "Side": bp.side,
-                "Z": bp.ret_z,
-                "SLx": bp.sl_atr,
-                "TPx": bp.tp_atr,
-                "UTC": ",".join(map(str, sorted(bp.utc_hours))) if bp.utc_hours else "all",
-                "RegimeMin": bp.vol_pctl_min if bp.vol_pctl_min is not None else "none",
-                "DynZref": bp.dynamic_z_ref if bp.dynamic_z_ref is not None else "none",
-                "Confirm": bp.confirm_symbol if bp.confirm_symbol else "none",
-                "CMode": bp.confirm_mode if bp.confirm_mode else "none",
-                "Cz": bp.confirm_z if bp.confirm_z is not None else "none",
-            })
-        else:
-            print("  (No top results to display)")
-
-    if summary_rows:
-        print("\n=== Summary ===")
-        sdf = pd.DataFrame(summary_rows)
-        cols = ["Symbol","BestEq$","Trades","Win%","AvgR%","MedR%","Side","Z","SLx","TPx",
-                "UTC","RegimeMin","DynZref","Confirm","CMode","Cz"]
-        sdf = sdf[cols]
-        print(sdf.to_string(index=False))
-    else:
-        print("\nNo symbols succeeded.")
-
-
-if __name__ == "__main__":
-    main()
+            # print compact grid
+            if grid:
+                hdr = "|   S
