@@ -24,33 +24,13 @@ on:
         required: false
         default: "okx"
       side:
-        description: "Trade side"
+        description: "Trade side (long|short|both)"
         required: false
         default: "both"
       utc_hours:
         description: "Comma-separated UTC hours (empty=all)"
         required: false
         default: "13,14,15,16,17,18,19,20"
-      vol_pctl_min:
-        description: "Regime: min vol percentile (0-100, empty=off)"
-        required: false
-        default: "40"
-      vol_lookback:
-        description: "Vol lookback bars"
-        required: false
-        default: "336"
-      dynamic_z_ref:
-        description: "Dynamic scaling reference |Z| (empty=off)"
-        required: false
-        default: "3.5"
-      dynamic_scale_min:
-        description: "Dynamic scale min"
-        required: false
-        default: "0.8"
-      dynamic_scale_max:
-        description: "Dynamic scale max"
-        required: false
-        default: "1.6"
       confirm_map:
         description: "Cross-confirm map e.g. 'SOLUSDT:BTCUSDT,ETHUSDT:BTCUSDT' (empty=off)"
         required: false
@@ -93,11 +73,6 @@ jobs:
             --exchange ${{ github.event.inputs.exchange }} \
             --side ${{ github.event.inputs.side }} \
             --utc-hours "${{ github.event.inputs.utc_hours }}" \
-            --vol-pctl-min ${{ github.event.inputs.vol_pctl_min }} \
-            --vol-lookback ${{ github.event.inputs.vol_lookback }} \
-            --dynamic-z-ref ${{ github.event.inputs.dynamic_z_ref }} \
-            --dynamic-scale-min ${{ github.event.inputs.dynamic_scale_min }} \
-            --dynamic-scale-max ${{ github.event.inputs.dynamic_scale_max }} \
             --confirm-map "${{ github.event.inputs.confirm_map }}" \
             --confirm-z ${{ github.event.inputs.confirm_z }} \
             --confirm-mode ${{ github.event.inputs.confirm_mode }} \
