@@ -64,7 +64,6 @@ def coinalyze_get(path, params=None, sleep=0.25):
         raise RuntimeError("COINALYZE_API_KEY not set in environment.")
     if params is None:
         params = {}
-    # Coinalyze allows api_key in header or query param
     headers = {
         "accept": "application/json",
     }
@@ -99,27 +98,57 @@ def cmc_get(path, params=None, sleep=0.25):
 
 def fetch_cb_btc_ohlcv(start_date, end_date):
     """
-    Fetch daily BTC-USD candles from Coinbase.
+    Fetch daily BTC-USD candles from Coinbase in <=300-candle chunks.
+
     Coinbase /candles returns [time, low, high, open, close, volume]
     with granularity in seconds.
+
+    Error we hit before:
+      "granularity too small for the requested time range. Count of aggregations requested exceeds 300"
+
+    So we now iterate over 300-day windows.
     """
-    start_unix = iso_to_unix(start_date)
-    end_unix   = iso_to_unix(end_date) + 24*60*60
-
     granularity = 86400  # 1 day in seconds
-    params = {
-        "granularity": granularity,
-        "start": datetime.utcfromtimestamp(start_unix).isoformat() + "Z",
-        "end": datetime.utcfromtimestamp(end_unix).isoformat() + "Z",
-    }
-    data = cb_get(f"/products/{SYMBOL_CB}/candles", params=params)
+    max_points = 300
 
-    # Coinbase returns newest first; reverse to oldest→newest
+    start_unix = iso_to_unix(start_date)
+    end_unix   = iso_to_unix(end_date) + 24 * 60 * 60  # include end date
+
     rows = []
-    for row in data:
-        ts, low, high, open_, close, volume = row
-        date = unix_to_date(ts)
-        rows.append((date, close, volume))
+    cur_start = start_unix
+
+    while cur_start < end_unix:
+        # end of this chunk
+        cur_end = cur_start + granularity * max_points
+        if cur_end > end_unix:
+            cur_end = end_unix
+
+        params = {
+            "granularity": granularity,
+            "start": datetime.utcfromtimestamp(cur_start).isoformat() + "Z",
+            "end": datetime.utcfromtimestamp(cur_end).isoformat() + "Z",
+        }
+        data = cb_get(f"/products/{SYMBOL_CB}/candles", params=params)
+
+        if not data:
+            break
+
+        # Coinbase returns newest first; we can just iterate and dedupe later
+        for row in data:
+            ts, low, high, open_, close, volume = row
+            date = unix_to_date(ts)
+            rows.append((date, close, volume))
+
+        # Move start forward. Data is newest-first, so the oldest candle
+        # is the last element's time.
+        oldest_ts = min(r[0] for r in data)
+        # advance to day after oldest_ts
+        cur_start = oldest_ts + granularity
+
+        # safety: if somehow we didn't move, break to avoid infinite loop
+        if cur_start <= start_unix:
+            break
+        start_unix = cur_start
 
     df = pd.DataFrame(rows, columns=["date", "spot_close", "spot_volume"])
     df = df.drop_duplicates("date").sort_values("date")
@@ -152,7 +181,6 @@ def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
 
     oi_rows = []
     for item in oi_js:
-        # each item: {"symbol": "...", "history": [ {t,o,h,l,c}, ... ]}
         symbol = item.get("symbol")
         if symbol != SYMBOL_PERP:
             continue
@@ -182,7 +210,6 @@ def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
         for h in item.get("history", []):
             ts = int(h["t"])
             date = unix_to_date(ts)
-            # v = volume, bv = buy volume, etc.
             perp_vol = float(h["v"])
             vol_rows.append((date, perp_vol))
 
@@ -321,3 +348,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
