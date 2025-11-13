@@ -3,7 +3,20 @@ Compute Fear & Greed 2.0 index (FG2) using:
 
 - Coinbase: BTC-USD daily OHLCV (for price & spot volume)
 - Coinalyze: BTC perp open interest history + perp OHLCV (for perp volume)
-- CoinMarketCap: global total market cap & stablecoin market cap
+- CoinGecko: historical market caps for a small basket of coins
+    - Risk assets:  bitcoin, ethereum, solana, binancecoin, ripple
+    - Stables:      tether, usd-coin
+
+Risk Deployment proxy:
+    RISK_MC  = sum(MC of risk_ids)
+    STABLE_MC = sum(MC of stable_ids)
+    rd_ratio = RISK_MC / (RISK_MC + STABLE_MC)
+    RD_score = 100 * rd_ratio
+
+FG2 = 0.40 * RD_score
+    + 0.30 * OI_score
+    + 0.20 * SP_score
+    + 0.10 * V_score
 
 Outputs a CSV with daily FG2 and component scores.
 """
@@ -18,19 +31,23 @@ import numpy as np
 
 # ---------------- CONFIG ----------------
 
-COINBASE_BASE    = "https://api.exchange.coinbase.com"
-COINALYZE_BASE   = "https://api.coinalyze.net/v1"
-CMC_BASE         = "https://pro-api.coinmarketcap.com"
+COINBASE_BASE   = "https://api.exchange.coinbase.com"
+COINALYZE_BASE  = "https://api.coinalyze.net/v1"
+COINGECKO_BASE  = "https://api.coingecko.com/api/v3"
 
-CMC_API_KEY        = os.getenv("CMC_API_KEY")
-COINALYZE_API_KEY  = os.getenv("COINALYZE_API_KEY")
+COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY")
 
 SYMBOL_CB    = "BTC-USD"          # Coinbase product
 SYMBOL_PERP  = "BTCUSDT_PERP.A"   # Coinalyze aggregated BTC perp symbol (example)
+
 START_DATE   = "2023-01-01"
 END_DATE     = "2025-11-01"
 
-OUT_CSV      = "output/fg2_daily.csv"
+# Risk & stable baskets for Risk Deployment proxy
+RISK_IDS   = ["bitcoin", "ethereum", "solana", "binancecoin", "ripple"]
+STABLE_IDS = ["tether", "usd-coin"]
+
+OUT_CSV    = "output/fg2_daily.csv"
 os.makedirs("output", exist_ok=True)
 
 
@@ -79,18 +96,15 @@ def coinalyze_get(path, params=None, sleep=0.25):
     return r.json()
 
 
-def cmc_get(path, params=None, sleep=0.25):
-    """CoinMarketCap GET with API key."""
-    if CMC_API_KEY is None:
-        raise RuntimeError("CMC_API_KEY not set in environment.")
+def cg_get(path, params=None, sleep=1.2):
+    """CoinGecko public GET (no key)."""
     if params is None:
         params = {}
-    headers = {"X-CMC_PRO_API_KEY": CMC_API_KEY}
-    url = CMC_BASE + path
-    r = requests.get(url, params=params, headers=headers, timeout=30)
+    url = COINGECKO_BASE + path
+    r = requests.get(url, params=params, timeout=60)
     if r.status_code != 200:
-        raise RuntimeError(f"CMC error {r.status_code}: {r.text[:300]}")
-    time.sleep(sleep)
+        raise RuntimeError(f"CoinGecko error {r.status_code}: {r.text[:300]}")
+    time.sleep(sleep)  # be gentle with their rate limits
     return r.json()
 
 
@@ -102,11 +116,6 @@ def fetch_cb_btc_ohlcv(start_date, end_date):
 
     Coinbase /candles returns [time, low, high, open, close, volume]
     with granularity in seconds.
-
-    Error we hit before:
-      "granularity too small for the requested time range. Count of aggregations requested exceeds 300"
-
-    So we now iterate over 300-day windows.
     """
     granularity = 86400  # 1 day in seconds
     max_points = 300
@@ -118,7 +127,6 @@ def fetch_cb_btc_ohlcv(start_date, end_date):
     cur_start = start_unix
 
     while cur_start < end_unix:
-        # end of this chunk
         cur_end = cur_start + granularity * max_points
         if cur_end > end_unix:
             cur_end = end_unix
@@ -133,19 +141,13 @@ def fetch_cb_btc_ohlcv(start_date, end_date):
         if not data:
             break
 
-        # Coinbase returns newest first; we can just iterate and dedupe later
         for row in data:
             ts, low, high, open_, close, volume = row
             date = unix_to_date(ts)
             rows.append((date, close, volume))
 
-        # Move start forward. Data is newest-first, so the oldest candle
-        # is the last element's time.
         oldest_ts = min(r[0] for r in data)
-        # advance to day after oldest_ts
         cur_start = oldest_ts + granularity
-
-        # safety: if somehow we didn't move, break to avoid infinite loop
         if cur_start <= start_unix:
             break
         start_unix = cur_start
@@ -161,8 +163,8 @@ def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
     """
     Fetch BTC perp open interest history (daily) + perp OHLCV (daily) from Coinalyze.
 
-    - open-interest-history: gives OHLC of OI, we'll use the close 'c'
-    - ohlcv-history: gives v (volume) field as quote volume
+    - /open-interest-history: gives OHLC of OI, we'll use the close 'c'
+    - /ohlcv-history: gives v (volume) field as quote volume
     """
     start_unix = iso_to_unix(start_date)
     end_unix   = iso_to_unix(end_date)
@@ -220,35 +222,63 @@ def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
     return df
 
 
-# ---------------- 3) CMC GLOBAL CAPS ----------------
+# ---------------- 3) COINGECKO RISK DEPLOYMENT PROXY ----------------
 
-def fetch_cmc_global_daily(start_date, end_date):
+def fetch_cg_risk_deployment(start_date, end_date):
     """
-    Fetch daily global market metrics from CoinMarketCap between start_date and end_date.
-    Uses global-metrics/quotes/historical.
+    Fetch historical market caps for a small basket of coins from CoinGecko and
+    compute a Risk Deployment proxy:
+
+      RISK_MC   = sum(MC of RISK_IDS)
+      STABLE_MC = sum(MC of STABLE_IDS)
+      rd_ratio  = RISK_MC / (RISK_MC + STABLE_MC)
+      RD_score  = 100 * rd_ratio
+
+    Uses /coins/{id}/market_chart with days=max, then filters by date.
     """
-    js = cmc_get(
-        "/v1/global-metrics/quotes/historical",
-        params={
-            "time_start": start_date,
-            "time_end": end_date,
-            "interval": "1d",
-        },
-    )
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_dt   = datetime.strptime(end_date, "%Y-%m-%d").date()
 
-    rows = []
-    for item in js.get("data", {}).get("quotes", []):
-        ts_str = item["timestamp"][:10]
-        date = datetime.strptime(ts_str, "%Y-%m-%d").date()
-        quote = item["quote"]["USD"]
-        total_mc  = float(quote["total_market_cap"])
-        # field name for stablecoin mc may depend on plan; adjust if needed
-        stable_mc = float(quote.get("stablecoin_market_cap", 0.0))
-        rows.append((date, total_mc, stable_mc))
+    all_ids = RISK_IDS + STABLE_IDS
+    frames = []
 
-    df = pd.DataFrame(rows, columns=["date", "total_mc_usd", "stable_mc_usd"])
-    df = df.sort_values("date")
-    return df
+    for cid in all_ids:
+        js = cg_get(
+            f"/coins/{cid}/market_chart",
+            params={"vs_currency": "usd", "days": "max"}
+        )
+        rows = []
+        for ts, cap in js.get("market_caps", []):
+            date = datetime.utcfromtimestamp(ts / 1000.0).date()
+            if date < start_dt or date > end_dt:
+                continue
+            rows.append((date, cap))
+        df = pd.DataFrame(rows, columns=["date", f"{cid}_mc"])
+        frames.append(df)
+
+    if not frames:
+        raise RuntimeError("No CoinGecko data fetched for risk deployment.")
+
+    df = frames[0]
+    for sub in frames[1:]:
+        df = df.merge(sub, on="date", how="outer")
+
+    df = df.sort_values("date").drop_duplicates("date")
+    df.set_index("date", inplace=True)
+    df = df.ffill()  # forward-fill any missing days
+
+    risk_cols   = [f"{cid}_mc" for cid in RISK_IDS]
+    stable_cols = [f"{cid}_mc" for cid in STABLE_IDS]
+
+    df["risk_mc"]   = df[risk_cols].sum(axis=1)
+    df["stable_mc"] = df[stable_cols].sum(axis=1)
+
+    eps = 1e-9
+    df["rd_ratio"] = df["risk_mc"] / (df["risk_mc"] + df["stable_mc"] + eps)
+    df["RD_score"] = 100.0 * df["rd_ratio"]
+
+    df = df.reset_index()
+    return df[["date", "RD_score", "risk_mc", "stable_mc"]]
 
 
 # ---------------- UTILITIES ----------------
@@ -270,7 +300,8 @@ def compute_fg2(df):
     df has columns:
       spot_close, spot_volume,
       perp_volume,
-      oi_usd, total_mc_usd, stable_mc_usd
+      oi_usd,
+      RD_score
     """
     eps = 1e-9
 
@@ -283,28 +314,24 @@ def compute_fg2(df):
     V_low, V_high = rolling_minmax(V_raw)
     V_score = 100 * clip01((V_raw - V_low) / (V_high - V_low + eps))
 
-    # 2) Open Interest ratio: OI / total_mc
-    OI_ratio = df["oi_usd"] / (df["total_mc_usd"] + eps)
-    OI_low, OI_high = rolling_minmax(OI_ratio)
-    OI_score = 100 * clip01((OI_ratio - OI_low) / (OI_high - OI_low + eps))
+    # 2) Open Interest score: OI normalized by its own rolling history
+    OI_series = df["oi_usd"]
+    OI_low, OI_high = rolling_minmax(OI_series)
+    OI_score = 100 * clip01((OI_series - OI_low) / (OI_high - OI_low + eps))
 
-    # 3) Spot vs Perp: perp fraction (using perp volume vs Coinbase spot volume)
+    # 3) Spot vs Perp: perp fraction (Coinalyze perp vs Coinbase spot volume)
     df["perp_frac"] = df["perp_volume"] / (
         df["perp_volume"] + df["spot_volume"] + eps
     )
     PF_low, PF_high = rolling_minmax(df["perp_frac"])
     SP_score = 100 * clip01((df["perp_frac"] - PF_low) / (PF_high - PF_low + eps))
 
-    # 4) Risk Deployment: RiskyMC = total - stable
-    df["risky_mc"] = df["total_mc_usd"] - df["stable_mc_usd"]
-    df["d_risky"] = df["risky_mc"].diff()
-    df["risk_flow"] = df["d_risky"].ewm(span=7, adjust=False).mean()
-    RF_low, RF_high = rolling_minmax(df["risk_flow"])
-    RF_score = 100 * clip01((df["risk_flow"] - RF_low) / (RF_high - RF_low + eps))
+    # 4) Risk Deployment proxy: RD_score already 0–100 from CoinGecko
+    RD_score = df["RD_score"]
 
     # Composite FG2
     FG2 = (
-        0.40 * RF_score +
+        0.40 * RD_score +
         0.30 * OI_score +
         0.20 * SP_score +
         0.10 * V_score
@@ -315,7 +342,7 @@ def compute_fg2(df):
     out["FG2_vol"]      = V_score
     out["FG2_oi"]       = OI_score
     out["FG2_spotperp"] = SP_score
-    out["FG2_riskflow"] = RF_score
+    out["FG2_riskdep"]  = RD_score
     return out
 
 
@@ -328,12 +355,12 @@ def main():
     print("Fetching Coinalyze BTC perp OI & volumes…")
     cl_df = fetch_coinalyze_oi_and_perp_volume(START_DATE, END_DATE)
 
-    print("Fetching CMC global metrics…")
-    cmc_df = fetch_cmc_global_daily(START_DATE, END_DATE)
+    print("Fetching CoinGecko risk deployment proxy…")
+    cg_df = fetch_cg_risk_deployment(START_DATE, END_DATE)
 
     # Merge everything on date
     df = cb_df.merge(cl_df, on="date", how="inner")
-    df = df.merge(cmc_df, on="date", how="inner")
+    df = df.merge(cg_df, on="date", how="inner")
 
     df = df.sort_values("date")
     print("Computing FG2 components…")
@@ -342,10 +369,10 @@ def main():
     fg2_df.to_csv(OUT_CSV, index=False)
     print(f"Saved FG2 daily data to {OUT_CSV}")
     print(fg2_df[[
-        "date", "FG2", "FG2_vol", "FG2_oi", "FG2_spotperp", "FG2_riskflow"
+        "date", "FG2", "FG2_vol", "FG2_oi", "FG2_spotperp", "FG2_riskdep"
     ]].tail())
 
 
 if __name__ == "__main__":
     main()
-    
+            
