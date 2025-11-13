@@ -1,24 +1,30 @@
 """
-Compute Fear & Greed 2.0 index (FG2) using:
+Compute Fear & Greed Lite index (FG_lite) using:
 
 - Coinbase: BTC-USD daily OHLCV (for price & spot volume)
 - Coinalyze: BTC perp open interest history + perp OHLCV (for perp volume)
-- CoinPaprika: historical market caps for a small basket of coins
-    - Risk assets:  bitcoin, ethereum, solana, bnb, xrp
-    - Stables:      tether, usdc
 
-Risk Deployment proxy:
-    RISK_MC   = sum(MC of risk_ids)
-    STABLE_MC = sum(MC of stable_ids)
-    rd_ratio  = RISK_MC / (RISK_MC + STABLE_MC)
-    RD_score  = 100 * rd_ratio
+This avoids any total-market-cap or stablecoin data, because all free
+providers either rate-limit or restrict historical access.
 
-FG2 = 0.40 * RD_score
-     + 0.30 * OI_score
-     + 0.20 * SP_score
-     + 0.10 * V_score
+Components:
 
-Outputs a CSV with daily FG2 and component scores.
+1) Volatility (V_score)
+   - Based on BTC 30d vs 90d realized volatility
+
+2) Open Interest (OI_score)
+   - Based on BTC perp open interest, normalized over its own history
+
+3) Perp vs Spot dominance (SP_score)
+   - Perp volume share = perp_volume / (perp_volume + spot_volume)
+
+Composite:
+
+    FG_lite = 0.50 * OI_score
+            + 0.30 * SP_score
+            + 0.20 * V_score
+
+Outputs a CSV with daily FG_lite and component scores.
 """
 
 import os
@@ -31,9 +37,8 @@ import numpy as np
 
 # ---------------- CONFIG ----------------
 
-COINBASE_BASE    = "https://api.exchange.coinbase.com"
-COINALYZE_BASE   = "https://api.coinalyze.net/v1"
-COINPAPRIKA_BASE = "https://api.coinpaprika.com/v1"
+COINBASE_BASE   = "https://api.exchange.coinbase.com"
+COINALYZE_BASE  = "https://api.coinalyze.net/v1"
 
 COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY")
 
@@ -42,19 +47,6 @@ SYMBOL_PERP  = "BTCUSDT_PERP.A"   # Coinalyze aggregated BTC perp symbol
 
 START_DATE   = "2023-01-01"
 END_DATE     = "2025-11-01"
-
-# CoinPaprika coin IDs for risk & stables
-RISK_IDS = [
-    "btc-bitcoin",
-    "eth-ethereum",
-    "sol-solana",
-    "bnb-bnb",
-    "xrp-xrp",
-]
-STABLE_IDS = [
-    "usdt-tether",
-    "usdc-usdc",
-]
 
 OUT_CSV = "output/fg2_daily.csv"
 os.makedirs("output", exist_ok=True)
@@ -96,18 +88,6 @@ def coinalyze_get(path, params=None, sleep=0.25):
     if r.status_code != 200:
         raise RuntimeError(f"Coinalyze error {r.status_code}: {r.text[:300]}")
     time.sleep(sleep)
-    return r.json()
-
-
-def cp_get(path, params=None, sleep=0.4):
-    """CoinPaprika public GET (no key, free plan)."""
-    if params is None:
-        params = {}
-    url = COINPAPRIKA_BASE + path
-    r = requests.get(url, params=params, timeout=60)
-    if r.status_code != 200:
-        raise RuntimeError(f"CoinPaprika error {r.status_code}: {r.text[:300]}")
-    time.sleep(sleep)  # polite rate limiting
     return r.json()
 
 
@@ -161,6 +141,12 @@ def fetch_cb_btc_ohlcv(start_date, end_date):
 # ---------------- 2) COINALYZE BTC PERP OI & VOLUME ----------------
 
 def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
+    """
+    Fetch BTC perp open interest history (daily) + perp OHLCV (daily) from Coinalyze.
+
+    - /open-interest-history: gives OHLC of OI, we'll use the close 'c'
+    - /ohlcv-history: gives v (volume) field as quote volume
+    """
     start_unix = iso_to_unix(start_date)
     end_unix   = iso_to_unix(end_date)
 
@@ -209,80 +195,6 @@ def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
     return df.sort_values("date")
 
 
-# ---------------- 3) COINPAPRIKA RISK DEPLOYMENT PROXY ----------------
-
-def fetch_cp_risk_deployment(start_date, end_date):
-    """
-    Fetch historical market caps for RISK_IDS and STABLE_IDS from CoinPaprika.
-
-    Free plan: daily historical data is only available for approx. the last 365 days
-    counted from *today*, not from END_DATE.
-
-    So we clamp the effective start date to max(START_DATE, today - 365 days).
-    """
-    start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end_dt   = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    today = datetime.utcnow().date()
-    min_start_allowed = today - timedelta(days=365)
-
-    effective_start = max(start_dt, min_start_allowed)
-
-    # Ensure end_dt is not before effective_start
-    if end_dt < effective_start:
-        raise RuntimeError(
-            f"END_DATE {end_dt} is older than free historical window "
-            f"({effective_start} onward) for CoinPaprika."
-        )
-
-    all_ids = RISK_IDS + STABLE_IDS
-    frames = []
-
-    for cid in all_ids:
-        js = cp_get(
-            f"/tickers/{cid}/historical",
-            params={
-                "start": effective_start.isoformat(),
-                "end": end_dt.isoformat(),
-                "interval": "1d",
-            }
-        )
-        rows = []
-        for entry in js:
-            ts = entry.get("timestamp")
-            mc = entry.get("market_cap")
-            if ts is None or mc is None:
-                continue
-            date = datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
-            if effective_start <= date <= end_dt:
-                rows.append((date, float(mc)))
-        df = pd.DataFrame(rows, columns=["date", f"{cid}_mc"])
-        frames.append(df)
-
-    if not frames:
-        raise RuntimeError("No CoinPaprika data fetched for risk deployment.")
-
-    df = frames[0]
-    for f in frames[1:]:
-        df = df.merge(f, on="date", how="outer")
-
-    df = df.sort_values("date").drop_duplicates("date")
-    df.set_index("date", inplace=True)
-    df = df.ffill()
-
-    risk_cols   = [f"{cid}_mc" for cid in RISK_IDS]
-    stable_cols = [f"{cid}_mc" for cid in STABLE_IDS]
-
-    eps = 1e-9
-    df["risk_mc"]   = df[risk_cols].sum(axis=1)
-    df["stable_mc"] = df[stable_cols].sum(axis=1)
-    df["rd_ratio"]  = df["risk_mc"] / (df["risk_mc"] + df["stable_mc"] + eps)
-    df["RD_score"]  = 100.0 * df["rd_ratio"]
-
-    df = df.reset_index()
-    return df[["date", "RD_score", "risk_mc", "stable_mc"]]
-
-
 # ---------------- UTILITIES ----------------
 
 def clip01(x):
@@ -295,46 +207,49 @@ def rolling_minmax(series, window=365, lower_q=0.05, upper_q=0.95):
     return low, high
 
 
-# ---------------- COMPUTE FG2 ----------------
+# ---------------- COMPUTE FG_LITE ----------------
 
-def compute_fg2(df):
+def compute_fg_lite(df):
+    """
+    df has columns:
+      spot_close, spot_volume,
+      perp_volume,
+      oi_usd
+    """
     eps = 1e-9
 
-    # Volatility scores
+    # 1) Volatility: realized 30d and 90d from Coinbase spot
     df["log_ret"] = np.log(df["spot_close"] / df["spot_close"].shift(1))
     df["RV_30"] = df["log_ret"].rolling(30).std() * np.sqrt(365)
     df["RV_90"] = df["log_ret"].rolling(90).std() * np.sqrt(365)
 
-    V_raw = df["RV_90"] / (df["RV_30"] + eps)
+    V_raw = df["RV_90"] / (df["RV_30"] + eps)  # calm > 1
     V_low, V_high = rolling_minmax(V_raw)
     V_score = 100 * clip01((V_raw - V_low) / (V_high - V_low + eps))
 
-    # OI score
+    # 2) Open Interest: normalized over its own history
     OI = df["oi_usd"]
     OI_low, OI_high = rolling_minmax(OI)
     OI_score = 100 * clip01((OI - OI_low) / (OI_high - OI_low + eps))
 
-    # Spot/perp score
-    df["perp_frac"] = df["perp_volume"] / (df["perp_volume"] + df["spot_volume"] + eps)
+    # 3) Spot vs Perp dominance: perp fraction
+    df["perp_frac"] = df["perp_volume"] / (
+        df["perp_volume"] + df["spot_volume"] + eps
+    )
     PF_low, PF_high = rolling_minmax(df["perp_frac"])
     SP_score = 100 * clip01((df["perp_frac"] - PF_low) / (PF_high - PF_low + eps))
 
-    RD_score = df["RD_score"]
-
-    FG2 = (
-        0.40 * RD_score +
-        0.30 * OI_score +
-        0.20 * SP_score +
-        0.10 * V_score
+    FG_lite = (
+        0.50 * OI_score +
+        0.30 * SP_score +
+        0.20 * V_score
     )
 
     out = df.copy()
-    out["FG2"]          = FG2
-    out["FG2_vol"]      = V_score
-    out["FG2_oi"]       = OI_score
-    out["FG2_spotperp"] = SP_score
-    out["FG2_riskdep"]  = RD_score
-
+    out["FG_lite"]     = FG_lite
+    out["FG_vol"]      = V_score
+    out["FG_oi"]       = OI_score
+    out["FG_spotperp"] = SP_score
     return out
 
 
@@ -347,20 +262,18 @@ def main():
     print("Fetching Coinalyze BTC perp OI & volumes…")
     cl_df = fetch_coinalyze_oi_and_perp_volume(START_DATE, END_DATE)
 
-    print("Fetching CoinPaprika risk deployment proxy…")
-    cp_df = fetch_cp_risk_deployment(START_DATE, END_DATE)
-
     print("Merging datasets…")
     df = cb_df.merge(cl_df, on="date", how="inner")
-    df = df.merge(cp_df, on="date", how="inner")
     df = df.sort_values("date")
 
-    print("Computing FG2 components…")
-    fg2_df = compute_fg2(df)
+    print("Computing FG_lite components…")
+    fg_df = compute_fg_lite(df)
 
-    fg2_df.to_csv(OUT_CSV, index=False)
-    print(f"Saved FG2 daily data to {OUT_CSV}")
-    print(fg2_df.tail())
+    fg_df.to_csv(OUT_CSV, index=False)
+    print(f"Saved FG_lite daily data to {OUT_CSV}")
+    print(fg_df[[
+        "date", "FG_lite", "FG_vol", "FG_oi", "FG_spotperp"
+    ]].tail())
 
 
 if __name__ == "__main__":
