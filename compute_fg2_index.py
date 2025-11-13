@@ -31,8 +31,8 @@ import numpy as np
 
 # ---------------- CONFIG ----------------
 
-COINBASE_BASE   = "https://api.exchange.coinbase.com"
-COINALYZE_BASE  = "https://api.coinalyze.net/v1"
+COINBASE_BASE    = "https://api.exchange.coinbase.com"
+COINALYZE_BASE   = "https://api.coinalyze.net/v1"
 COINPAPRIKA_BASE = "https://api.coinpaprika.com/v1"
 
 COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY")
@@ -56,7 +56,7 @@ STABLE_IDS = [
     "usdc-usdc",
 ]
 
-OUT_CSV    = "output/fg2_daily.csv"
+OUT_CSV = "output/fg2_daily.csv"
 os.makedirs("output", exist_ok=True)
 
 
@@ -107,7 +107,7 @@ def cp_get(path, params=None, sleep=0.4):
     r = requests.get(url, params=params, timeout=60)
     if r.status_code != 200:
         raise RuntimeError(f"CoinPaprika error {r.status_code}: {r.text[:300]}")
-    time.sleep(sleep)  # be nice to their rate limits
+    time.sleep(sleep)  # polite rate limiting
     return r.json()
 
 
@@ -215,15 +215,25 @@ def fetch_cp_risk_deployment(start_date, end_date):
     """
     Fetch historical market caps for RISK_IDS and STABLE_IDS from CoinPaprika.
 
-    Uses /v1/tickers/{coin_id}/historical?start=YYYY-MM-DD&end=YYYY-MM-DD&interval=1d
+    Free plan: daily historical data is only available for approx. the last 365 days
+    counted from *today*, not from END_DATE.
 
-    NOTE (free plan): daily history is limited to ~last 1 year.
-    We clamp the effective start date to (end_date - 365 days).
+    So we clamp the effective start date to max(START_DATE, today - 365 days).
     """
     start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
     end_dt   = datetime.strptime(end_date, "%Y-%m-%d").date()
 
-    effective_start = max(start_dt, end_dt - timedelta(days=365))
+    today = datetime.utcnow().date()
+    min_start_allowed = today - timedelta(days=365)
+
+    effective_start = max(start_dt, min_start_allowed)
+
+    # Ensure end_dt is not before effective_start
+    if end_dt < effective_start:
+        raise RuntimeError(
+            f"END_DATE {end_dt} is older than free historical window "
+            f"({effective_start} onward) for CoinPaprika."
+        )
 
     all_ids = RISK_IDS + STABLE_IDS
     frames = []
