@@ -1,12 +1,9 @@
 name: Compute FG2 Index
 
 on:
-  # Run manually from the Actions tab
   workflow_dispatch: {}
-
-  # Run once per day at 00:10 UTC
   schedule:
-    - cron: '10 0 * * *'
+    - cron: '10 0 * * *'  # daily at 00:10 UTC
 
 jobs:
   fg2-index:
@@ -29,6 +26,7 @@ jobs:
       - name: Compute FG2 index
         env:
           CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
+          COINGLASS_API_KEY: ${{ secrets.COINGLASS_API_KEY }}
         run: |
           python compute_fg2_index.py
 
@@ -37,4 +35,3 @@ jobs:
         with:
           name: fg2-daily
           path: output/fg2_daily.csv
-          
