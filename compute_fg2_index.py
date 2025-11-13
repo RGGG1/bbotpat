@@ -3,15 +3,15 @@ Compute Fear & Greed 2.0 index (FG2) using:
 
 - Coinbase: BTC-USD daily OHLCV (for price & spot volume)
 - Coinalyze: BTC perp open interest history + perp OHLCV (for perp volume)
-- CoinGecko: historical market caps for a small basket of coins
-    - Risk assets:  bitcoin, ethereum, solana, binancecoin, ripple
-    - Stables:      tether, usd-coin
+- CoinPaprika: historical market caps for a small basket of coins
+    - Risk assets:  bitcoin, ethereum, solana, bnb, xrp
+    - Stables:      tether, usdc
 
 Risk Deployment proxy:
-    RISK_MC  = sum(MC of risk_ids)
+    RISK_MC   = sum(MC of risk_ids)
     STABLE_MC = sum(MC of stable_ids)
-    rd_ratio = RISK_MC / (RISK_MC + STABLE_MC)
-    RD_score = 100 * rd_ratio
+    rd_ratio  = RISK_MC / (RISK_MC + STABLE_MC)
+    RD_score  = 100 * rd_ratio
 
 FG2 = 0.40 * RD_score
      + 0.30 * OI_score
@@ -33,7 +33,7 @@ import numpy as np
 
 COINBASE_BASE   = "https://api.exchange.coinbase.com"
 COINALYZE_BASE  = "https://api.coinalyze.net/v1"
-COINGECKO_BASE  = "https://api.coingecko.com/api/v3"
+COINPAPRIKA_BASE = "https://api.coinpaprika.com/v1"
 
 COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY")
 
@@ -43,9 +43,18 @@ SYMBOL_PERP  = "BTCUSDT_PERP.A"   # Coinalyze aggregated BTC perp symbol
 START_DATE   = "2023-01-01"
 END_DATE     = "2025-11-01"
 
-# Risk & stable baskets for Risk Deployment proxy
-RISK_IDS   = ["bitcoin", "ethereum", "solana", "binancecoin", "ripple"]
-STABLE_IDS = ["tether", "usd-coin"]
+# CoinPaprika coin IDs for risk & stables
+RISK_IDS = [
+    "btc-bitcoin",
+    "eth-ethereum",
+    "sol-solana",
+    "bnb-bnb",
+    "xrp-xrp",
+]
+STABLE_IDS = [
+    "usdt-tether",
+    "usdc-usdc",
+]
 
 OUT_CSV    = "output/fg2_daily.csv"
 os.makedirs("output", exist_ok=True)
@@ -80,8 +89,8 @@ def coinalyze_get(path, params=None, sleep=0.25):
         raise RuntimeError("COINALYZE_API_KEY not set in environment.")
     if params is None:
         params = {}
-    headers = { "accept": "application/json" }
-    params = { **params, "api_key": COINALYZE_API_KEY }
+    headers = {"accept": "application/json"}
+    params = {**params, "api_key": COINALYZE_API_KEY}
     url = COINALYZE_BASE + path
     r = requests.get(url, params=params, headers=headers, timeout=30)
     if r.status_code != 200:
@@ -90,15 +99,15 @@ def coinalyze_get(path, params=None, sleep=0.25):
     return r.json()
 
 
-def cg_get(path, params=None, sleep=1.2):
-    """CoinGecko public GET (no key)."""
+def cp_get(path, params=None, sleep=0.4):
+    """CoinPaprika public GET (no key, free plan)."""
     if params is None:
         params = {}
-    url = COINGECKO_BASE + path
+    url = COINPAPRIKA_BASE + path
     r = requests.get(url, params=params, timeout=60)
     if r.status_code != 200:
-        raise RuntimeError(f"CoinGecko error {r.status_code}: {r.text[:300]}")
-    time.sleep(sleep)
+        raise RuntimeError(f"CoinPaprika error {r.status_code}: {r.text[:300]}")
+    time.sleep(sleep)  # be nice to their rate limits
     return r.json()
 
 
@@ -174,7 +183,6 @@ def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
         for h in item.get("history", []):
             ts = int(h["t"])
             oi_rows.append((unix_to_date(ts), float(h["c"])))
-
     oi_df = pd.DataFrame(oi_rows, columns=["date", "oi_usd"])
 
     # Perp OHLCV (volume)
@@ -195,42 +203,54 @@ def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
         for h in item.get("history", []):
             ts = int(h["t"])
             vol_rows.append((unix_to_date(ts), float(h["v"])))
-
     vol_df = pd.DataFrame(vol_rows, columns=["date", "perp_volume"])
 
     df = oi_df.merge(vol_df, on="date", how="inner")
     return df.sort_values("date")
 
 
-# ---------------- 3) COINGECKO RISK DEPLOYMENT PROXY ----------------
+# ---------------- 3) COINPAPRIKA RISK DEPLOYMENT PROXY ----------------
 
-def fetch_cg_risk_deployment(start_date, end_date):
+def fetch_cp_risk_deployment(start_date, end_date):
     """
-    Fetch historical market caps for RISK_IDS and STABLE_IDS from CoinGecko,
-    using only 365 days of data (free plan limit).
+    Fetch historical market caps for RISK_IDS and STABLE_IDS from CoinPaprika.
+
+    Uses /v1/tickers/{coin_id}/historical?start=YYYY-MM-DD&end=YYYY-MM-DD&interval=1d
+
+    NOTE (free plan): daily history is limited to ~last 1 year.
+    We clamp the effective start date to (end_date - 365 days).
     """
     start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
     end_dt   = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    effective_start = max(start_dt, end_dt - timedelta(days=365))
 
     all_ids = RISK_IDS + STABLE_IDS
     frames = []
 
     for cid in all_ids:
-        js = cg_get(
-            f"/coins/{cid}/market_chart",
-            params={"vs_currency": "usd", "days": "365"}   # <— FIXED HERE
+        js = cp_get(
+            f"/tickers/{cid}/historical",
+            params={
+                "start": effective_start.isoformat(),
+                "end": end_dt.isoformat(),
+                "interval": "1d",
+            }
         )
         rows = []
-        for ts, cap in js.get("market_caps", []):
-            date = datetime.utcfromtimestamp(ts / 1000.0).date()
-            if start_dt <= date <= end_dt:
-                rows.append((date, cap))
-
+        for entry in js:
+            ts = entry.get("timestamp")
+            mc = entry.get("market_cap")
+            if ts is None or mc is None:
+                continue
+            date = datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
+            if effective_start <= date <= end_dt:
+                rows.append((date, float(mc)))
         df = pd.DataFrame(rows, columns=["date", f"{cid}_mc"])
         frames.append(df)
 
     if not frames:
-        raise RuntimeError("No CoinGecko data fetched for risk deployment.")
+        raise RuntimeError("No CoinPaprika data fetched for risk deployment.")
 
     df = frames[0]
     for f in frames[1:]:
@@ -240,14 +260,14 @@ def fetch_cg_risk_deployment(start_date, end_date):
     df.set_index("date", inplace=True)
     df = df.ffill()
 
-    risk_cols = [f"{cid}_mc" for cid in RISK_IDS]
+    risk_cols   = [f"{cid}_mc" for cid in RISK_IDS]
     stable_cols = [f"{cid}_mc" for cid in STABLE_IDS]
 
     eps = 1e-9
     df["risk_mc"]   = df[risk_cols].sum(axis=1)
     df["stable_mc"] = df[stable_cols].sum(axis=1)
     df["rd_ratio"]  = df["risk_mc"] / (df["risk_mc"] + df["stable_mc"] + eps)
-    df["RD_score"]  = 100 * df["rd_ratio"]
+    df["RD_score"]  = 100.0 * df["rd_ratio"]
 
     df = df.reset_index()
     return df[["date", "RD_score", "risk_mc", "stable_mc"]]
@@ -299,9 +319,9 @@ def compute_fg2(df):
     )
 
     out = df.copy()
-    out["FG2"] = FG2
-    out["FG2_vol"] = V_score
-    out["FG2_oi"]  = OI_score
+    out["FG2"]          = FG2
+    out["FG2_vol"]      = V_score
+    out["FG2_oi"]       = OI_score
     out["FG2_spotperp"] = SP_score
     out["FG2_riskdep"]  = RD_score
 
@@ -317,12 +337,12 @@ def main():
     print("Fetching Coinalyze BTC perp OI & volumes…")
     cl_df = fetch_coinalyze_oi_and_perp_volume(START_DATE, END_DATE)
 
-    print("Fetching CoinGecko risk deployment proxy…")
-    cg_df = fetch_cg_risk_deployment(START_DATE, END_DATE)
+    print("Fetching CoinPaprika risk deployment proxy…")
+    cp_df = fetch_cp_risk_deployment(START_DATE, END_DATE)
 
     print("Merging datasets…")
     df = cb_df.merge(cl_df, on="date", how="inner")
-    df = df.merge(cg_df, on="date", how="inner")
+    df = df.merge(cp_df, on="date", how="inner")
     df = df.sort_values("date")
 
     print("Computing FG2 components…")
@@ -335,3 +355,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
