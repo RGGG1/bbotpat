@@ -1,9 +1,9 @@
 """
 Compute Fear & Greed 2.0 index (FG2) using:
 
-- Binance spot: BTCUSDT klines (for price & spot volume)
-- Binance futures: BTCUSDT perps (for perp volume & open interest)
-- CoinMarketCap: global metrics (for total vs stablecoin market cap)
+- Coinbase: BTC-USD daily OHLCV (for price & spot volume)
+- Coinglass: BTC derivatives data (OI & perp volume, spot volume)
+- CoinMarketCap: global total market cap & stablecoin market cap
 
 Outputs a CSV with daily FG2 and component scores.
 """
@@ -18,43 +18,65 @@ import numpy as np
 
 # ---------------- CONFIG ----------------
 
-BINANCE_SPOT_BASE   = "https://api.binance.com"
-BINANCE_FUTURES_BASE = "https://fapi.binance.com"
-CMC_BASE            = "https://pro-api.coinmarketcap.com"
+COINBASE_BASE   = "https://api.exchange.coinbase.com"
+COINGLASS_BASE  = "https://open-api.coinglass.com/api"
+CMC_BASE        = "https://pro-api.coinmarketcap.com"
 
-CMC_API_KEY = os.getenv("CMC_API_KEY")  # you must set this in GitHub secrets or env
+CMC_API_KEY       = os.getenv("CMC_API_KEY")
+COINGLASS_API_KEY = os.getenv("COINGLASS_API_KEY")
 
-SYMBOL         = "BTCUSDT"
-START_DATE     = "2023-01-01"
-END_DATE       = "2025-11-01"
+SYMBOL_CB   = "BTC-USD"
+SYMBOL_FUT  = "BTC"   # used in Coinglass
+START_DATE  = "2023-01-01"
+END_DATE    = "2025-11-01"
 
-OUT_CSV        = "output/fg2_daily.csv"
+OUT_CSV     = "output/fg2_daily.csv"
 os.makedirs("output", exist_ok=True)
 
 
 # ---------------- HELPER FUNCS ----------------
 
-def iso_to_millis(date_str):
+def iso_to_unix(date_str):
     dt = datetime.strptime(date_str, "%Y-%m-%d")
-    return int(dt.timestamp() * 1000)
+    return int(dt.timestamp())
 
 
-def millis_to_date(ms):
-    return datetime.utcfromtimestamp(ms / 1000.0).date()
+def unix_to_date(ts):
+    return datetime.utcfromtimestamp(ts).date()
 
 
-def binance_get(base, path, params=None, sleep=0.3):
+def cb_get(path, params=None, sleep=0.25):
+    """Coinbase public GET"""
     if params is None:
         params = {}
-    url = base + path
+    url = COINBASE_BASE + path
     r = requests.get(url, params=params, timeout=30)
     if r.status_code != 200:
-        raise RuntimeError(f"Binance error {r.status_code}: {r.text[:300]}")
+        raise RuntimeError(f"Coinbase error {r.status_code}: {r.text[:300]}")
     time.sleep(sleep)
     return r.json()
 
 
-def cmc_get(path, params=None, sleep=0.5):
+def coinglass_get(path, params=None, sleep=0.25):
+    """Coinglass GET with API key"""
+    if COINGLASS_API_KEY is None:
+        raise RuntimeError("COINGLASS_API_KEY not set in environment.")
+    if params is None:
+        params = {}
+    headers = {
+        "accept": "application/json",
+        "coinglassSecret": COINGLASS_API_KEY,
+    }
+    url = COINGLASS_BASE + path
+    r = requests.get(url, params=params, headers=headers, timeout=30)
+    if r.status_code != 200:
+        raise RuntimeError(f"Coinglass error {r.status_code}: {r.text[:300]}")
+    time.sleep(sleep)
+    return r.json()
+
+
+def cmc_get(path, params=None, sleep=0.25):
+    """CoinMarketCap GET with API key"""
     if CMC_API_KEY is None:
         raise RuntimeError("CMC_API_KEY not set in environment.")
     if params is None:
@@ -68,127 +90,99 @@ def cmc_get(path, params=None, sleep=0.5):
     return r.json()
 
 
-# ---------------- 1) BINANCE SPOT KLINES (price + spot vol) ----------------
+# ---------------- 1) COINBASE BTC SPOT (OHLCV) ----------------
 
-def fetch_spot_klines(symbol, interval, start_date, end_date):
+def fetch_cb_btc_ohlcv(start_date, end_date):
     """
-    Fetch daily klines for symbol from Binance spot.
-    Returns DataFrame with date, close, spot_quote_volume.
+    Fetch daily BTC-USD candles from Coinbase.
+    Coinbase /candles returns [time, low, high, open, close, volume]
+    with granularity in seconds.
     """
-    start_ms = iso_to_millis(start_date)
-    end_ms   = iso_to_millis(end_date) + 24*60*60*1000  # include end date
+    start_unix = iso_to_unix(start_date)
+    end_unix   = iso_to_unix(end_date) + 24*60*60
 
-    all_rows = []
-    cur_start = start_ms
-    while cur_start < end_ms:
-        data = binance_get(
-            BINANCE_SPOT_BASE,
-            "/api/v3/klines",
-            params={
-                "symbol": symbol,
-                "interval": interval,
-                "startTime": cur_start,
-                "endTime": end_ms,
-                "limit": 1000,
-            },
-        )
-        if not data:
-            break
-        for row in data:
-            open_time = row[0]
-            close = float(row[4])
-            quote_volume = float(row[7])  # quote asset volume
-            date = millis_to_date(open_time)
-            all_rows.append((date, close, quote_volume))
-        if len(data) < 1000:
-            break
-        cur_start = data[-1][0] + 1
+    granularity = 86400  # 1 day in seconds
+    params = {
+        "granularity": granularity,
+        "start": datetime.utcfromtimestamp(start_unix).isoformat() + "Z",
+        "end": datetime.utcfromtimestamp(end_unix).isoformat() + "Z",
+    }
+    data = cb_get(f"/products/{SYMBOL_CB}/candles", params=params)
 
-    df = pd.DataFrame(all_rows, columns=["date", "spot_close", "spot_quote_volume"])
+    # Coinbase returns newest first; reverse
+    rows = []
+    for row in data:
+        ts, low, high, open_, close, volume = row
+        date = unix_to_date(ts)
+        rows.append((date, close, volume))
+
+    df = pd.DataFrame(rows, columns=["date", "spot_close", "spot_volume"])
     df = df.drop_duplicates("date").sort_values("date")
     return df
 
 
-# ---------------- 2) BINANCE FUTURES KLINES (perp vol) ----------------
+# ---------------- 2) COINGLASS BTC OI & VOLUME ----------------
 
-def fetch_futures_klines(symbol, interval, start_date, end_date):
+def fetch_coinglass_oi_and_volume(start_date, end_date):
     """
-    Fetch daily futures klines for symbol from Binance USDT-margined futures.
-    Returns DataFrame with date, perp_quote_volume.
+    Fetch BTC futures open interest & volume + spot volume from Coinglass.
+    Exact field names may need slight tweaks based on your plan.
+    We'll assume daily aggregated endpoints exist:
+      - /futures/openInterestHistory
+      - /futures/longShortHistory or /futures/futuresVolume
     """
-    start_ms = iso_to_millis(start_date)
-    end_ms   = iso_to_millis(end_date) + 24*60*60*1000
 
-    all_rows = []
-    cur_start = start_ms
-    while cur_start < end_ms:
-        data = binance_get(
-            BINANCE_FUTURES_BASE,
-            "/fapi/v1/klines",
-            params={
-                "symbol": symbol,
-                "interval": interval,
-                "startTime": cur_start,
-                "endTime": end_ms,
-                "limit": 1500,
-            },
-        )
-        if not data:
-            break
-        for row in data:
-            open_time = row[0]
-            quote_volume = float(row[7])  # quote asset volume
-            date = millis_to_date(open_time)
-            all_rows.append((date, quote_volume))
-        if len(data) < 1500:
-            break
-        cur_start = data[-1][0] + 1
+    start_unix = iso_to_unix(start_date)
+    end_unix   = iso_to_unix(end_date)
 
-    df = pd.DataFrame(all_rows, columns=["date", "perp_quote_volume"])
-    df = df.drop_duplicates("date").sort_values("date")
+    # Open Interest history
+    oi_js = coinglass_get(
+        "/futures/openInterestHistory",
+        params={
+            "symbol": SYMBOL_FUT,
+            "interval": "day",
+            "startTime": start_unix,
+            "endTime": end_unix,
+        },
+    )
+
+    oi_rows = []
+    # adjust "data" shape as needed
+    for item in oi_js.get("data", []):
+        ts = int(item["time"])
+        date = unix_to_date(ts // 1000 if ts > 10**12 else ts)
+        oi_value = float(item["openInterestUsd"])
+        oi_rows.append((date, oi_value))
+
+    oi_df = pd.DataFrame(oi_rows, columns=["date", "oi_usd"]).drop_duplicates("date")
+
+    # Futures volume & spot volume
+    vol_js = coinglass_get(
+        "/futures/futuresVolume",
+        params={
+            "symbol": SYMBOL_FUT,
+            "interval": "day",
+            "startTime": start_unix,
+            "endTime": end_unix,
+        },
+    )
+    v_rows = []
+    for item in vol_js.get("data", []):
+        ts = int(item["time"])
+        date = unix_to_date(ts // 1000 if ts > 10**12 else ts)
+        perp_vol = float(item["futuresVolumeUsd"])
+        spot_vol = float(item.get("spotVolumeUsd", 0.0))  # if endpoint provides it
+        v_rows.append((date, perp_vol, spot_vol))
+
+    vol_df = pd.DataFrame(v_rows, columns=["date", "perp_volume_usd", "cg_spot_volume_usd"])
+    vol_df = vol_df.drop_duplicates("date")
+
+    df = oi_df.merge(vol_df, on="date", how="inner")
+    df = df.sort_values("date")
     return df
 
 
-# ---------------- 3) BINANCE FUTURES OPEN INTEREST ----------------
-
-def fetch_futures_oi(symbol, start_date, end_date):
-    """
-    Fetch daily open interest history for symbol from Binance futures.
-    Uses openInterestHist endpoint with period=1d.
-    """
-    start_ts = datetime.strptime(start_date, "%Y-%m-%d")
-    end_ts   = datetime.strptime(end_date, "%Y-%m-%d")
-
-    all_rows = []
-    cur_start = start_ts
-    while cur_start <= end_ts:
-        next_end = min(cur_start + timedelta(days=500), end_ts)
-        data = binance_get(
-            BINANCE_FUTURES_BASE,
-            "/futures/data/openInterestHist",
-            params={
-                "symbol": symbol,
-                "period": "1d",
-                "limit": 500,
-                "startTime": int(cur_start.timestamp() * 1000),
-                "endTime": int(next_end.timestamp() * 1000),
-            },
-        )
-        if not data:
-            break
-        for row in data:
-            ts = int(row["timestamp"])
-            oi = float(row["sumOpenInterestValue"])
-            date = millis_to_date(ts)
-            all_rows.append((date, oi))
-        cur_start = next_end + timedelta(days=1)
-
-    df = pd.DataFrame(all_rows, columns=["date", "oi_usd"])
-    df = df.drop_duplicates("date").sort_values("date")
-    return df
-
-
-# ---------------- 4) COINMARKETCAP GLOBAL METRICS ----------------
+# ---------------- 3) COINMARKETCAP GLOBAL CAPS ----------------
 
 def fetch_cmc_global_daily(start_date, end_date):
     """
@@ -209,9 +203,9 @@ def fetch_cmc_global_daily(start_date, end_date):
         ts_str = item["timestamp"][:10]
         date = datetime.strptime(ts_str, "%Y-%m-%d").date()
         quote = item["quote"]["USD"]
-        total_mc    = float(quote["total_market_cap"])
-        # field name for stablecoin mc may differ; adjust if needed:
-        stable_mc   = float(quote.get("stablecoin_market_cap", 0.0))
+        total_mc  = float(quote["total_market_cap"])
+        # adjust key if needed based on your plan:
+        stable_mc = float(quote.get("stablecoin_market_cap", 0.0))
         rows.append((date, total_mc, stable_mc))
 
     df = pd.DataFrame(rows, columns=["date", "total_mc_usd", "stable_mc_usd"])
@@ -236,7 +230,8 @@ def rolling_minmax(series, window=365, lower_q=0.05, upper_q=0.95):
 def compute_fg2(df):
     """
     df has columns:
-      spot_close, spot_quote_volume, perp_quote_volume,
+      spot_close, spot_volume,
+      perp_volume_usd, cg_spot_volume_usd,
       oi_usd, total_mc_usd, stable_mc_usd
     """
     eps = 1e-9
@@ -250,15 +245,14 @@ def compute_fg2(df):
     V_low, V_high = rolling_minmax(V_raw)
     V_score = 100 * clip01((V_raw - V_low) / (V_high - V_low + eps))
 
-    # 2) Open Interest ratio: OI / total_mc (or BTC mc if you pull it separately)
-    # here we normalize by total_mc as a proxy:
+    # 2) Open Interest ratio: OI / total_mc
     OI_ratio = df["oi_usd"] / (df["total_mc_usd"] + eps)
     OI_low, OI_high = rolling_minmax(OI_ratio)
     OI_score = 100 * clip01((OI_ratio - OI_low) / (OI_high - OI_low + eps))
 
-    # 3) Spot vs Perp: perp fraction
-    df["perp_frac"] = df["perp_quote_volume"] / (
-        df["perp_quote_volume"] + df["spot_quote_volume"] + eps
+    # 3) Spot vs Perp: perp fraction (using Coinglass volumes)
+    df["perp_frac"] = df["perp_volume_usd"] / (
+        df["perp_volume_usd"] + df["cg_spot_volume_usd"] + eps
     )
     PF_low, PF_high = rolling_minmax(df["perp_frac"])
     SP_score = 100 * clip01((df["perp_frac"] - PF_low) / (PF_high - PF_low + eps))
@@ -290,21 +284,17 @@ def compute_fg2(df):
 # ---------------- MAIN ----------------
 
 def main():
-    print("Fetching Binance spot klines…")
-    spot_df = fetch_spot_klines(SYMBOL, "1d", START_DATE, END_DATE)
+    print("Fetching Coinbase BTC-USD OHLCV…")
+    cb_df = fetch_cb_btc_ohlcv(START_DATE, END_DATE)
 
-    print("Fetching Binance perp klines…")
-    fut_df = fetch_futures_klines(SYMBOL, "1d", START_DATE, END_DATE)
-
-    print("Fetching Binance futures OI…")
-    oi_df = fetch_futures_oi(SYMBOL, START_DATE, END_DATE)
+    print("Fetching Coinglass BTC OI & volumes…")
+    cg_df = fetch_coinglass_oi_and_volume(START_DATE, END_DATE)
 
     print("Fetching CMC global metrics…")
     cmc_df = fetch_cmc_global_daily(START_DATE, END_DATE)
 
     # Merge everything on date
-    df = spot_df.merge(fut_df, on="date", how="inner")
-    df = df.merge(oi_df, on="date", how="inner")
+    df = cb_df.merge(cg_df, on="date", how="inner")
     df = df.merge(cmc_df, on="date", how="inner")
 
     df = df.sort_values("date")
@@ -318,4 +308,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-          
+        
