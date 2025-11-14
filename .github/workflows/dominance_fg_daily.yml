@@ -1,49 +1,33 @@
-name: Dominance + FG Daily Signals
+name: FG + Dominance Telegram Daily
 
 on:
   schedule:
-    - cron: '2 0 * * *'   # 00:02 UTC every day
-  workflow_dispatch: {}   # allow manual runs too
+    - cron: "2 0 * * *"   # runs at 00:02 UTC daily
+  workflow_dispatch:
 
 jobs:
-  dom-fg-signals:
+  send_signal:
     runs-on: ubuntu-latest
-
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      CMC_API_KEY: ${{ secrets.CMC_API_KEY }}   # if needed
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pandas numpy requests
+          pip install requests pandas python-telegram-bot
 
-      - name: Compute FG_lite index
-        env:
-          COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
-        run: |
-          python compute_fg2_index.py
+      - name: Run FG daily engine
+        run: python compute_fg2_index.py
 
-      - name: Run BTC dominance + FG backtest
-        run: |
-          python backtest_dominance_rotation.py
-
-      - name: Send Telegram FG/Dominance signal
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:  ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python send_fg_dom_signal_telegram.py
-
-      - name: Upload outputs (optional)
-        uses: actions/upload-artifact@v4
-        with:
-          name: dom-fg-outputs
-          path: |
-            output/fg2_daily.csv
-            output/equity_curve_fg_dom.csv
+      - name: Send TG signal
+        run: python send_fg_dom_signal_telegram.py
+        
