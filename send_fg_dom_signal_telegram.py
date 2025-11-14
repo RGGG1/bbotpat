@@ -29,8 +29,15 @@ GREED_STABLE_THRESHOLD = 77.0
 
 RISK_IDS = ["bitcoin", "ethereum", "solana", "binancecoin"]
 
-TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TG_CHAT  = os.getenv("TELEGRAM_CHAT_ID")
+# Support both TELEGRAM_* and TG_* env names
+TG_TOKEN = (
+    os.getenv("TELEGRAM_BOT_TOKEN")
+    or os.getenv("TG_BOT_TOKEN")
+)
+TG_CHAT  = (
+    os.getenv("TELEGRAM_CHAT_ID")
+    or os.getenv("TG_CHAT_ID")
+)
 
 
 def cb_get(path, params=None, sleep=0.1):
@@ -227,7 +234,10 @@ def format_signal_message():
 
 def send_telegram_message(text: str):
     if not TG_TOKEN or not TG_CHAT:
-        raise RuntimeError("Telegram env vars not set (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID).")
+        raise RuntimeError(
+            "Telegram env vars not set "
+            "(TELEGRAM_BOT_TOKEN/TG_BOT_TOKEN or TELEGRAM_CHAT_ID/TG_CHAT_ID)."
+        )
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = {
         "chat_id": TG_CHAT,
@@ -248,4 +258,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+            
