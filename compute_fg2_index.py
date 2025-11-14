@@ -1,5 +1,5 @@
 """
-Compute Fear & Greed Lite index (FG_lite) using:
+Compute Hive Mind Index (HMI) using:
 
 - Coinbase: BTC-USD daily OHLCV (for price & spot volume)
 - Coinalyze: BTC perp open interest history + perp OHLCV (for perp volume)
@@ -9,22 +9,23 @@ providers either rate-limit or restrict historical access.
 
 Components:
 
-1) Volatility (V_score)
+1) Volatility (HMI_vol)
    - Based on BTC 30d vs 90d realized volatility
 
-2) Open Interest (OI_score)
+2) Open Interest (HMI_oi)
    - Based on BTC perp open interest, normalized over its own history
 
-3) Perp vs Spot dominance (SP_score)
+3) Perp vs Spot dominance (HMI_spotperp)
    - Perp volume share = perp_volume / (perp_volume + spot_volume)
 
-Composite:
+Composite (formerly FG_lite):
 
-    FG_lite = 0.50 * OI_score
-            + 0.30 * SP_score
-            + 0.20 * V_score
+    HMI = 0.50 * HMI_oi
+        + 0.30 * HMI_spotperp
+        + 0.20 * HMI_vol
 
-Outputs a CSV with daily FG_lite and component scores.
+NOTE: For compatibility with existing code, the CSV still uses the
+column name 'FG_lite'. Conceptually, that is the Hive Mind Index (HMI).
 """
 
 import os
@@ -212,7 +213,7 @@ def rolling_minmax(series, window=365, lower_q=0.05, upper_q=0.95):
     return low, high
 
 
-# ---------------- COMPUTE FG_LITE ----------------
+# ---------------- COMPUTE HMI (FG_lite) ----------------
 
 def compute_fg_lite(df):
     """
@@ -220,6 +221,9 @@ def compute_fg_lite(df):
       spot_close, spot_volume,
       perp_volume,
       oi_usd
+
+    Returns df with:
+      FG_lite (a.k.a. HMI), FG_vol, FG_oi, FG_spotperp
     """
     eps = 1e-9
 
@@ -271,16 +275,24 @@ def main():
     df = cb_df.merge(cl_df, on="date", how="inner")
     df = df.sort_values("date")
 
-    print("Computing FG_lite components…")
+    print("Computing Hive Mind Index components…")
     fg_df = compute_fg_lite(df)
 
     fg_df.to_csv(OUT_CSV, index=False)
-    print(f"Saved FG_lite daily data to {OUT_CSV}")
-    print(fg_df[[
-        "date", "FG_lite", "FG_vol", "FG_oi", "FG_spotperp"
-    ]].tail())
+    print(f"Saved HMI daily data to {OUT_CSV}")
+
+    # Pretty print with HMI naming for logs only
+    display_df = fg_df[["date", "FG_lite", "FG_vol", "FG_oi", "FG_spotperp"]].rename(
+        columns={
+            "FG_lite": "HMI",
+            "FG_vol": "HMI_vol",
+            "FG_oi": "HMI_oi",
+            "FG_spotperp": "HMI_spotperp",
+        }
+    )
+    print(display_df.tail())
 
 
 if __name__ == "__main__":
     main()
-   
+           
