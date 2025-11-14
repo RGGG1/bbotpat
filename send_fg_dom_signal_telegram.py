@@ -2,17 +2,17 @@
 """
 Send Telegram alert with:
 
-- Current FG_lite % and band name (zombie, extreme fear, etc)
-- Emoji colour based on fear/greed
-- BTC dominance vs ALT (BTC:ALT %)
+- Current HMI (Hive Mind Index) level and tier name
+- Emoji colour (circles) based on tier
+- BTC dominance vs ALT (BTC:ALT % as '75/25')
 - BTC / ETH / SOL prices
-- Current trade signal from dominance + FG_lite model
-- Percent-of-portfolio change vs previous day (e.g. 'move ~20% from BTC → ALTs')
+- Current trade signal from dominance + HMI
+- Percent-of-portfolio change vs previous day
+- Tiered target allocation (e.g. 66.7% BTC / 33.3% ALTs)
 """
 
 import os
 import time
-from datetime import datetime
 
 import requests
 import pandas as pd
@@ -25,7 +25,7 @@ DOM_LOW   = 0.75
 DOM_HIGH  = 0.81
 DOM_MID_LOW  = 0.771
 DOM_MID_HIGH = 0.789
-GREED_STABLE_THRESHOLD = 77.0
+GREED_STABLE_THRESHOLD = 77.0  # still used in logic, just not printed
 
 RISK_IDS = ["bitcoin", "ethereum", "solana", "binancecoin"]
 
@@ -60,38 +60,49 @@ def cg_get(path, params=None, sleep=0.3):
     return r.json()
 
 
-def load_latest_fg(path="output/fg2_daily.csv"):
+def load_latest_hmi(path="output/fg2_daily.csv"):
     df = pd.read_csv(path, parse_dates=["date"])
     df = df.sort_values("date")
     row = df.iloc[-1]
+    # FG_lite in CSV is our HMI
     return float(row["FG_lite"]), row["date"].date()
 
 
-def fg_band_name_and_emoji(fg):
-    # Aesthetic bands:
-    if fg < 10:
-        return "zombie apocalypse", "🩸🧟‍♂️"
-    elif fg < 25:
-        return "extreme fear", "🟥😱"
-    elif fg < 35:
-        return "moderate fear", "🟧😟"
-    elif fg < 65:
-        return "neutral", "⬜😐"
-    elif fg < 75:
-        return "greed", "🟩😏"
-    elif fg < 90:
-        return "extreme greed", "🟩🟩🤪"
+def hmi_band_name_and_emoji(hmi):
+    """
+    HMI tiers:
+
+    <10      -> Zombie apocalypse
+    10–25    -> McDonalds applications
+    25–40    -> Ngmi
+    40–60    -> Stable
+    60–80    -> We're early
+    80+      -> It's the future of finance
+    """
+    if hmi < 10:
+        return "Zombie apocalypse", "⚫🧟‍♂️"
+    elif hmi < 25:
+        return "McDonalds applications", "🔴🍔"
+    elif hmi < 40:
+        return "Ngmi", "🟠📉"
+    elif hmi < 60:
+        return "Stable", "⚪😐"
+    elif hmi < 80:
+        return "We're early", "🟢🚀"
     else:
-        return "the top", "🟢🚨"
+        return "It's the future of finance", "🟢🟢🌈"
 
 
-def allocation_from_dom_and_fg(btc_dom, fg_lite):
+def allocation_from_dom_and_hmi(btc_dom, hmi):
+    """
+    Same core logic as before, but we think of 'hmi' instead of FG_lite.
+    """
     # 1) mid dominance -> stables
     if DOM_MID_LOW <= btc_dom <= DOM_MID_HIGH:
         return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
 
-    # 2) extreme greed -> stables
-    if fg_lite >= GREED_STABLE_THRESHOLD:
+    # 2) extreme 'greed' (high HMI) -> stables
+    if hmi >= GREED_STABLE_THRESHOLD:
         return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
 
     # 3) dominance rotation
@@ -192,39 +203,67 @@ def describe_allocation_change(prev_w, curr_w):
     return main_flow, detail
 
 
+def snap_to_tiered_allocation(w):
+    """
+    We only *signal* at tier levels.
+    Use a 1/6 grid for BTC vs ALTs:
+      BTC weight ∈ {0, 1/6, 2/6, 3/6, 4/6, 5/6, 1}
+    Stables stay either 0 or 1 as per our logic.
+    """
+    if w["stables"] >= 0.999:
+        return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
+
+    grid = [0.0, 1/6, 2/6, 0.5, 4/6, 5/6, 1.0]
+    btc_cont = w["btc"]
+    # snap BTC to nearest grid point
+    btc_snapped = min(grid, key=lambda g: abs(g - btc_cont))
+    alt_snapped = 1.0 - btc_snapped
+
+    return {"btc": btc_snapped, "alts": alt_snapped, "stables": 0.0}
+
+
 def format_signal_message():
-    fg, fg_date = load_latest_fg()
-    band_name, emoji = fg_band_name_and_emoji(fg)
+    hmi, hmi_date = load_latest_hmi()
+    band_name, emoji = hmi_band_name_and_emoji(hmi)
 
     prices = fetch_spot_prices()
     btc_dom = fetch_btc_dom_current()
-    w = allocation_from_dom_and_fg(btc_dom, fg)
+    w_raw = allocation_from_dom_and_hmi(btc_dom, hmi)
+    w_tier = snap_to_tiered_allocation(w_raw)
 
-    btc_pct  = round(btc_dom * 100, 1)
-    alt_pct  = round((1 - btc_dom) * 100, 1)
+    btc_pct_dom  = round(btc_dom * 100)
+    alt_pct_dom  = 100 - btc_pct_dom
 
-    # high-level signal
-    if w["stables"] == 1.0:
-        signal = "Stable all (100% stables)."
-    elif w["btc"] > w["alts"]:
-        signal = f"Rotate toward BTC ({int(w['btc']*100)}% BTC / {int(w['alts']*100)}% ALTs)."
+    # high-level signal based on tiered target
+    if w_tier["stables"] == 1.0:
+        signal = "Stable all (100% Stables)."
+    elif w_tier["btc"] > w_tier["alts"]:
+        signal = f"Rotate toward BTC ({int(w_tier['btc']*100)}% BTC / {int(w_tier['alts']*100)}% ALTs)."
     else:
-        signal = f"Rotate toward ALTs ({int(w['alts']*100)}% ALTs / {int(w['btc']*100)}% BTC)."
+        signal = f"Rotate toward ALTs ({int(w_tier['alts']*100)}% ALTs / {int(w_tier['btc']*100)}% BTC)."
 
     prev_w, curr_w = load_last_two_allocations()
     flow_summary, flow_detail = describe_allocation_change(prev_w, curr_w)
 
+    # Suggested allocation (tiered)
+    sugg_btc = w_tier["btc"] * 100
+    sugg_alt = w_tier["alts"] * 100
+    sugg_stb = w_tier["stables"] * 100
+
     text = (
-        f"🧠 *FG_lite & Dominance Signal*\n"
-        f"`Date:` {fg_date}\n\n"
-        f"{emoji} *FG_lite:* {fg:.1f} — _{band_name}_\n"
-        f"📊 *BTC Dominance:* {btc_pct:.1f}% (ALTs {alt_pct:.1f}%)\n\n"
+        f"🧠 *Hive Mind Index (HMI) & Dominance Signal*\n"
+        f"`{hmi_date}`\n\n"
+        f"{emoji} *HMI:* {hmi:.1f} — _{band_name}_\n"
+        f"📊 *BTC dominance:* {btc_pct_dom}/{alt_pct_dom}\n\n"
         f"💰 *Prices:*\n"
         f" • BTC: ${prices['BTC']:.0f}\n"
         f" • ETH: ${prices['ETH']:.0f}\n"
         f" • SOL: ${prices['SOL']:.2f}\n\n"
-        f"⚙️ *Signal:* {signal}\n"
-        f"   (Greed stabling threshold: FG ≥ {GREED_STABLE_THRESHOLD})\n\n"
+        f"📐 *Suggested allocation (tiered):*\n"
+        f" • BTC: {sugg_btc:.1f}%\n"
+        f" • ALTs: {sugg_alt:.1f}%\n"
+        f" • Stables: {sugg_stb:.1f}%\n\n"
+        f"⚙️ *Signal:* {signal}\n\n"
         f"🔁 *Portfolio Flow:*\n"
         f"{flow_summary}\n"
         f"{flow_detail}"
@@ -258,4 +297,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-            
+    
