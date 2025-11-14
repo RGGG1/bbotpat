@@ -10,35 +10,18 @@ Capital assumptions:
 
 - Start with $100 only, entirely in stables.
 - No DCA, no further capital added.
-- First allocation happens on the first backtest date.
 - BTC-only benchmark also starts with $100 on the same date and just holds BTC.
 
-Allocation logic (must match live Telegram logic):
-
-1) Greed override:
-   If HMI >= GREED_STABLE_THRESHOLD (77) -> 100% STABLES
-
-2) Stable mid-zone (dominance pivot):
-   If DOM_MID_LOW < dom < DOM_MID_HIGH (0.771–0.789) -> 100% STABLES
-
-3) BTC side:
-   - If dom <= DOM_LOW (0.75) -> 100% BTC
-   - If DOM_LOW < dom <= DOM_MID_LOW (0.75–0.771):
-       BTC/ALTs change linearly:
-         dom = 0.75   -> 100% BTC / 0% ALTs
-         dom = 0.771  -> 0% BTC / 100% ALTs
-
-4) ALT side:
-   - If dom >= DOM_HIGH (0.81) -> 100% ALTs
-   - If DOM_MID_HIGH <= dom < DOM_HIGH (0.789–0.81):
-       BTC/ALTs change linearly:
-         dom = 0.789 -> 100% BTC / 0% ALTs
-         dom = 0.81  -> 0% BTC / 100% ALTs
+We use the intersection of:
+    * desired date range
+    * HMI (fg2) date range
+If there is no overlap, we exit gracefully and leave the previous
+equity_curve_fg_dom.csv untouched.
 """
 
 import os
 import time
-from datetime import datetime, date
+from datetime import datetime
 
 import requests
 import pandas as pd
@@ -46,16 +29,14 @@ import numpy as np
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
-# Start backtest: you said we start with $100 on 14/11/25 and first trade at 00:02 on 15th.
-START_DATE = "2025-11-15"
-
-# END_DATE = today (UTC)
-END_DATE = datetime.utcnow().date().isoformat()
+# We want to start as far back as reasonably possible.
+DESIRED_START_DATE = "2023-01-01"
+DESIRED_END_DATE   = datetime.utcnow().date().isoformat()
 
 OUT_CSV_EQUITY = "output/equity_curve_fg_dom.csv"
 os.makedirs("output", exist_ok=True)
 
-# Dominance thresholds (match live script)
+# Dominance thresholds (must match HMI / TG script)
 DOM_LOW       = 0.75
 DOM_HIGH      = 0.81
 DOM_MID_LOW   = 0.771
@@ -83,7 +64,9 @@ def cg_get(path, params=None, sleep=1.2):
 def fetch_cg_ohlc_and_mc(coin_id, start_date, end_date):
     """
     Use /market_chart to get daily prices + market caps.
-    CoinGecko free plan: last 365d allowed.
+
+    We pass `days=365` (CoinGecko free limit), then filter records
+    to [start_date, end_date].
     """
     start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
     end_dt   = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -114,16 +97,38 @@ def fetch_cg_ohlc_and_mc(coin_id, start_date, end_date):
 
 
 def load_hmi(path="output/fg2_daily.csv"):
+    """
+    Load HMI (FG_lite) and return df, min_date, max_date.
+    """
+    if not os.path.exists(path):
+        raise RuntimeError("HMI file not found; run compute_fg2_index.py first.")
+
     df = pd.read_csv(path, parse_dates=["date"])
+    if df.empty:
+        raise RuntimeError("HMI file is empty; run compute_fg2_index.py first.")
+
     df["date"] = df["date"].dt.date
+    df = df.sort_values("date")
+
+    dmin = df["date"].min()
+    dmax = df["date"].max()
+
     # FG_lite column is our HMI
-    return df[["date", "FG_lite"]].rename(columns={"FG_lite": "HMI"})
+    df = df[["date", "FG_lite"]].rename(columns={"FG_lite": "HMI"})
+    return df, dmin, dmax
 
 
 def allocation_from_dom_and_hmi(btc_dom, hmi):
     """
     Returns target weights: dict(btc, alts, stables),
     BTC dominance in [0,1], HMI in [0,100].
+
+    1) HMI >= 77 -> 100% stables
+    2) 0.771 < dom < 0.789 -> 100% stables
+    3) dom <= 0.75 -> 100% BTC
+    4) dom >= 0.81 -> 100% ALTs
+    5) BTC side linear between 0.75–0.771
+    6) ALT side linear between 0.789–0.81
     """
 
     # 1) Greed override
@@ -158,18 +163,26 @@ def allocation_from_dom_and_hmi(btc_dom, hmi):
     return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
 
 
-# ---------- BUILD DATA ----------
+# ---------- BUILD MARKET DATA ----------
 
-def build_market_data():
-    print("Fetching CoinGecko data for BTC, ETH, SOL, BNB…")
+def build_market_data(eff_start_str, eff_end_str):
+    print(f"Fetching CoinGecko data for BTC, ETH, SOL, BNB… "
+          f"({eff_start_str} → {eff_end_str})")
+
     frames = []
     for cid in RISK_IDS:
-        df = fetch_cg_ohlc_and_mc(cid, START_DATE, END_DATE)
+        df = fetch_cg_ohlc_and_mc(cid, eff_start_str, eff_end_str)
         frames.append(df)
+
+    if not frames:
+        raise RuntimeError("No market data frames returned from CoinGecko.")
 
     df = frames[0]
     for sub in frames[1:]:
         df = df.merge(sub, on="date", how="inner")
+
+    if df.empty:
+        raise RuntimeError("No overlapping market data between assets.")
 
     df = df.sort_values("date").reset_index(drop=True)
 
@@ -190,12 +203,38 @@ def build_market_data():
 # ---------- BACKTEST / EQUITY UPDATE ----------
 
 def run_backtest():
-    df_mkt = build_market_data()
-    df_hmi = load_hmi()
+    # 1) Load HMI and its range
+    df_hmi, hmi_min, hmi_max = load_hmi()
 
+    desired_start = datetime.strptime(DESIRED_START_DATE, "%Y-%m-%d").date()
+    desired_end   = datetime.strptime(DESIRED_END_DATE, "%Y-%m-%d").date()
+
+    # Effective intersection
+    eff_start = max(desired_start, hmi_min)
+    eff_end   = min(desired_end, hmi_max)
+
+    if eff_start > eff_end:
+        print(f"[Hive equity updater] No overlapping dates between desired "
+              f"range ({desired_start}→{desired_end}) and HMI "
+              f"range ({hmi_min}→{hmi_max}).")
+        print("Leaving existing equity_curve_fg_dom.csv untouched.")
+        return
+
+    eff_start_str = eff_start.isoformat()
+    eff_end_str   = eff_end.isoformat()
+
+    # 2) Market data for effective range
+    df_mkt = build_market_data(eff_start_str, eff_end_str)
+
+    # 3) Merge market + HMI
     df = df_mkt.merge(df_hmi, on="date", how="inner").sort_values("date").reset_index(drop=True)
     if df.empty:
-        raise RuntimeError("No overlapping dates between market data and HMI; check START_DATE and HMI file.")
+        print("[Hive equity updater] After merging market data and HMI, no rows remain.")
+        print("Leaving existing equity_curve_fg_dom.csv untouched.")
+        return
+
+    print(f"[Hive equity updater] Effective backtest range: "
+          f"{df['date'].iloc[0]} → {df['date'].iloc[-1]}")
 
     # Portfolio starts all in stables
     btc_units   = 0.0
@@ -207,7 +246,7 @@ def run_backtest():
     # BTC-only: invest 100 in BTC on the first day, then hold
     btc_only_units = None
 
-    for i, row in df.iterrows():
+    for _, row in df.iterrows():
         date_row = row["date"]
         btc_price = row["btc_price"]
         alt_price = (row["ethereum_price"] + row["solana_price"] + row["binancecoin_price"]) / 3.0
@@ -253,4 +292,4 @@ def run_backtest():
 
 if __name__ == "__main__":
     run_backtest()
-   
+       
