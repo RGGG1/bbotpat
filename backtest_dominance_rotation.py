@@ -9,11 +9,12 @@
 Capital assumptions:
 
 - Start with $100 only, entirely in stables.
+- Start date: 2025-11-10 (first live Hive allocation day).
 - No DCA, no further capital added.
 - BTC-only benchmark also starts with $100 on the same date and just holds BTC.
 
 We use the intersection of:
-    * desired date range
+    * desired date range (2025-11-10 → today)
     * HMI (fg2) date range
 If there is no overlap, we exit gracefully and leave the previous
 equity_curve_fg_dom.csv untouched.
@@ -29,8 +30,8 @@ import numpy as np
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
-# We want to start as far back as reasonably possible.
-DESIRED_START_DATE = "2023-01-01"
+# Live start date for Hive:
+DESIRED_START_DATE = "2025-11-10"
 DESIRED_END_DATE   = datetime.utcnow().date().isoformat()
 
 OUT_CSV_EQUITY = "output/equity_curve_fg_dom.csv"
@@ -292,4 +293,4 @@ def run_backtest():
 
 if __name__ == "__main__":
     run_backtest()
-       
+                
