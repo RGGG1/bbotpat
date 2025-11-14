@@ -9,17 +9,18 @@ BTC dominance rotation backtest with FG_lite integration.
 
   1) If BTC dominance in [0.771, 0.789] -> 100% stables
   2) Else if FG_lite >= 77 -> 100% stables
-  3) Else (Fear+Neutral bands) -> pure dominance rotation:
+  3) Else (Fear+Neutral) -> pure dominance rotation:
 
         dom <= 0.75 -> 100% BTC
         dom >= 0.81 -> 100% ALTS
         between    -> linear mix BTC<->ALTS
 
+Writes: output/equity_curve_fg_dom.csv
 """
 
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import requests
 import pandas as pd
@@ -27,7 +28,8 @@ import numpy as np
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
-START_DATE = "2024-01-01"  # realistically, last ~365 days
+# For free APIs, realistically last ~365 days
+START_DATE = "2024-01-01"
 END_DATE   = "2025-11-01"
 
 OUT_CSV_EQUITY = "output/equity_curve_fg_dom.csv"
@@ -158,37 +160,31 @@ def run_backtest():
 
     df = df_mkt.merge(df_fg, on="date", how="inner").sort_values("date").reset_index(drop=True)
 
-    # Portfolio units
     btc_units   = 0.0
-    alt_units   = 0.0   # ALT bucket: equal-weighted ETH+SOL+BNB by value
+    alt_units   = 0.0
     stable_usd  = 100.0  # start in stables
     equity_hist = []
 
     for i, row in df.iterrows():
         date      = row["date"]
         btc_price = row["btc_price"]
-        # alt bucket price = simple equal-weighted of three
         alt_price = (row["ethereum_price"] + row["solana_price"] + row["binancecoin_price"]) / 3.0
 
-        # compute current equity
         equity = (
             btc_units * btc_price +
             alt_units * alt_price +
             stable_usd
         )
 
-        # decide target allocation
         w = allocation_from_dom_and_fg(row["btc_dom"], row["FG_lite"])
         target_btc_usd   = equity * w["btc"]
         target_alt_usd   = equity * w["alts"]
         target_stable_usd = equity * w["stables"]
 
-        # rebalance
         btc_units   = target_btc_usd / btc_price if btc_price > 0 else 0.0
         alt_units   = target_alt_usd / alt_price if alt_price > 0 else 0.0
         stable_usd  = target_stable_usd
 
-        # also compute BTC-only equity (100% BTC buy&hold from start)
         if i == 0:
             btc_only_units = equity / btc_price
         btc_only_equity = btc_only_units * btc_price
@@ -219,3 +215,4 @@ def run_backtest():
 
 if __name__ == "__main__":
     run_backtest()
+  
