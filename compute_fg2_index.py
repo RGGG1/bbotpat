@@ -4,6 +4,9 @@ Compute Hive Mind Index (HMI) — previously FG_lite.
 Uses:
 - Coinbase spot OHLCV (BTC-USD)
 - Coinalyze perp OHLCV + open interest
+
+We compute daily HMI and save to output/fg2_daily.csv
+(HMI is stored in the FG_lite column for compatibility).
 """
 
 import os
@@ -24,8 +27,9 @@ COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY")
 SYMBOL_CB    = "BTC-USD"          # Coinbase product
 SYMBOL_PERP  = "BTCUSDT_PERP.A"   # Coinalyze aggregated BTC perp symbol
 
-START_DATE   = "2023-01-01"
-END_DATE     = "2025-11-01"
+# Use a rolling window of ~2 years to support 365d rolling min/max etc.
+END_DATE     = datetime.utcnow().date().isoformat()
+START_DATE   = (datetime.utcnow().date() - timedelta(days=730)).isoformat()
 
 OUT_CSV = "output/fg2_daily.csv"
 os.makedirs("output", exist_ok=True)
@@ -102,6 +106,11 @@ def coinalyze_get(path, params=None, sleep=0.25):
 # ---------------- 1) SPOT DATA ----------------
 
 def fetch_cb_btc_ohlcv(start_date, end_date):
+    """
+    Fetch BTC-USD daily candles from Coinbase in <=300-candle chunks.
+
+    /candles returns [time, low, high, open, close, volume].
+    """
     granularity = 86400      # 1d candles
     max_points = 300
 
@@ -131,7 +140,7 @@ def fetch_cb_btc_ohlcv(start_date, end_date):
             ts, low, high, open_, close, volume = row
             rows.append((unix_to_date(ts), close, volume))
 
-        # get oldest timestamp Coinbase returned
+        # Coinbase returns candles newest→oldest; find oldest ts
         oldest_ts = min(r[0] for r in data)
         cur_start = oldest_ts + granularity
         if cur_start <= start_unix:
@@ -244,7 +253,7 @@ def compute_fg_lite(df):
 # ---------------- MAIN ----------------
 
 def main():
-    print("Fetching Coinbase BTC-USD OHLCV…")
+    print(f"Fetching Coinbase BTC-USD OHLCV… ({START_DATE} → {END_DATE})")
     cb_df = fetch_cb_btc_ohlcv(START_DATE, END_DATE)
 
     print("Fetching Coinalyze BTC perp OI & volumes…")
@@ -263,4 +272,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-   
+        
