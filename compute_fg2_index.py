@@ -40,6 +40,7 @@ import numpy as np
 
 COINBASE_BASE   = "https://api.exchange.coinbase.com"
 COINALYZE_BASE  = "https://api.coinalyze.net/v1"
+COINGECKO_BASE  = "https://api.coingecko.com/api/v3"   # NEW: for fallback
 
 # Try multiple env names just in case
 COINALYZE_API_KEY = (
@@ -69,16 +70,59 @@ def unix_to_date(ts: int):
     return datetime.utcfromtimestamp(ts).date()
 
 
-def cb_get(path, params=None, sleep=0.25):
-    """Coinbase public GET."""
+def cb_get(path, params=None, sleep=0.25, max_retries=5):
+    """
+    Coinbase public GET with simple retry/backoff on transient errors.
+
+    Retries on:
+      - network errors (requests.exceptions.RequestException)
+      - HTTP 5xx (server-side issues)
+      - HTTP 429 (rate limit)
+
+    Raises immediately on other 4xx errors.
+    """
     if params is None:
         params = {}
+
     url = COINBASE_BASE + path
-    r = requests.get(url, params=params, timeout=30)
-    if r.status_code != 200:
-        raise RuntimeError(f"Coinbase error {r.status_code}: {r.text[:300]}")
-    time.sleep(sleep)
-    return r.json()
+    last_err = None
+    status_code = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.get(url, params=params, timeout=30)
+            status_code = r.status_code
+        except requests.exceptions.RequestException as e:
+            last_err = e
+        else:
+            # Success
+            if status_code == 200:
+                time.sleep(sleep)
+                return r.json()
+
+            # Transient / retryable errors
+            if status_code in (429,) or 500 <= status_code < 600:
+                last_err = RuntimeError(
+                    f"Coinbase error {status_code}: {r.text[:300]}"
+                )
+            else:
+                # Non-retryable client error
+                raise RuntimeError(
+                    f"Coinbase error {status_code}: {r.text[:300]}"
+                )
+
+        # Backoff and retry
+        wait = sleep * (2 ** (attempt - 1))
+        print(
+            f"cb_get: attempt {attempt}/{max_retries} failed "
+            f"(status={status_code}, err={last_err}); retrying in {wait:.1f}s…"
+        )
+        time.sleep(wait)
+
+    # Exhausted retries
+    raise RuntimeError(
+        f"Coinbase request failed after {max_retries} attempts: {last_err}"
+    )
 
 
 def coinalyze_get(path, params=None, sleep=0.25):
@@ -93,6 +137,17 @@ def coinalyze_get(path, params=None, sleep=0.25):
     r = requests.get(url, params=params, headers=headers, timeout=30)
     if r.status_code != 200:
         raise RuntimeError(f"Coinalyze error {r.status_code}: {r.text[:300]}")
+    time.sleep(sleep)
+    return r.json()
+
+
+def cg_get(path, params=None, sleep=0.5):
+    """CoinGecko public GET (used as fallback for BTC spot)."""
+    if params is None:
+        params = {}
+    url = COINGECKO_BASE + path
+    r = requests.get(url, params=params, timeout=30)
+    r.raise_for_status()
     time.sleep(sleep)
     return r.json()
 
@@ -142,6 +197,42 @@ def fetch_cb_btc_ohlcv(start_date, end_date):
 
     df = pd.DataFrame(rows, columns=["date", "spot_close", "spot_volume"])
     return df.drop_duplicates("date").sort_values("date")
+
+
+def fetch_cg_btc_ohlcv_fallback(start_date, end_date):
+    """
+    Fallback: get BTC daily close + volume from CoinGecko
+    if Coinbase candles are unavailable.
+    """
+    print("FALLBACK: Fetching BTC-USD daily data from CoinGecko…")
+
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_dt   = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    js = cg_get(
+        "/coins/bitcoin/market_chart",
+        params={"vs_currency": "usd", "days": "max"}
+    )
+
+    prices = js.get("prices", [])
+    vols   = js.get("total_volumes", [])
+
+    vol_map = {}
+    for ts, vol in vols:
+        d = datetime.utcfromtimestamp(ts / 1000.0).date()
+        vol_map[d] = vol
+
+    rows = []
+    for ts, price in prices:
+        d = datetime.utcfromtimestamp(ts / 1000.0).date()
+        if not (start_dt <= d <= end_dt):
+            continue
+        vol = vol_map.get(d, 0.0)
+        rows.append((d, price, vol))
+
+    df = pd.DataFrame(rows, columns=["date", "spot_close", "spot_volume"])
+    df = df.drop_duplicates("date").sort_values("date")
+    return df
 
 
 # ---------------- 2) COINALYZE BTC PERP OI & VOLUME ----------------
@@ -266,7 +357,12 @@ def compute_fg_lite(df):
 
 def main():
     print("Fetching Coinbase BTC-USD OHLCV…")
-    cb_df = fetch_cb_btc_ohlcv(START_DATE, END_DATE)
+    try:
+        cb_df = fetch_cb_btc_ohlcv(START_DATE, END_DATE)
+    except Exception as e:
+        # If Coinbase is having a bad day (500s, etc.), fall back to CoinGecko.
+        print("Coinbase fetch failed, using CoinGecko fallback:", e)
+        cb_df = fetch_cg_btc_ohlcv_fallback(START_DATE, END_DATE)
 
     print("Fetching Coinalyze BTC perp OI & volumes…")
     cl_df = fetch_coinalyze_oi_and_perp_volume(START_DATE, END_DATE)
