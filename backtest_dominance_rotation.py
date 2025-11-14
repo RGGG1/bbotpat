@@ -208,9 +208,13 @@ def run_backtest():
     print("Final equity (strategy):", res["equity"].iloc[-1])
     print("Final equity (BTC only):", res["btc_only"].iloc[-1])
 
-    annual = res.set_index("date")[["equity", "btc_only"]].resample("YE").last()
+    # Ensure date is a proper datetime index for resampling
+    res_annual = res.copy()
+    res_annual["date"] = pd.to_datetime(res_annual["date"])
+    res_annual = res_annual.set_index("date")[["equity", "btc_only"]].resample("YE").last()
+
     print("\n=== ANNUAL ===")
-    print(annual)
+    print(res_annual)
 
 
 if __name__ == "__main__":
