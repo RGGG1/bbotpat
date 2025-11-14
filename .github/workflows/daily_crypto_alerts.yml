@@ -3,7 +3,7 @@ name: Daily Crypto Alerts
 on:
   workflow_dispatch:
   # schedule:
-  #   - cron: '31 23 * * *'
+  #   - cron: '31 23 * * *'   # uncomment & adjust if you want it scheduled
 
 concurrency:
   group: daily-crypto-alerts
@@ -20,11 +20,14 @@ jobs:
             label: x44roi
           - script: alerts_10.py
             label: x10trades18xroi
+          - script: alerts_dom_fg.py
+            label: dom_fg
 
     env:
-      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-      TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
-      ALERTS_NAME:  ${{ matrix.label }}
+      TG_BOT_TOKEN:        ${{ secrets.TG_BOT_TOKEN }}
+      TG_CHAT_ID:          ${{ secrets.TG_CHAT_ID }}
+      COINALYZE_API_KEY:   ${{ secrets.COINALYZE_API_KEY }}  # needed by compute_fg2_index.py
+      ALERTS_NAME:         ${{ matrix.label }}
 
     steps:
       - uses: actions/checkout@v4
@@ -44,3 +47,4 @@ jobs:
 
       - name: Run ${{ matrix.label }}
         run: python ${{ matrix.script }}
+        
