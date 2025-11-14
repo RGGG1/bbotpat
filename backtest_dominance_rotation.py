@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """
-BTC dominance rotation backtest with HMI (Hive Mind Index) filter + DCA.
+'Hive' equity updater.
 
 - BTC vs ALT bucket (ETH+SOL+BNB)
 - Uses CoinGecko for daily prices/market caps (last ~365d)
 - Uses HMI from output/fg2_daily.csv (stored as FG_lite)
 
-Allocation logic:
+Capital assumptions:
+
+- Start with $100 only, entirely in stables.
+- No DCA, no further capital added.
+- First allocation happens on the first backtest date.
+- BTC-only benchmark also starts with $100 on the same date and just holds BTC.
+
+Allocation logic (must match live Telegram logic):
 
 1) Greed override:
    If HMI >= GREED_STABLE_THRESHOLD (77) -> 100% STABLES
@@ -18,8 +25,8 @@ Allocation logic:
    - If dom <= DOM_LOW (0.75) -> 100% BTC
    - If DOM_LOW < dom <= DOM_MID_LOW (0.75–0.771):
        BTC/ALTs change linearly:
-         dom = 0.75  -> 100% BTC / 0% ALTs
-         dom = 0.771 -> 0% BTC / 100% ALTs
+         dom = 0.75   -> 100% BTC / 0% ALTs
+         dom = 0.771  -> 0% BTC / 100% ALTs
 
 4) ALT side:
    - If dom >= DOM_HIGH (0.81) -> 100% ALTs
@@ -27,16 +34,11 @@ Allocation logic:
        BTC/ALTs change linearly:
          dom = 0.789 -> 100% BTC / 0% ALTs
          dom = 0.81  -> 0% BTC / 100% ALTs
-
-DCA:
-
-- Each day add DCA_AMOUNT (USD) to stables, then rebalance to target weights.
-- BTC-only benchmark also gets the same DCA into BTC.
 """
 
 import os
 import time
-from datetime import datetime
+from datetime import datetime, date
 
 import requests
 import pandas as pd
@@ -44,14 +46,16 @@ import numpy as np
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
-# For free APIs, realistically last ~365 days
-START_DATE = "2024-01-01"
-END_DATE   = "2025-11-01"
+# Start backtest: you said we start with $100 on 14/11/25 and first trade at 00:02 on 15th.
+START_DATE = "2025-11-15"
+
+# END_DATE = today (UTC)
+END_DATE = datetime.utcnow().date().isoformat()
 
 OUT_CSV_EQUITY = "output/equity_curve_fg_dom.csv"
 os.makedirs("output", exist_ok=True)
 
-# Dominance thresholds
+# Dominance thresholds (match live script)
 DOM_LOW       = 0.75
 DOM_HIGH      = 0.81
 DOM_MID_LOW   = 0.771
@@ -59,7 +63,6 @@ DOM_MID_HIGH  = 0.789
 GREED_STABLE_THRESHOLD = 77.0  # HMI >= 77 => fully stables
 
 INITIAL_CAPITAL = 100.0
-DCA_AMOUNT      = 10.0  # USD per day
 
 RISK_IDS = ["bitcoin", "ethereum", "solana", "binancecoin"]
 
@@ -121,8 +124,6 @@ def allocation_from_dom_and_hmi(btc_dom, hmi):
     """
     Returns target weights: dict(btc, alts, stables),
     BTC dominance in [0,1], HMI in [0,100].
-
-    Implements the new symmetric, fully linear model.
     """
 
     # 1) Greed override
@@ -141,8 +142,6 @@ def allocation_from_dom_and_hmi(btc_dom, hmi):
 
     # 4) BTC side linear: DOM_LOW < dom <= DOM_MID_LOW
     if btc_dom <= DOM_MID_LOW:
-        # dom = DOM_LOW   -> btc = 1, alt = 0
-        # dom = DOM_MID_LOW -> btc = 0, alt = 1
         t = (btc_dom - DOM_LOW) / (DOM_MID_LOW - DOM_LOW)
         btc_w = 1.0 - t
         alt_w = t
@@ -150,14 +149,12 @@ def allocation_from_dom_and_hmi(btc_dom, hmi):
 
     # 5) ALT side linear: DOM_MID_HIGH <= dom < DOM_HIGH
     if btc_dom >= DOM_MID_HIGH:
-        # dom = DOM_MID_HIGH -> btc = 1, alt = 0
-        # dom = DOM_HIGH     -> btc = 0, alt = 1
         t = (btc_dom - DOM_MID_HIGH) / (DOM_HIGH - DOM_MID_HIGH)
         btc_w = 1.0 - t
         alt_w = t
         return {"btc": btc_w, "alts": alt_w, "stables": 0.0}
 
-    # Fallback (should not be hit): treat as stables
+    # Fallback
     return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
 
 
@@ -190,51 +187,52 @@ def build_market_data():
     return df
 
 
-# ---------- BACKTEST ----------
+# ---------- BACKTEST / EQUITY UPDATE ----------
 
 def run_backtest():
     df_mkt = build_market_data()
     df_hmi = load_hmi()
 
     df = df_mkt.merge(df_hmi, on="date", how="inner").sort_values("date").reset_index(drop=True)
+    if df.empty:
+        raise RuntimeError("No overlapping dates between market data and HMI; check START_DATE and HMI file.")
 
+    # Portfolio starts all in stables
     btc_units   = 0.0
     alt_units   = 0.0
     stable_usd  = INITIAL_CAPITAL
+
     equity_hist = []
 
-    btc_only_units = 0.0
+    # BTC-only: invest 100 in BTC on the first day, then hold
+    btc_only_units = None
 
     for i, row in df.iterrows():
-        date      = row["date"]
+        date_row = row["date"]
         btc_price = row["btc_price"]
         alt_price = (row["ethereum_price"] + row["solana_price"] + row["binancecoin_price"]) / 3.0
 
-        # 1) Apply DCA: add fresh cash as stables
-        stable_usd += DCA_AMOUNT
-
-        # 2) Compute current equity
+        # Current equity
         equity = btc_units * btc_price + alt_units * alt_price + stable_usd
 
-        # 3) Decide target allocation from dominance + HMI
+        # BTC-only benchmark: buy once on the first day
+        if btc_only_units is None:
+            btc_only_units = INITIAL_CAPITAL / btc_price
+        btc_only_equity = btc_only_units * btc_price
+
+        # Decide target allocation from dominance + HMI
         w = allocation_from_dom_and_hmi(row["btc_dom"], row["HMI"])
         target_btc_usd    = equity * w["btc"]
         target_alt_usd    = equity * w["alts"]
         target_stable_usd = equity * w["stables"]
 
-        # 4) Rebalance
+        # Rebalance
         btc_units   = target_btc_usd / btc_price if btc_price > 0 else 0.0
         alt_units   = target_alt_usd / alt_price if alt_price > 0 else 0.0
         stable_usd  = target_stable_usd
 
-        # 5) BTC-only comparison (buy&hold with same DCA pattern)
-        btc_only_units += DCA_AMOUNT / btc_price
-        if i == 0:
-            btc_only_units += INITIAL_CAPITAL / btc_price
-        btc_only_equity = btc_only_units * btc_price
-
         equity_hist.append({
-            "date": date,
+            "date": date_row,
             "equity": equity,
             "btc_only": btc_only_equity,
             "btc_dom": row["btc_dom"],
@@ -252,15 +250,7 @@ def run_backtest():
     print("Final equity (strategy):", res["equity"].iloc[-1])
     print("Final equity (BTC only):", res["btc_only"].iloc[-1])
 
-    # Annual summary
-    res_annual = res.copy()
-    res_annual["date"] = pd.to_datetime(res_annual["date"])
-    res_annual = res_annual.set_index("date")[["equity", "btc_only"]].resample("YE").last()
-
-    print("\n=== ANNUAL ===")
-    print(res_annual)
-
 
 if __name__ == "__main__":
     run_backtest()
-  
+   
