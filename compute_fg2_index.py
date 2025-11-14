@@ -1,36 +1,14 @@
 """
-Compute Hive Mind Index (HMI) using:
+Compute Hive Mind Index (HMI) — previously FG_lite.
 
-- Coinbase: BTC-USD daily OHLCV (for price & spot volume)
-- Coinalyze: BTC perp open interest history + perp OHLCV (for perp volume)
-
-This avoids any total-market-cap or stablecoin data, because all free
-providers either rate-limit or restrict historical access.
-
-Components:
-
-1) Volatility (HMI_vol)
-   - Based on BTC 30d vs 90d realized volatility
-
-2) Open Interest (HMI_oi)
-   - Based on BTC perp open interest, normalized over its own history
-
-3) Perp vs Spot dominance (HMI_spotperp)
-   - Perp volume share = perp_volume / (perp_volume + spot_volume)
-
-Composite (formerly FG_lite):
-
-    HMI = 0.50 * HMI_oi
-        + 0.30 * HMI_spotperp
-        + 0.20 * HMI_vol
-
-NOTE: For compatibility with existing code, the CSV still uses the
-column name 'FG_lite'. Conceptually, that is the Hive Mind Index (HMI).
+Uses:
+- Coinbase spot OHLCV (BTC-USD)
+- Coinalyze perp OHLCV + open interest
 """
 
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 import pandas as pd
@@ -40,132 +18,95 @@ import numpy as np
 
 COINBASE_BASE   = "https://api.exchange.coinbase.com"
 COINALYZE_BASE  = "https://api.coinalyze.net/v1"
-COINGECKO_BASE  = "https://api.coingecko.com/api/v3"   # NEW: for fallback
 
-# Try multiple env names just in case
-COINALYZE_API_KEY = (
-    os.getenv("COINALYZE_API_KEY")
-    or os.getenv("COINALYZE_KEY")
-    or os.getenv("CMC_API_KEY")  # fallback if you reused this
-)
+COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY")
 
 SYMBOL_CB    = "BTC-USD"          # Coinbase product
 SYMBOL_PERP  = "BTCUSDT_PERP.A"   # Coinalyze aggregated BTC perp symbol
 
 START_DATE   = "2023-01-01"
-END_DATE     = "2030-01-01"       # effectively ignored, we use 'days=..' from Coinalyze/CB
+END_DATE     = "2025-11-01"
 
 OUT_CSV = "output/fg2_daily.csv"
 os.makedirs("output", exist_ok=True)
 
 
-# ---------------- HELPER FUNCS ----------------
+# ---------------- UTIL ----------------
 
 def iso_to_unix(date_str: str) -> int:
-    dt = datetime.strptime(date_str, "%Y-%m-%d")
-    return int(dt.timestamp())
+    return int(datetime.strptime(date_str, "%Y-%m-%d").timestamp())
 
 
 def unix_to_date(ts: int):
     return datetime.utcfromtimestamp(ts).date()
 
 
+# ---------------- COINBASE (with retry) ----------------
+
 def cb_get(path, params=None, sleep=0.25, max_retries=5):
     """
-    Coinbase public GET with simple retry/backoff on transient errors.
-
-    Retries on:
-      - network errors (requests.exceptions.RequestException)
-      - HTTP 5xx (server-side issues)
-      - HTTP 429 (rate limit)
-
-    Raises immediately on other 4xx errors.
+    Coinbase GET with retry for 5xx errors.
     """
     if params is None:
         params = {}
 
     url = COINBASE_BASE + path
-    last_err = None
-    status_code = None
+    last_err = ""
 
     for attempt in range(1, max_retries + 1):
         try:
             r = requests.get(url, params=params, timeout=30)
-            status_code = r.status_code
-        except requests.exceptions.RequestException as e:
-            last_err = e
-        else:
-            # Success
-            if status_code == 200:
-                time.sleep(sleep)
-                return r.json()
+        except requests.RequestException as e:
+            last_err = str(e)
+            time.sleep(sleep * attempt)
+            continue
 
-            # Transient / retryable errors
-            if status_code in (429,) or 500 <= status_code < 600:
-                last_err = RuntimeError(
-                    f"Coinbase error {status_code}: {r.text[:300]}"
-                )
-            else:
-                # Non-retryable client error
-                raise RuntimeError(
-                    f"Coinbase error {status_code}: {r.text[:300]}"
-                )
+        if r.status_code == 200:
+            time.sleep(sleep)
+            return r.json()
 
-        # Backoff and retry
-        wait = sleep * (2 ** (attempt - 1))
-        print(
-            f"cb_get: attempt {attempt}/{max_retries} failed "
-            f"(status={status_code}, err={last_err}); retrying in {wait:.1f}s…"
-        )
-        time.sleep(wait)
+        # Retry on 5xx server errors
+        if 500 <= r.status_code < 600:
+            last_err = r.text[:300]
+            if attempt < max_retries:
+                time.sleep(sleep * attempt)
+                continue
 
-    # Exhausted retries
+        last_err = r.text[:300]
+        break
+
     raise RuntimeError(
-        f"Coinbase request failed after {max_retries} attempts: {last_err}"
+        f"Coinbase error after {max_retries} attempts: {last_err}"
     )
 
 
+# ---------------- COINALYZE ----------------
+
 def coinalyze_get(path, params=None, sleep=0.25):
-    """Coinalyze GET with API key."""
     if COINALYZE_API_KEY is None:
         raise RuntimeError("COINALYZE_API_KEY not set in environment.")
+
     if params is None:
         params = {}
-    headers = {"accept": "application/json"}
-    params = {**params, "api_key": COINALYZE_API_KEY}
+
     url = COINALYZE_BASE + path
-    r = requests.get(url, params=params, headers=headers, timeout=30)
+    params = {**params, "api_key": COINALYZE_API_KEY}
+
+    r = requests.get(url, params=params, timeout=30)
     if r.status_code != 200:
         raise RuntimeError(f"Coinalyze error {r.status_code}: {r.text[:300]}")
     time.sleep(sleep)
     return r.json()
 
 
-def cg_get(path, params=None, sleep=0.5):
-    """CoinGecko public GET (used as fallback for BTC spot)."""
-    if params is None:
-        params = {}
-    url = COINGECKO_BASE + path
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    time.sleep(sleep)
-    return r.json()
-
-
-# ---------------- 1) COINBASE BTC SPOT (OHLCV) ----------------
+# ---------------- 1) SPOT DATA ----------------
 
 def fetch_cb_btc_ohlcv(start_date, end_date):
-    """
-    Fetch daily BTC-USD candles from Coinbase in <=300-candle chunks.
-
-    Coinbase /candles returns [time, low, high, open, close, volume]
-    with granularity in seconds.
-    """
-    granularity = 86400
+    granularity = 86400      # 1d candles
     max_points = 300
 
     start_unix = iso_to_unix(start_date)
-    end_unix   = iso_to_unix(end_date) + 24 * 60 * 60
+    end_unix   = iso_to_unix(end_date) + 86400
 
     rows = []
     cur_start = start_unix
@@ -180,6 +121,7 @@ def fetch_cb_btc_ohlcv(start_date, end_date):
             "start": datetime.utcfromtimestamp(cur_start).isoformat() + "Z",
             "end": datetime.utcfromtimestamp(cur_end).isoformat() + "Z",
         }
+
         data = cb_get(f"/products/{SYMBOL_CB}/candles", params=params)
 
         if not data:
@@ -189,6 +131,7 @@ def fetch_cb_btc_ohlcv(start_date, end_date):
             ts, low, high, open_, close, volume = row
             rows.append((unix_to_date(ts), close, volume))
 
+        # get oldest timestamp Coinbase returned
         oldest_ts = min(r[0] for r in data)
         cur_start = oldest_ts + granularity
         if cur_start <= start_unix:
@@ -199,56 +142,15 @@ def fetch_cb_btc_ohlcv(start_date, end_date):
     return df.drop_duplicates("date").sort_values("date")
 
 
-def fetch_cg_btc_ohlcv_fallback(start_date, end_date):
-    """
-    Fallback: get BTC daily close + volume from CoinGecko
-    if Coinbase candles are unavailable.
-    """
-    print("FALLBACK: Fetching BTC-USD daily data from CoinGecko…")
-
-    start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end_dt   = datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    js = cg_get(
-        "/coins/bitcoin/market_chart",
-        params={"vs_currency": "usd", "days": "max"}
-    )
-
-    prices = js.get("prices", [])
-    vols   = js.get("total_volumes", [])
-
-    vol_map = {}
-    for ts, vol in vols:
-        d = datetime.utcfromtimestamp(ts / 1000.0).date()
-        vol_map[d] = vol
-
-    rows = []
-    for ts, price in prices:
-        d = datetime.utcfromtimestamp(ts / 1000.0).date()
-        if not (start_dt <= d <= end_dt):
-            continue
-        vol = vol_map.get(d, 0.0)
-        rows.append((d, price, vol))
-
-    df = pd.DataFrame(rows, columns=["date", "spot_close", "spot_volume"])
-    df = df.drop_duplicates("date").sort_values("date")
-    return df
-
-
-# ---------------- 2) COINALYZE BTC PERP OI & VOLUME ----------------
+# ---------------- 2) PERP DATA ----------------
 
 def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
-    """
-    Fetch BTC perp open interest history (daily) + perp OHLCV (daily) from Coinalyze.
 
-    - /open-interest-history: gives OHLC of OI, we'll use the close 'c'
-    - /ohlcv-history: gives v (volume) field as quote volume
-    """
     start_unix = iso_to_unix(start_date)
     end_unix   = iso_to_unix(end_date)
 
-    # OI history
-    oi_js = coinalyze_get(
+    # open interest
+    js = coinalyze_get(
         "/open-interest-history",
         params={
             "symbols": SYMBOL_PERP,
@@ -260,16 +162,16 @@ def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
     )
 
     oi_rows = []
-    for item in oi_js:
+    for item in js:
         if item.get("symbol") != SYMBOL_PERP:
             continue
         for h in item.get("history", []):
-            ts = int(h["t"])
-            oi_rows.append((unix_to_date(ts), float(h["c"])))
+            oi_rows.append((unix_to_date(int(h["t"])), float(h["c"])))
+
     oi_df = pd.DataFrame(oi_rows, columns=["date", "oi_usd"])
 
-    # Perp OHLCV (volume)
-    ohlcv_js = coinalyze_get(
+    # perp volume
+    js2 = coinalyze_get(
         "/ohlcv-history",
         params={
             "symbols": SYMBOL_PERP,
@@ -280,19 +182,18 @@ def fetch_coinalyze_oi_and_perp_volume(start_date, end_date):
     )
 
     vol_rows = []
-    for item in ohlcv_js:
+    for item in js2:
         if item.get("symbol") != SYMBOL_PERP:
             continue
         for h in item.get("history", []):
-            ts = int(h["t"])
-            vol_rows.append((unix_to_date(ts), float(h["v"])))
+            vol_rows.append((unix_to_date(int(h["t"])), float(h["v"])))
+
     vol_df = pd.DataFrame(vol_rows, columns=["date", "perp_volume"])
 
-    df = oi_df.merge(vol_df, on="date", how="inner")
-    return df.sort_values("date")
+    return oi_df.merge(vol_df, on="date", how="inner").sort_values("date")
 
 
-# ---------------- UTILITIES ----------------
+# ---------------- SCORING ----------------
 
 def clip01(x):
     return np.minimum(1, np.maximum(0, x))
@@ -304,38 +205,25 @@ def rolling_minmax(series, window=365, lower_q=0.05, upper_q=0.95):
     return low, high
 
 
-# ---------------- COMPUTE HMI (FG_lite) ----------------
-
 def compute_fg_lite(df):
-    """
-    df has columns:
-      spot_close, spot_volume,
-      perp_volume,
-      oi_usd
-
-    Returns df with:
-      FG_lite (a.k.a. HMI), FG_vol, FG_oi, FG_spotperp
-    """
     eps = 1e-9
 
-    # 1) Volatility: realized 30d and 90d from Coinbase spot
+    # volatility
     df["log_ret"] = np.log(df["spot_close"] / df["spot_close"].shift(1))
     df["RV_30"] = df["log_ret"].rolling(30).std() * np.sqrt(365)
     df["RV_90"] = df["log_ret"].rolling(90).std() * np.sqrt(365)
 
-    V_raw = df["RV_90"] / (df["RV_30"] + eps)  # calm > 1
+    V_raw = df["RV_90"] / (df["RV_30"] + eps)
     V_low, V_high = rolling_minmax(V_raw)
     V_score = 100 * clip01((V_raw - V_low) / (V_high - V_low + eps))
 
-    # 2) Open Interest: normalized over its own history
+    # open interest
     OI = df["oi_usd"]
     OI_low, OI_high = rolling_minmax(OI)
     OI_score = 100 * clip01((OI - OI_low) / (OI_high - OI_low + eps))
 
-    # 3) Spot vs Perp dominance: perp fraction
-    df["perp_frac"] = df["perp_volume"] / (
-        df["perp_volume"] + df["spot_volume"] + eps
-    )
+    # spot vs perp dominance
+    df["perp_frac"] = df["perp_volume"] / (df["perp_volume"] + df["spot_volume"] + eps)
     PF_low, PF_high = rolling_minmax(df["perp_frac"])
     SP_score = 100 * clip01((df["perp_frac"] - PF_low) / (PF_high - PF_low + eps))
 
@@ -357,35 +245,20 @@ def compute_fg_lite(df):
 
 def main():
     print("Fetching Coinbase BTC-USD OHLCV…")
-    try:
-        cb_df = fetch_cb_btc_ohlcv(START_DATE, END_DATE)
-    except Exception as e:
-        # If Coinbase is having a bad day (500s, etc.), fall back to CoinGecko.
-        print("Coinbase fetch failed, using CoinGecko fallback:", e)
-        cb_df = fetch_cg_btc_ohlcv_fallback(START_DATE, END_DATE)
+    cb_df = fetch_cb_btc_ohlcv(START_DATE, END_DATE)
 
     print("Fetching Coinalyze BTC perp OI & volumes…")
     cl_df = fetch_coinalyze_oi_and_perp_volume(START_DATE, END_DATE)
 
     print("Merging datasets…")
-    df = cb_df.merge(cl_df, on="date", how="inner")
-    df = df.sort_values("date")
+    df = cb_df.merge(cl_df, on="date", how="inner").sort_values("date")
 
-    print("Computing Hive Mind Index components…")
+    print("Computing HMI (FG_lite)…")
     fg_df = compute_fg_lite(df)
 
     fg_df.to_csv(OUT_CSV, index=False)
-    print(f"Saved HMI daily data to {OUT_CSV}")
-
-    display_df = fg_df[["date", "FG_lite", "FG_vol", "FG_oi", "FG_spotperp"]].rename(
-        columns={
-            "FG_lite": "HMI",
-            "FG_vol": "HMI_vol",
-            "FG_oi": "HMI_oi",
-            "FG_spotperp": "HMI_spotperp",
-        }
-    )
-    print(display_df.tail())
+    print(f"Saved HMI data to {OUT_CSV}")
+    print(fg_df[['date','FG_lite','FG_vol','FG_oi','FG_spotperp']].tail())
 
 
 if __name__ == "__main__":
