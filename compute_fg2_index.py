@@ -29,7 +29,7 @@ Outputs a CSV with daily FG_lite and component scores.
 
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import requests
 import pandas as pd
@@ -40,7 +40,12 @@ import numpy as np
 COINBASE_BASE   = "https://api.exchange.coinbase.com"
 COINALYZE_BASE  = "https://api.coinalyze.net/v1"
 
-COINALYZE_API_KEY = os.getenv("COINALYZE_API_KEY")
+# Try multiple env names just in case
+COINALYZE_API_KEY = (
+    os.getenv("COINALYZE_API_KEY")
+    or os.getenv("COINALYZE_KEY")
+    or os.getenv("CMC_API_KEY")  # fallback if you reused this
+)
 
 SYMBOL_CB    = "BTC-USD"          # Coinbase product
 SYMBOL_PERP  = "BTCUSDT_PERP.A"   # Coinalyze aggregated BTC perp symbol
@@ -278,4 +283,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+   
