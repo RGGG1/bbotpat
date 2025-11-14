@@ -4,10 +4,10 @@ Telegram alert for 'Hive' (HMI + BTC dominance rotation).
 
 Message layout:
 
-Hive   14/11/25    💵 Balance: $xxx.xx
+Hive   dd/mm/yy    💵 Balance: $xxx.xx
 
 ⚪ HMI: 49.7 — Stable
-📊 BTC vs EthSol: 77/23
+📊 BTC vs EthSolBnb: 77/23
 
 💰 Prices:
  • BTC: $...
@@ -15,11 +15,11 @@ Hive   14/11/25    💵 Balance: $xxx.xx
  • SOL: $...
 
 🧠 Suggested allocation:
- • BTC: 20.6% - $X
- • ALTs: 79.4% - $Y
- • Stables: 0.0% - $Z
+ • BTC: xx.x% - $X
+ • ALTs: yy.y% - $Y
+ • Stables: zz.z% - $Z
 
-⚙️ Action: Rotate X% of <SRC> to <DST>.
+⚙️ Action: Rotate X% of SRC to DST.
 
 🔁 Portfolio Flow:
 Yesterday: a% BTC, b% ALTs, c% Stables
@@ -28,6 +28,9 @@ Today:     d% BTC, e% ALTs, f% Stables
 🧠 Hive ROI:  +P% / +$P
 BTC buy & hold ROI: +Q% / +$Q
 Hive is outperforming BTC buy & hold by Yx.
+
+📈 Hive reallocations per year:
+ • 2025: N trades
 """
 
 import os
@@ -207,7 +210,6 @@ def fetch_dominance_and_alt_label():
     else:
         btc_dom = btc_mc / (btc_mc + alt_mc_sum)
 
-    # Build label like 'EthSol' or 'EthSolBnb'
     alt_label = "".join(ALT_LABEL.get(aid, aid[:3].title()) for aid, _ in alt_caps_sorted)
 
     return btc_dom, alt_label
@@ -312,6 +314,49 @@ def compute_roi_fields(last_row):
     return equity, btc_only, hive_roi_pct, hive_profit, btc_roi_pct, btc_profit, outperf
 
 
+def summarise_trades_per_year(path=EQUITY_CSV, threshold=0.01):
+    """
+    Count "trade days" per year where allocations changed
+    by more than 'threshold' (sum of abs deltas) vs previous day.
+
+    threshold = 0.01 -> 1% of portfolio moved.
+    """
+    if not os.path.exists(path):
+        return {}
+
+    df = pd.read_csv(path, parse_dates=["date"])
+    df = df.sort_values("date")
+    if len(df) < 2:
+        return {}
+
+    trades_per_year = {}
+
+    prev = df.iloc[0]
+    for i in range(1, len(df)):
+        curr = df.iloc[i]
+        prev_w = (
+            float(prev["w_btc"]),
+            float(prev["w_alts"]),
+            float(prev["w_stables"]),
+        )
+        curr_w = (
+            float(curr["w_btc"]),
+            float(curr["w_alts"]),
+            float(curr["w_stables"]),
+        )
+
+        deltas = [abs(c - p) for c, p in zip(curr_w, prev_w)]
+        total_move = sum(deltas)
+
+        if total_move > threshold:
+            year = curr["date"].year
+            trades_per_year[year] = trades_per_year.get(year, 0) + 1
+
+        prev = curr
+
+    return trades_per_year
+
+
 # ---------- Message Formatting ----------
 
 def format_signal_message():
@@ -362,7 +407,7 @@ def format_signal_message():
     else:
         action_line = f"Rotate {main_flow['size']:.1f}% of {main_flow['src']} to {main_flow['dst']}."
 
-    # Top line: Hive   14/11/25    💵 Balance: $xxx.xx
+    # Top line: Hive   dd/mm/yy    💵 Balance: $xxx.xx
     date_str = hmi_date.strftime("%d/%m/%y")
     top_line = f"Hive   {date_str}    💵 Balance: ${equity:,.2f}"
 
@@ -377,6 +422,16 @@ def format_signal_message():
         outperf_line = "Hive outperformance vs BTC buy & hold: n/a"
     else:
         outperf_line = f"Hive is outperforming BTC buy & hold by ~{outperf:.2f}x."
+
+    # Trades per year
+    trades_per_year = summarise_trades_per_year()
+    if trades_per_year:
+        lines = ["📈 Hive reallocations per year:"]
+        for year in sorted(trades_per_year):
+            lines.append(f" • {year}: {trades_per_year[year]} trades")
+        trades_block = "\n".join(lines)
+    else:
+        trades_block = "📈 Hive reallocations per year:\n • No trades above 1% threshold yet."
 
     text = (
         f"{top_line}\n\n"
@@ -395,7 +450,8 @@ def format_signal_message():
         f"{flow_summary_text}\n\n"
         f"🧠 {hive_roi_line}\n"
         f"{btc_roi_line}\n"
-        f"{outperf_line}"
+        f"{outperf_line}\n\n"
+        f"{trades_block}"
     )
 
     return text
@@ -427,4 +483,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+ 
