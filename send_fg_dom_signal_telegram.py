@@ -8,7 +8,7 @@ Send Telegram alert with:
 - BTC / ETH / SOL prices
 - Current trade signal from dominance + HMI
 - Percent-of-portfolio change vs previous day
-- Tiered target allocation (e.g. 66.7% BTC / 33.3% ALTs)
+- Suggested allocation based on fully linear model
 """
 
 import os
@@ -16,16 +16,15 @@ import time
 
 import requests
 import pandas as pd
-import numpy as np
 
 COINBASE_BASE   = "https://api.exchange.coinbase.com"
 COINGECKO_BASE  = "https://api.coingecko.com/api/v3"
 
-DOM_LOW   = 0.75
-DOM_HIGH  = 0.81
-DOM_MID_LOW  = 0.771
-DOM_MID_HIGH = 0.789
-GREED_STABLE_THRESHOLD = 77.0  # still used in logic, just not printed
+DOM_LOW       = 0.75
+DOM_HIGH      = 0.81
+DOM_MID_LOW   = 0.771
+DOM_MID_HIGH  = 0.789
+GREED_STABLE_THRESHOLD = 77.0  # HMI >= 77 => fully stables
 
 RISK_IDS = ["bitcoin", "ethereum", "solana", "binancecoin"]
 
@@ -95,27 +94,50 @@ def hmi_band_name_and_emoji(hmi):
 
 def allocation_from_dom_and_hmi(btc_dom, hmi):
     """
-    Same core logic as before, but we think of 'hmi' instead of FG_lite.
-    """
-    # 1) mid dominance -> stables
-    if DOM_MID_LOW <= btc_dom <= DOM_MID_HIGH:
-        return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
+    Same allocation model as in the backtest:
 
-    # 2) extreme 'greed' (high HMI) -> stables
+    1) HMI >= 77 -> 100% stables
+    2) 0.771 < dom < 0.789 -> 100% stables
+    3) dom <= 0.75 -> 100% BTC
+    4) dom >= 0.81 -> 100% ALTs
+    5) BTC side linear between 0.75–0.771
+    6) ALT side linear between 0.789–0.81
+    """
+
+    # 1) Greed override
     if hmi >= GREED_STABLE_THRESHOLD:
         return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
 
-    # 3) dominance rotation
+    # 2) Stable mid-zone (open interval)
+    if DOM_MID_LOW < btc_dom < DOM_MID_HIGH:
+        return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
+
+    # 3) Extremes
     if btc_dom <= DOM_LOW:
-        btc_w, alt_w = 1.0, 0.0
-    elif btc_dom >= DOM_HIGH:
-        btc_w, alt_w = 0.0, 1.0
-    else:
-        t = (btc_dom - DOM_LOW) / (DOM_HIGH - DOM_LOW)
+        return {"btc": 1.0, "alts": 0.0, "stables": 0.0}
+    if btc_dom >= DOM_HIGH:
+        return {"btc": 0.0, "alts": 1.0, "stables": 0.0}
+
+    # 4) BTC side linear: DOM_LOW < dom <= DOM_MID_LOW
+    if btc_dom <= DOM_MID_LOW:
+        # dom = 0.75   -> btc = 1, alt = 0
+        # dom = 0.771  -> btc = 0, alt = 1
+        t = (btc_dom - DOM_LOW) / (DOM_MID_LOW - DOM_LOW)
         btc_w = 1.0 - t
         alt_w = t
+        return {"btc": btc_w, "alts": alt_w, "stables": 0.0}
 
-    return {"btc": btc_w, "alts": alt_w, "stables": 0.0}
+    # 5) ALT side linear: DOM_MID_HIGH <= dom < DOM_HIGH
+    if btc_dom >= DOM_MID_HIGH:
+        # dom = 0.789 -> btc = 1, alt = 0
+        # dom = 0.81  -> btc = 0, alt = 1
+        t = (btc_dom - DOM_MID_HIGH) / (DOM_HIGH - DOM_MID_HIGH)
+        btc_w = 1.0 - t
+        alt_w = t
+        return {"btc": btc_w, "alts": alt_w, "stables": 0.0}
+
+    # Fallback
+    return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
 
 
 def fetch_spot_prices():
@@ -172,10 +194,8 @@ def describe_allocation_change(prev_w, curr_w):
         return "No prior allocation history. (First run or file missing.)", ""
 
     deltas = {k: curr_w[k] - prev_w[k] for k in ["btc", "alts", "stables"]}
-    # Convert to %
     deltas_pct = {k: round(100 * v, 1) for k, v in deltas.items()}
 
-    # If all small, say 'no major change'
     if all(abs(v) < 1.0 for v in deltas_pct.values()):
         detail = (
             f"Allocations unchanged (Δ<1% each).\n"
@@ -184,7 +204,6 @@ def describe_allocation_change(prev_w, curr_w):
         )
         return "No major reallocation today.", detail
 
-    # Find main source (most negative) and destination (most positive)
     src_asset = min(deltas, key=lambda k: deltas[k])
     dst_asset = max(deltas, key=lambda k: deltas[k])
     flow_size = min(abs(deltas_pct[src_asset]), abs(deltas_pct[dst_asset]))
@@ -203,52 +222,30 @@ def describe_allocation_change(prev_w, curr_w):
     return main_flow, detail
 
 
-def snap_to_tiered_allocation(w):
-    """
-    We only *signal* at tier levels.
-    Use a 1/6 grid for BTC vs ALTs:
-      BTC weight ∈ {0, 1/6, 2/6, 3/6, 4/6, 5/6, 1}
-    Stables stay either 0 or 1 as per our logic.
-    """
-    if w["stables"] >= 0.999:
-        return {"btc": 0.0, "alts": 0.0, "stables": 1.0}
-
-    grid = [0.0, 1/6, 2/6, 0.5, 4/6, 5/6, 1.0]
-    btc_cont = w["btc"]
-    # snap BTC to nearest grid point
-    btc_snapped = min(grid, key=lambda g: abs(g - btc_cont))
-    alt_snapped = 1.0 - btc_snapped
-
-    return {"btc": btc_snapped, "alts": alt_snapped, "stables": 0.0}
-
-
 def format_signal_message():
     hmi, hmi_date = load_latest_hmi()
     band_name, emoji = hmi_band_name_and_emoji(hmi)
 
     prices = fetch_spot_prices()
     btc_dom = fetch_btc_dom_current()
-    w_raw = allocation_from_dom_and_hmi(btc_dom, hmi)
-    w_tier = snap_to_tiered_allocation(w_raw)
+    w = allocation_from_dom_and_hmi(btc_dom, hmi)
 
-    btc_pct_dom  = round(btc_dom * 100)
-    alt_pct_dom  = 100 - btc_pct_dom
+    btc_pct_dom = int(round(btc_dom * 100))
+    alt_pct_dom = 100 - btc_pct_dom
 
-    # high-level signal based on tiered target
-    if w_tier["stables"] == 1.0:
+    if w["stables"] == 1.0:
         signal = "Stable all (100% Stables)."
-    elif w_tier["btc"] > w_tier["alts"]:
-        signal = f"Rotate toward BTC ({int(w_tier['btc']*100)}% BTC / {int(w_tier['alts']*100)}% ALTs)."
+    elif w["btc"] > w["alts"]:
+        signal = f"Rotate toward BTC ({w['btc']*100:.1f}% BTC / {w['alts']*100:.1f}% ALTs)."
     else:
-        signal = f"Rotate toward ALTs ({int(w_tier['alts']*100)}% ALTs / {int(w_tier['btc']*100)}% BTC)."
+        signal = f"Rotate toward ALTs ({w['alts']*100:.1f}% ALTs / {w['btc']*100:.1f}% BTC)."
 
     prev_w, curr_w = load_last_two_allocations()
     flow_summary, flow_detail = describe_allocation_change(prev_w, curr_w)
 
-    # Suggested allocation (tiered)
-    sugg_btc = w_tier["btc"] * 100
-    sugg_alt = w_tier["alts"] * 100
-    sugg_stb = w_tier["stables"] * 100
+    sugg_btc = w["btc"] * 100
+    sugg_alt = w["alts"] * 100
+    sugg_stb = w["stables"] * 100
 
     text = (
         f"🧠 *Hive Mind Index (HMI) & Dominance Signal*\n"
@@ -259,7 +256,7 @@ def format_signal_message():
         f" • BTC: ${prices['BTC']:.0f}\n"
         f" • ETH: ${prices['ETH']:.0f}\n"
         f" • SOL: ${prices['SOL']:.2f}\n\n"
-        f"📐 *Suggested allocation (tiered):*\n"
+        f"📐 *Suggested allocation:*\n"
         f" • BTC: {sugg_btc:.1f}%\n"
         f" • ALTs: {sugg_alt:.1f}%\n"
         f" • Stables: {sugg_stb:.1f}%\n\n"
