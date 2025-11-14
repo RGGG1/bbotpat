@@ -7,6 +7,7 @@ Send Telegram alert with:
 - BTC dominance vs ALT (BTC:ALT %)
 - BTC / ETH / SOL prices
 - Current trade signal from dominance + FG_lite model
+- Percent-of-portfolio change vs previous day (e.g. 'move ~20% from BTC → ALTs')
 """
 
 import os
@@ -60,14 +61,7 @@ def load_latest_fg(path="output/fg2_daily.csv"):
 
 
 def fg_band_name_and_emoji(fg):
-    # Your bands:
-    # <10 zombie apocalypse
-    # 10-25 extreme fear
-    # 25-35 moderate fear
-    # 35-65 neutral
-    # 65-75 greed
-    # 75-90 extreme greed
-    # 90+ the top
+    # Aesthetic bands:
     if fg < 10:
         return "zombie apocalypse", "🩸🧟‍♂️"
     elif fg < 25:
@@ -82,6 +76,7 @@ def fg_band_name_and_emoji(fg):
         return "extreme greed", "🟩🟩🤪"
     else:
         return "the top", "🟢🚨"
+
 
 def allocation_from_dom_and_fg(btc_dom, fg_lite):
     # 1) mid dominance -> stables
@@ -132,6 +127,64 @@ def fetch_btc_dom_current():
     return dom
 
 
+def load_last_two_allocations(path="output/equity_curve_fg_dom.csv"):
+    if not os.path.exists(path):
+        return None, None
+    df = pd.read_csv(path, parse_dates=["date"])
+    df = df.sort_values("date")
+    if len(df) < 2:
+        return None, None
+    prev = df.iloc[-2]
+    curr = df.iloc[-1]
+    prev_w = {
+        "btc": float(prev["w_btc"]),
+        "alts": float(prev["w_alts"]),
+        "stables": float(prev["w_stables"]),
+    }
+    curr_w = {
+        "btc": float(curr["w_btc"]),
+        "alts": float(curr["w_alts"]),
+        "stables": float(curr["w_stables"]),
+    }
+    return prev_w, curr_w
+
+
+def describe_allocation_change(prev_w, curr_w):
+    if prev_w is None or curr_w is None:
+        return "No prior allocation history. (First run or file missing.)", ""
+
+    deltas = {k: curr_w[k] - prev_w[k] for k in ["btc", "alts", "stables"]}
+    # Convert to %
+    deltas_pct = {k: round(100 * v, 1) for k, v in deltas.items()}
+
+    # If all small, say 'no major change'
+    if all(abs(v) < 1.0 for v in deltas_pct.values()):
+        detail = (
+            f"Allocations unchanged (Δ<1% each).\n"
+            f"Now: BTC {curr_w['btc']*100:.1f}%, ALTs {curr_w['alts']*100:.1f}%, "
+            f"Stables {curr_w['stables']*100:.1f}%."
+        )
+        return "No major reallocation today.", detail
+
+    # Find main source (most negative) and destination (most positive)
+    src_asset = min(deltas, key=lambda k: deltas[k])
+    dst_asset = max(deltas, key=lambda k: deltas[k])
+    flow_size = min(abs(deltas_pct[src_asset]), abs(deltas_pct[dst_asset]))
+    flow_size = round(flow_size, 1)
+
+    asset_names = {"btc": "BTC", "alts": "ALTs", "stables": "Stables"}
+    main_flow = f"Move ~{flow_size:.1f}% of portfolio from {asset_names[src_asset]} → {asset_names[dst_asset]}."
+
+    detail = (
+        f"Allocation change vs yesterday:\n"
+        f" • BTC: {prev_w['btc']*100:.1f}% → {curr_w['btc']*100:.1f}% (Δ {deltas_pct['btc']:+.1f}%)\n"
+        f" • ALTs: {prev_w['alts']*100:.1f}% → {curr_w['alts']*100:.1f}% (Δ {deltas_pct['alts']:+.1f}%)\n"
+        f" • Stables: {prev_w['stables']*100:.1f}% → {curr_w['stables']*100:.1f}% (Δ {deltas_pct['stables']:+.1f}%)"
+    )
+
+    return main_flow, detail
+
+
 def format_signal_message():
     fg, fg_date = load_latest_fg()
     band_name, emoji = fg_band_name_and_emoji(fg)
@@ -143,13 +196,16 @@ def format_signal_message():
     btc_pct  = round(btc_dom * 100, 1)
     alt_pct  = round((1 - btc_dom) * 100, 1)
 
-    # describe trade signal qualitatively
+    # high-level signal
     if w["stables"] == 1.0:
-        signal = "Stable all (100% stables)"
+        signal = "Stable all (100% stables)."
     elif w["btc"] > w["alts"]:
-        signal = f"Rotate toward BTC ({int(w['btc']*100)}% BTC / {int(w['alts']*100)}% ALTs)"
+        signal = f"Rotate toward BTC ({int(w['btc']*100)}% BTC / {int(w['alts']*100)}% ALTs)."
     else:
-        signal = f"Rotate toward ALTs ({int(w['alts']*100)}% ALTs / {int(w['btc']*100)}% BTC)"
+        signal = f"Rotate toward ALTs ({int(w['alts']*100)}% ALTs / {int(w['btc']*100)}% BTC)."
+
+    prev_w, curr_w = load_last_two_allocations()
+    flow_summary, flow_detail = describe_allocation_change(prev_w, curr_w)
 
     text = (
         f"🧠 *FG_lite & Dominance Signal*\n"
@@ -161,7 +217,10 @@ def format_signal_message():
         f" • ETH: ${prices['ETH']:.0f}\n"
         f" • SOL: ${prices['SOL']:.2f}\n\n"
         f"⚙️ *Signal:* {signal}\n"
-        f"(Greed stabling threshold: FG ≥ {GREED_STABLE_THRESHOLD})"
+        f"   (Greed stabling threshold: FG ≥ {GREED_STABLE_THRESHOLD})\n\n"
+        f"🔁 *Portfolio Flow:*\n"
+        f"{flow_summary}\n"
+        f"{flow_detail}"
     )
     return text
 
@@ -189,4 +248,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-  
+    
