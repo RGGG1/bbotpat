@@ -52,7 +52,7 @@ SYMBOL_CB    = "BTC-USD"          # Coinbase product
 SYMBOL_PERP  = "BTCUSDT_PERP.A"   # Coinalyze aggregated BTC perp symbol
 
 START_DATE   = "2023-01-01"
-END_DATE     = "2025-11-01"
+END_DATE     = "2030-01-01"       # effectively ignored, we use 'days=..' from Coinalyze/CB
 
 OUT_CSV = "output/fg2_daily.csv"
 os.makedirs("output", exist_ok=True)
@@ -281,7 +281,6 @@ def main():
     fg_df.to_csv(OUT_CSV, index=False)
     print(f"Saved HMI daily data to {OUT_CSV}")
 
-    # Pretty print with HMI naming for logs only
     display_df = fg_df[["date", "FG_lite", "FG_vol", "FG_oi", "FG_spotperp"]].rename(
         columns={
             "FG_lite": "HMI",
@@ -295,4 +294,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-           
+   
