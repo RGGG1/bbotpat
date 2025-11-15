@@ -1,292 +1,506 @@
 #!/usr/bin/env python3
 """
-Hive Telegram Signal — Updated with BNB price included.
+Hive Telegram Signal
 
-Contains:
- - HMI scoring display
- - BTC vs ALT dominance (ETH+BNB+SOL)
- - Token prices: BTC, ETH, BNB, SOL
- - Suggested allocation with yesterday → today moves
- - Action showing % of BTC (or ALTs) to rotate
- - Hive ROI vs BTC Buy & Hold
- - Hive trade count
+- Uses:
+    - output/fg2_daily.csv            (HMI = FG_lite)
+    - output/equity_curve_fg_dom.csv  (equity, btc_only, weights)
+
+- Sends a daily Telegram message with:
+    - Top line: Hive   dd/mm/yy    💵 $balance   ROI: +x.x%
+    - HMI value + band + circle emoji
+    - BTC vs ALT dominance (ETH+BNB+SOL)
+    - Prices: BTC, ETH, BNB, SOL
+    - Suggested allocation: yesterday%/$ → today%/$
+    - Action: % of your BTC or ALTs to rotate
+    - Hive ROI vs BTC buy & hold (both % and $)
+    - Hive vs BTC: X.x x multiple
+    - Hive trades: total days with >1% reallocation since start
 """
 
 import os
 import time
 from datetime import datetime
+
 import requests
 import pandas as pd
-import numpy as np
 
-# ---------------- CONFIG ----------------
-
-COINBASE_BASE  = "https://api.exchange.coinbase.com"
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
-HMI_STABLE_THRESHOLD = 77.0
+# Files produced by your other scripts
+HMI_CSV    = "output/fg2_daily.csv"
+EQUITY_CSV = "output/equity_curve_fg_dom.csv"
 
-DOM_LOW  = 0.75
-DOM_HIGH = 0.81
-DOM_MID_LOW  = 0.771
-DOM_MID_HIGH = 0.789
+# Starting capital (used for ROI)
+INITIAL_CAPITAL = 100.0
 
-ALT_IDS = ["ethereum", "binancecoin", "solana"]
+# Dominance thresholds (must match backtest_dominance_rotation.py)
+DOM_LOW       = 0.75
+DOM_HIGH      = 0.81
+DOM_MID_LOW   = 0.771
+DOM_MID_HIGH  = 0.789
+GREED_STABLE_THRESHOLD = 77.0  # HMI >= 77 => full stables in the model
 
-TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TG_CHAT  = os.getenv("TELEGRAM_CHAT_ID")
+# Assets used in dominance
+RISK_IDS  = ["bitcoin", "ethereum", "solana", "binancecoin"]
+ALT_IDS   = ["ethereum", "binancecoin", "solana"]
+ALT_LABEL = {
+    "ethereum": "Eth",
+    "binancecoin": "Bnb",
+    "solana": "Sol",
+}
 
-STARTING_BAL = 100.0
-BAL_FILE = "output/hive_balance.csv"
-ALLOC_FILE = "output/hive_allocations.csv"
+# Telegram token/chat (support both TELEGRAM_* and TG_*)
+TG_TOKEN = (
+    os.getenv("TELEGRAM_BOT_TOKEN")
+    or os.getenv("TG_BOT_TOKEN")
+)
+TG_CHAT = (
+    os.getenv("TELEGRAM_CHAT_ID")
+    or os.getenv("TG_CHAT_ID")
+)
 
 
-# ---------------- HELPERS ----------------
+# ---------- HTTP helpers ----------
 
-def cb_get(path, params=None, sleep=0.15):
+def cg_get(path, params=None, sleep=0.3):
     if params is None:
         params = {}
-    r = requests.get(COINBASE_BASE + path, params=params, timeout=20)
+    url = COINGECKO_BASE + path
+    r = requests.get(url, params=params, timeout=30)
     r.raise_for_status()
     time.sleep(sleep)
     return r.json()
 
 
-def cg_get(path, params=None, sleep=0.2):
-    if params is None:
-        params = {}
-    r = requests.get(COINGECKO_BASE + path, params=params, timeout=30)
-    r.raise_for_status()
-    time.sleep(sleep)
-    return r.json()
+# ---------- HMI helpers ----------
 
-
-def load_latest_hmi(path="output/fg2_daily.csv"):
+def load_latest_hmi(path=HMI_CSV):
+    if not os.path.exists(path):
+        raise RuntimeError("HMI CSV not found; run compute_fg2_index.py first.")
     df = pd.read_csv(path, parse_dates=["date"])
+    if df.empty:
+        raise RuntimeError("HMI CSV is empty.")
     df = df.sort_values("date")
     row = df.iloc[-1]
     return float(row["FG_lite"]), row["date"].date()
 
 
-def hmi_band(f):
-    if f < 10:
-        return "zombie apocalypse", "🔴"
-    elif f < 25:
-        return "mcdonalds applications", "🟠"
-    elif f < 35:
-        return "ngmi", "🟡"
-    elif f < 65:
-        return "stable", "⚪"
-    elif f < 75:
-        return "we’re early", "🟢"
+def hmi_band_name_and_emoji(hmi: float):
+    """
+    Your tiers:
+
+    <10      -> Zombie apocalypse
+    10-25    -> McDonalds applications
+    25-40    -> Ngmi
+    40-60    -> Stable
+    60-80    -> We're early
+    80+      -> It's the future of finance
+    """
+    if hmi < 10:
+        return "Zombie apocalypse", "⚫"
+    elif hmi < 25:
+        return "McDonalds applications", "🔴"
+    elif hmi < 40:
+        return "Ngmi", "🟠"
+    elif hmi < 60:
+        return "Stable", "⚪"
+    elif hmi < 80:
+        return "We're early", "🟢"
     else:
-        return "the future of finance", "🟢🟢"
+        return "It's the future of finance", "🟢"
 
 
-# ---------------- DOMINANCE ----------------
+# ---------- Dominance & prices ----------
 
-def fetch_btc_dom():
+def fetch_dominance_and_alt_label():
+    """
+    Returns (btc_dom_fraction, alt_label_str)
+
+    alt_label_str is concatenation of short names in order of current market cap,
+    e.g. 'EthBnbSol'.
+    """
     js = cg_get(
         "/coins/markets",
-        params={"vs_currency": "usd", "ids": "bitcoin," + ",".join(ALT_IDS)}
+        params={
+            "vs_currency": "usd",
+            "ids": ",".join(RISK_IDS),
+            "per_page": len(RISK_IDS),
+            "page": 1,
+        },
     )
     caps = {row["id"]: row["market_cap"] for row in js}
 
-    btc = caps["bitcoin"]
-    alts = caps["ethereum"] + caps["binancecoin"] + caps["solana"]
-    if btc + alts == 0:
-        return 0.5
-    return btc / (btc + alts)
+    btc_mc = caps.get("bitcoin", 0.0)
+    alt_caps = [(aid, caps.get(aid, 0.0)) for aid in ALT_IDS]
+    alt_caps_sorted = sorted(alt_caps, key=lambda x: x[1], reverse=True)
+
+    alt_mc_sum = sum(mc for _, mc in alt_caps_sorted)
+
+    if btc_mc + alt_mc_sum == 0:
+        btc_dom = 0.5
+    else:
+        btc_dom = btc_mc / (btc_mc + alt_mc_sum)
+
+    label = "".join(ALT_LABEL.get(aid, aid[:3].title()) for aid, _ in alt_caps_sorted)
+
+    return btc_dom, label
 
 
-# ---------------- PRICES ----------------
-
-def fetch_prices():
-    out = {}
-    for sym in ["BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD"]:
-        try:
-            js = cb_get(f"/products/{sym}/ticker")
-            coin = sym.split("-")[0]
-            out[coin] = float(js["price"])
-        except:
-            out[coin] = None
-    return out
-
-
-# ---------------- ALLOCATION ----------------
-
-def allocation_from_dom_and_hmi(dom, hmi):
-    # Extreme greed → stables
-    if hmi >= HMI_STABLE_THRESHOLD:
-        return {"btc": 0, "alts": 0, "stables": 1}
-
-    # Mid dominance → stables
-    if DOM_MID_LOW <= dom <= DOM_MID_HIGH:
-        return {"btc": 0, "alts": 0, "stables": 1}
-
-    # LOW DOM REGION: 0.75 → 0.77
-    if dom < DOM_MID_LOW:
-        frac = (dom - DOM_LOW) / (DOM_MID_LOW - DOM_LOW)
-        frac = max(0, min(1, frac))
-        btc = 1 - frac
-        alts = frac
-        return {"btc": btc, "alts": alts, "stables": 0}
-
-    # HIGH DOM REGION: 0.79 → 0.81+
-    if dom > DOM_MID_HIGH:
-        frac = (dom - DOM_MID_HIGH) / (DOM_HIGH - DOM_MID_HIGH)
-        frac = max(0, min(1, frac))
-        btc = 1 - frac
-        alts = frac
-        return {"btc": btc, "alts": alts, "stables": 0}
-
-    return {"btc": 0, "alts": 0, "stables": 1}
+def fetch_spot_prices():
+    """
+    Use CoinGecko simple price for BTC, ETH, BNB, SOL.
+    """
+    js = cg_get(
+        "/simple/price",
+        params={
+            "ids": "bitcoin,ethereum,binancecoin,solana",
+            "vs_currencies": "usd",
+        },
+    )
+    prices = {
+        "BTC": js.get("bitcoin", {}).get("usd", None),
+        "ETH": js.get("ethereum", {}).get("usd", None),
+        "BNB": js.get("binancecoin", {}).get("usd", None),
+        "SOL": js.get("solana", {}).get("usd", None),
+    }
+    return prices
 
 
-# ---------------- BALANCE STORAGE ----------------
+# ---------- Equity & allocations ----------
 
-def load_balance():
-    if not os.path.exists(BAL_FILE):
-        return STARTING_BAL
-    df = pd.read_csv(BAL_FILE)
-    return float(df.iloc[-1]["balance"])
-
-
-def save_balance(bal):
-    df = pd.DataFrame([{"timestamp": datetime.utcnow(), "balance": bal}])
-    if os.path.exists(BAL_FILE):
-        old = pd.read_csv(BAL_FILE)
-        df = pd.concat([old, df], ignore_index=True)
-    df.to_csv(BAL_FILE, index=False)
-
-
-def load_last_alloc():
-    if not os.path.exists(ALLOC_FILE):
-        return {"btc": 0, "alts": 0, "stables": 1}
-    df = pd.read_csv(ALLOC_FILE)
-    row = df.iloc[-1]
-    return {"btc": row["btc"], "alts": row["alts"], "stables": row["stables"]}
+def load_equity_snapshot(path=EQUITY_CSV):
+    """
+    Returns (last_row, prev_row) from equity_curve_fg_dom.csv
+    where each row has:
+        date, equity, btc_only, btc_dom, HMI, w_btc, w_alts, w_stables
+    """
+    if not os.path.exists(path):
+        return None, None
+    df = pd.read_csv(path, parse_dates=["date"])
+    if df.empty:
+        return None, None
+    df = df.sort_values("date")
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) >= 2 else None
+    return last, prev
 
 
-def save_alloc(w):
-    df = pd.DataFrame([{
-        "timestamp": datetime.utcnow(),
-        "btc": w["btc"], "alts": w["alts"], "stables": w["stables"]
-    }])
-    if os.path.exists(ALLOC_FILE):
-        old = pd.read_csv(ALLOC_FILE)
-        df = pd.concat([old, df], ignore_index=True)
-    df.to_csv(ALLOC_FILE, index=False)
+def compute_roi_fields(last_row):
+    """
+    Compute ROI numbers:
+
+    - Hive equity & ROI vs 100
+    - BTC-only equity & ROI vs 100
+    - Outperformance multiple: (Hive growth) / (BTC growth)
+      where growth = equity / 100
+    """
+    equity   = float(last_row["equity"])
+    btc_only = float(last_row["btc_only"])
+
+    hive_profit = equity - INITIAL_CAPITAL
+    btc_profit  = btc_only - INITIAL_CAPITAL
+
+    hive_roi_pct = (hive_profit / INITIAL_CAPITAL) * 100.0
+    btc_roi_pct  = (btc_profit / INITIAL_CAPITAL) * 100.0
+
+    if btc_only <= 0:
+        outperf = None
+    else:
+        # growth factor ratio
+        outperf = equity / btc_only
+
+    return equity, btc_only, hive_roi_pct, hive_profit, btc_roi_pct, btc_profit, outperf
 
 
-# ---------------- FORMAT MESSAGE ----------------
+def describe_allocation_change(prev_row, curr_row):
+    """
+    From equity_curve_fg_dom, derive yesterday & today allocations.
 
-def format_message():
-    balance = load_balance()
-    last_alloc = load_last_alloc()
+    Returns:
+      summary_text, main_flow, prev_w, curr_w
 
+    main_flow is dict with:
+      {
+        "src": "BTC"/"ALTs"/"Stables",
+        "dst": "BTC"/"ALTs"/"Stables",
+        "size_total": <percentage of portfolio moved, approx>,
+        "src_key": "btc"/"alts"/"stables",
+        "dst_key": ...
+      }
+    or None if no meaningful change.
+    """
+    if prev_row is None or curr_row is None:
+        return (
+            "No prior allocation history.",
+            None,
+            None,
+            {
+                "btc": float(curr_row["w_btc"]),
+                "alts": float(curr_row["w_alts"]),
+                "stables": float(curr_row["w_stables"]),
+            } if curr_row is not None else None,
+        )
+
+    prev_w = {
+        "btc": float(prev_row["w_btc"]),
+        "alts": float(prev_row["w_alts"]),
+        "stables": float(prev_row["w_stables"]),
+    }
+    curr_w = {
+        "btc": float(curr_row["w_btc"]),
+        "alts": float(curr_row["w_alts"]),
+        "stables": float(curr_row["w_stables"]),
+    }
+
+    deltas = {k: curr_w[k] - prev_w[k] for k in ["btc", "alts", "stables"]}
+    deltas_pct = {k: round(100 * v, 1) for k, v in deltas.items()}
+
+    # If all little (<1%), call it "no major" but still return weights
+    if all(abs(v) < 1.0 for v in deltas_pct.values()):
+        text = (
+            f"Yesterday: BTC {prev_w['btc']*100:.1f}%, ALTs {prev_w['alts']*100:.1f}%, "
+            f"Stables {prev_w['stables']*100:.1f}%\n"
+            f"Today:     BTC {curr_w['btc']*100:.1f}%, ALTs {curr_w['alts']*100:.1f}%, "
+            f"Stables {curr_w['stables']*100:.1f}%"
+        )
+        return text, None, prev_w, curr_w
+
+    # Determine main flow: from the most-negative delta to most-positive
+    src_key = min(deltas, key=lambda k: deltas[k])
+    dst_key = max(deltas, key=lambda k: deltas[k])
+
+    flow_size_total = min(abs(deltas_pct[src_key]), abs(deltas_pct[dst_key]))
+    asset_name_map = {"btc": "BTC", "alts": "ALTs", "stables": "Stables"}
+
+    summary = (
+        f"Yesterday: BTC {prev_w['btc']*100:.1f}%, ALTs {prev_w['alts']*100:.1f}%, "
+        f"Stables {prev_w['stables']*100:.1f}%\n"
+        f"Today:     BTC {curr_w['btc']*100:.1f}%, ALTs {curr_w['alts']*100:.1f}%, "
+        f"Stables {curr_w['stables']*100:.1f}%"
+    )
+
+    main_flow = {
+        "src": asset_name_map[src_key],
+        "dst": asset_name_map[dst_key],
+        "size_total": flow_size_total,
+        "src_key": src_key,
+        "dst_key": dst_key,
+    }
+
+    return summary, main_flow, prev_w, curr_w
+
+
+def summarise_trades_total(path=EQUITY_CSV, threshold=0.01):
+    """
+    Count total 'trade days' where the sum of absolute allocation changes
+    (BTC, ALTs, Stables) vs previous day exceeds 'threshold'.
+
+    threshold=0.01 -> about 1% of portfolio moved.
+    """
+    if not os.path.exists(path):
+        return 0
+
+    df = pd.read_csv(path, parse_dates=["date"])
+    if df.empty or len(df) < 2:
+        return 0
+
+    df = df.sort_values("date")
+    total_trades = 0
+
+    prev = df.iloc[0]
+    for i in range(1, len(df)):
+        curr = df.iloc[i]
+
+        prev_w = (
+            float(prev["w_btc"]),
+            float(prev["w_alts"]),
+            float(prev["w_stables"]),
+        )
+        curr_w = (
+            float(curr["w_btc"]),
+            float(curr["w_alts"]),
+            float(curr["w_stables"]),
+        )
+
+        deltas = [abs(c - p) for c, p in zip(curr_w, prev_w)]
+        total_move = sum(deltas)
+
+        if total_move > threshold:
+            total_trades += 1
+
+        prev = curr
+
+    return total_trades
+
+
+# ---------- Main formatting ----------
+
+def format_signal_message():
+    # HMI
     hmi, hmi_date = load_latest_hmi()
-    band, emoji = hmi_band(hmi)
+    band_name, hmi_circle = hmi_band_name_and_emoji(hmi)
 
-    prices = fetch_prices()
-    dom = fetch_btc_dom()
+    # Equity / ROI
+    last_row, prev_row = load_equity_snapshot()
+    if last_row is None:
+        raise RuntimeError("equity_curve_fg_dom.csv missing or empty; run backtest_dominance_rotation.py first.")
 
-    w = allocation_from_dom_and_hmi(dom, hmi)
-    save_alloc(w)
+    (
+        equity,
+        btc_equity,
+        hive_roi_pct,
+        hive_profit,
+        btc_roi_pct,
+        btc_profit,
+        outperf,
+    ) = compute_roi_fields(last_row)
 
-    btc_pct = round(dom * 100, 1)
-    alt_pct = round((1 - dom) * 100, 1)
+    # Dominance & alt label
+    btc_dom, alt_label = fetch_dominance_and_alt_label()
+    btc_dom_pct = int(round(btc_dom * 100))
+    alt_dom_pct = 100 - btc_dom_pct
 
-    # Allocation display yesterday→today
-    def alloc_line(asset, pct1, pct2):
-        val1 = balance * pct1
-        val2 = balance * pct2
-        return f" • {asset}: {pct1*100:.1f}% → {pct2*100:.1f}% | ${val1:.2f} → ${val2:.2f}"
+    # Prices
+    prices = fetch_spot_prices()
 
-    alloc_text = "\n".join([
-        alloc_line("BTC", last_alloc["btc"], w["btc"]),
-        alloc_line("ALTs", last_alloc["alts"], w["alts"]),
-        alloc_line("Stables", last_alloc["stables"], w["stables"]),
-    ])
+    # Allocation change
+    flow_summary_text, main_flow, prev_w, curr_w = describe_allocation_change(prev_row, last_row)
 
-    # Action: % of BTC moved
-    move = abs(w["btc"] - last_alloc["btc"])
-    if last_alloc["btc"] > 0:
-        pct_move = round(100 * move / last_alloc["btc"], 1)
+    # Top line: Hive   dd/mm/yy    💵 $xx.xx   ROI: +x.x%
+    date_str = hmi_date.strftime("%d/%m/%y")
+    top_line = f"Hive   {date_str}    💵 ${equity:,.2f}   ROI: {hive_roi_pct:+.1f}%"
+
+    # Suggested allocation: yesterday → today, with $ values
+    allocation_lines = ["🧠 Suggested allocation:"]
+
+    if curr_w is not None:
+        curr_btc_pct = curr_w["btc"] * 100
+        curr_alt_pct = curr_w["alts"] * 100
+        curr_stb_pct = curr_w["stables"] * 100
+
+        curr_eq = equity
+        curr_btc_usd = curr_eq * curr_w["btc"]
+        curr_alt_usd = curr_eq * curr_w["alts"]
+        curr_stb_usd = curr_eq * curr_w["stables"]
+
+        if prev_w is not None and prev_row is not None:
+            prev_eq = float(prev_row["equity"])
+
+            prev_btc_pct = prev_w["btc"] * 100
+            prev_alt_pct = prev_w["alts"] * 100
+            prev_stb_pct = prev_w["stables"] * 100
+
+            prev_btc_usd = prev_eq * prev_w["btc"]
+            prev_alt_usd = prev_eq * prev_w["alts"]
+            prev_stb_usd = prev_eq * prev_w["stables"]
+
+            allocation_lines.append(
+                f" • BTC: {prev_btc_pct:.1f}% → {curr_btc_pct:.1f}% | "
+                f"${prev_btc_usd:,.2f} → ${curr_btc_usd:,.2f}"
+            )
+            allocation_lines.append(
+                f" • ALTs: {prev_alt_pct:.1f}% → {curr_alt_pct:.1f}% | "
+                f"${prev_alt_usd:,.2f} → ${curr_alt_usd:,.2f}"
+            )
+            allocation_lines.append(
+                f" • Stables: {prev_stb_pct:.1f}% → {curr_stb_pct:.1f}% | "
+                f"${prev_stb_usd:,.2f} → ${curr_stb_usd:,.2f}"
+            )
+        else:
+            allocation_lines.append(
+                f" • BTC: {curr_btc_pct:.1f}% | ${curr_btc_usd:,.2f}"
+            )
+            allocation_lines.append(
+                f" • ALTs: {curr_alt_pct:.1f}% | ${curr_alt_usd:,.2f}"
+            )
+            allocation_lines.append(
+                f" • Stables: {curr_stb_pct:.1f}% | ${curr_stb_usd:,.2f}"
+            )
+
+    allocation_block = "\n".join(allocation_lines)
+
+    # Action line: % of SOURCE asset to move, not % of total
+    if main_flow is None or prev_w is None or curr_w is None:
+        action_line = "No action."
     else:
-        pct_move = round(move * 100, 1)
+        src_key = main_flow["src_key"]   # 'btc'/'alts'/'stables'
+        src_label = main_flow["src"]     # 'BTC'/'ALTs'/'Stables'
+        dst_label = main_flow["dst"]
 
-    if move < 0.001:
-        action = "No reallocation."
-    elif w["btc"] < last_alloc["btc"]:
-        action = f"Rotate ~{pct_move}% of your BTC → ALTs."
+        prev_src_pct = prev_w[src_key] * 100.0
+        curr_src_pct = curr_w[src_key] * 100.0
+        delta_src_pct = abs(curr_src_pct - prev_src_pct)
+
+        if prev_src_pct > 0.1:
+            rel_move = (delta_src_pct / prev_src_pct) * 100.0
+            action_line = f"Rotate ~{rel_move:.1f}% of your {src_label} to {dst_label}."
+        else:
+            action_line = f"Rotate allocation toward {dst_label}."
+
+    # ROI text
+    hive_profit_sign = "+" if hive_profit >= 0 else "-"
+    btc_profit_sign  = "+" if btc_profit >= 0 else "-"
+
+    hive_roi_line = f"Hive ROI:  {hive_roi_pct:+.1f}% / {hive_profit_sign}${abs(hive_profit):,.2f}"
+    btc_roi_line  = f"BTC buy & hold ROI: {btc_roi_pct:+.1f}% / {btc_profit_sign}${abs(btc_profit):,.2f}"
+
+    if outperf is None:
+        outperf_line = "Hive vs BTC: n/a"
     else:
-        action = f"Rotate ~{pct_move}% of your ALTs → BTC."
+        outperf_line = f"Hive vs BTC: {outperf:.2f}x"
 
-    # Hive ROI
-    roi = round((balance - STARTING_BAL) / STARTING_BAL * 100, 2)
+    # Trades
+    total_trades = summarise_trades_total()
+    trades_line = f"Hive trades: {total_trades}"
 
-    # BTC B&H ROI
-    start_price = prices["BTC"]
-    btc_hold_value = STARTING_BAL * (prices["BTC"] / start_price)
-    btc_roi = round((btc_hold_value - STARTING_BAL) / STARTING_BAL * 100, 2)
+    # Build full text
+    text = (
+        f"{top_line}\n\n"
+        f"{hmi_circle} HMI: {hmi:.1f} — {band_name}\n"
+        f"📊 BTC vs {alt_label}: {btc_dom_pct}/{alt_dom_pct}\n\n"
+        f"💰 Prices:\n"
+        f" • BTC: ${prices['BTC']:.0f}\n"
+        f" • ETH: ${prices['ETH']:.0f}\n"
+        f" • BNB: ${prices['BNB']:.0f}\n"
+        f" • SOL: ${prices['SOL']:.2f}\n\n"
+        f"{allocation_block}\n\n"
+        f"⚙️ Action: {action_line}\n\n"
+        f"🧠 {hive_roi_line}\n"
+        f"{btc_roi_line}\n"
+        f"{outperf_line}\n\n"
+        f"{trades_line}"
+    )
 
-    # Comparison
-    if btc_roi == 0:
-        mult = 0
-    else:
-        mult = round(roi / btc_roi, 2)
-
-    # Trades count
-    if os.path.exists(ALLOC_FILE):
-        df = pd.read_csv(ALLOC_FILE)
-        trades = len(df) - 1
-    else:
-        trades = 0
-
-    return f"""
-Hive    {hmi_date}
-
-{emoji} HMI: {hmi:.1f} — {band}
-📊 BTC vs EthBnbSol: {btc_pct}/{alt_pct}
-
-💰 Prices:
- • BTC: ${prices['BTC']:.0f}
- • ETH: ${prices['ETH']:.0f}
- • BNB: ${prices['BNB']:.0f}
- • SOL: ${prices['SOL']:.2f}
-
-🧠 Suggested allocation:
-{alloc_text}
-
-⚙️ Action:
-{action}
-
-🧠 Hive ROI: {roi}%
-BTC buy & hold ROI: {btc_roi}%
-Hive vs BTC: {mult}x
-
-Hive trades: {trades}
-    """.strip()
+    return text
 
 
-# ---------------- TELEGRAM ----------------
+# ---------- Telegram send ----------
 
-def send_tg(text):
+def send_telegram_message(text: str):
     if not TG_TOKEN or not TG_CHAT:
-        raise RuntimeError("Telegram env vars missing.")
+        raise RuntimeError(
+            "Telegram env vars not set "
+            "(TELEGRAM_BOT_TOKEN/TG_BOT_TOKEN or TELEGRAM_CHAT_ID/TG_CHAT_ID)."
+        )
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TG_CHAT, "text": text, "parse_mode": "Markdown"})
+    payload = {
+        "chat_id": TG_CHAT,
+        "text": text,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True,
+    }
+    r = requests.post(url, json=payload, timeout=20)
+    r.raise_for_status()
+    return r.json()
 
-
-# ---------------- MAIN ----------------
 
 def main():
-    msg = format_message()
-    send_tg(msg)
-    print("Sent Hive update.")
+    msg = format_signal_message()
+    resp = send_telegram_message(msg)
+    print("Sent Telegram message, message_id:", resp.get("result", {}).get("message_id"))
 
 
 if __name__ == "__main__":
     main()
-     
+ 
