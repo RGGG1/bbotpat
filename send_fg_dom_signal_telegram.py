@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Hive Telegram Signal
+HiveAI Telegram Signal
 
 - Uses:
     - output/fg2_daily.csv            (HMI = FG_lite)
     - output/equity_curve_fg_dom.csv  (equity, btc_only, weights)
 
 - Sends a daily Telegram message with:
-    - Top line: Hive   dd/mm/yy    💵 $balance   ROI: +x.x%
+    - Top line: HiveAI   dd/mm/yy    💵 $balance_live   ROI: +x.x% (LIVE estimate)
     - HMI value + band + circle emoji
     - BTC vs ALT dominance (ETH+BNB+SOL)
     - Prices: BTC, ETH, BNB, SOL
-    - Suggested allocation: yesterday%/$ → today%/$
-    - Action: % of your BTC or ALTs to rotate
-    - Hive ROI vs BTC buy & hold (both % and $)
-    - Hive vs BTC: X.x x multiple
-    - Hive trades: total days with >1% reallocation since start
+    - Suggested allocation: yesterday%/$ → today%/$ (model, daily close)
+    - Action: % of your BTC or ALTs to rotate (model, daily close)
+    - HiveAI ROI vs BTC buy & hold (both % and $, model, daily close)
+    - HiveAI vs BTC: X.x x multiple (model)
+    - HiveAI trades: total days with >1% reallocation since start
 """
 
 import os
@@ -129,6 +129,7 @@ def hmi_band_name_and_emoji(hmi: float):
 def fetch_markets():
     """
     Fetch /coins/markets once for all RISK_IDS.
+    Includes 24h change for live equity marking.
     """
     js = cg_get(
         "/coins/markets",
@@ -137,6 +138,7 @@ def fetch_markets():
             "ids": ",".join(RISK_IDS),
             "per_page": len(RISK_IDS),
             "page": 1,
+            "price_change_percentage": "24h",
         },
     )
     return js
@@ -186,6 +188,49 @@ def fetch_spot_prices_from_markets(markets):
     return prices
 
 
+def compute_live_balance(equity_close, btc_only_close, w_btc, w_alts, w_stb, markets):
+    """
+    Approximate live portfolio value based on 24h % change from CoinGecko.
+
+    We use:
+      ratio = 1 + price_change_percentage_24h / 100
+
+    For ALTs, we average ratios of ETH, BNB, SOL equally.
+    Stables assumed ratio = 1.
+
+    Returns:
+      equity_live, hive_roi_live_pct
+    """
+    by_id = {row["id"]: row for row in markets}
+
+    def get_ratio(cid):
+        row = by_id.get(cid)
+        if not row:
+            return 1.0
+        ch = row.get("price_change_percentage_24h")
+        if ch is None:
+            ch = 0.0
+        return 1.0 + ch / 100.0
+
+    ratio_btc = get_ratio("bitcoin")
+    ratio_eth = get_ratio("ethereum")
+    ratio_bnb = get_ratio("binancecoin")
+    ratio_sol = get_ratio("solana")
+
+    # equal-weight alt basket ratio
+    alt_ratios = [ratio_eth, ratio_bnb, ratio_sol]
+    alt_ratio = sum(alt_ratios) / len(alt_ratios)
+
+    # portfolio live factor
+    factor_port = w_btc * ratio_btc + w_alts * alt_ratio + w_stb * 1.0
+
+    equity_live = equity_close * factor_port
+
+    hive_roi_live_pct = (equity_live - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100.0
+
+    return equity_live, hive_roi_live_pct
+
+
 # ---------- Equity & allocations ----------
 
 def load_equity_snapshot(path=EQUITY_CSV):
@@ -207,11 +252,11 @@ def load_equity_snapshot(path=EQUITY_CSV):
 
 def compute_roi_fields(last_row):
     """
-    Compute ROI numbers:
+    Compute ROI numbers (model / daily close):
 
-    - Hive equity & ROI vs 100
+    - HiveAI equity & ROI vs 100
     - BTC-only equity & ROI vs 100
-    - Outperformance multiple: (Hive growth) / (BTC growth)
+    - Outperformance multiple: (HiveAI growth) / (BTC growth)
       where growth = equity / 100
     """
     equity   = float(last_row["equity"])
@@ -360,37 +405,45 @@ def format_signal_message():
     hmi, hmi_date = load_latest_hmi()
     band_name, hmi_circle = hmi_band_name_and_emoji(hmi)
 
-    # Equity / ROI
+    # Equity / ROI (model / close-based)
     last_row, prev_row = load_equity_snapshot()
     if last_row is None:
         raise RuntimeError("equity_curve_fg_dom.csv missing or empty; run backtest_dominance_rotation.py first.")
 
     (
-        equity,
-        btc_equity,
-        hive_roi_pct,
-        hive_profit,
-        btc_roi_pct,
-        btc_profit,
-        outperf,
+        equity_close,
+        btc_equity_close,
+        hive_roi_close_pct,
+        hive_profit_close,
+        btc_roi_close_pct,
+        btc_profit_close,
+        outperf_close,
     ) = compute_roi_fields(last_row)
 
-    # Markets (one call): used for dominance + prices
+    # Markets (one call): used for dominance + prices + live equity approximation
     markets = fetch_markets()
     btc_dom, alt_label = fetch_dominance_and_alt_label(markets)
     prices = fetch_spot_prices_from_markets(markets)
 
+    # Approximate live balance & live ROI from 24h % changes
+    w_btc = float(last_row["w_btc"])
+    w_alts = float(last_row["w_alts"])
+    w_stb = float(last_row["w_stables"])
+    equity_live, hive_roi_live_pct = compute_live_balance(
+        equity_close, btc_equity_close, w_btc, w_alts, w_stb, markets
+    )
+
     btc_dom_pct = int(round(btc_dom * 100))
     alt_dom_pct = 100 - btc_dom_pct
 
-    # Allocation change
+    # Allocation change (yesterday → today) for %/$ block
     flow_summary_text, main_flow, prev_w, curr_w = describe_allocation_change(prev_row, last_row)
 
-    # Top line: Hive   dd/mm/yy    💵 $xx.xx   ROI: +x.x%
+    # Top line: HiveAI   dd/mm/yy    💵 $xx.xx   ROI: +x.x%  (LIVE)
     date_str = hmi_date.strftime("%d/%m/%y")
-    top_line = f"Hive   {date_str}    💵 ${equity:,.2f}   ROI: {hive_roi_pct:+.1f}%"
+    top_line = f"HiveAI   {date_str}    💵 ${equity_live:,.2f}   ROI: {hive_roi_live_pct:+.1f}%"
 
-    # Suggested allocation: yesterday → today, with $ values
+    # Suggested allocation: yesterday → today, with $ values (model equity)
     allocation_lines = ["🧠 Suggested allocation:"]
 
     if curr_w is not None:
@@ -398,7 +451,7 @@ def format_signal_message():
         curr_alt_pct = curr_w["alts"] * 100
         curr_stb_pct = curr_w["stables"] * 100
 
-        curr_eq = equity
+        curr_eq = equity_close
         curr_btc_usd = curr_eq * curr_w["btc"]
         curr_alt_usd = curr_eq * curr_w["alts"]
         curr_stb_usd = curr_eq * curr_w["stables"]
@@ -457,21 +510,21 @@ def format_signal_message():
         else:
             action_line = f"Rotate allocation toward {dst_label}."
 
-    # ROI text
-    hive_profit_sign = "+" if hive_profit >= 0 else "-"
-    btc_profit_sign  = "+" if btc_profit >= 0 else "-"
+    # ROI text (still close-based model numbers)
+    hive_profit_sign = "+" if hive_profit_close >= 0 else "-"
+    btc_profit_sign  = "+" if btc_profit_close >= 0 else "-"
 
-    hive_roi_line = f"Hive ROI:  {hive_roi_pct:+.1f}% / {hive_profit_sign}${abs(hive_profit):,.2f}"
-    btc_roi_line  = f"BTC buy & hold ROI: {btc_roi_pct:+.1f}% / {btc_profit_sign}${abs(btc_profit):,.2f}"
+    hive_roi_line = f"HiveAI ROI:  {hive_roi_close_pct:+.1f}% / {hive_profit_sign}${abs(hive_profit_close):,.2f}"
+    btc_roi_line  = f"BTC buy & hold ROI: {btc_roi_close_pct:+.1f}% / {btc_profit_sign}${abs(btc_profit_close):,.2f}"
 
-    if outperf is None:
-        outperf_line = "Hive vs BTC: n/a"
+    if outperf_close is None:
+        outperf_line = "HiveAI vs BTC: n/a"
     else:
-        outperf_line = f"Hive vs BTC: {outperf:.2f}x"
+        outperf_line = f"HiveAI vs BTC: {outperf_close:.2f}x"
 
     # Trades
     total_trades = summarise_trades_total()
-    trades_line = f"Hive trades: {total_trades}"
+    trades_line = f"HiveAI trades: {total_trades}"
 
     # Build full text
     text = (
@@ -517,9 +570,8 @@ def send_telegram_message(text: str):
 def main():
     msg = format_signal_message()
     resp = send_telegram_message(msg)
-    print("Sent Telegram message, message_id:", resp.get("result", {}).get("message_id"))
+    print("Sent HiveAI message, message_id:", resp.get("result", {}).get("message_id"))
 
 
 if __name__ == "__main__":
     main()
-            
