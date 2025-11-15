@@ -63,14 +63,27 @@ TG_CHAT = (
 
 # ---------- HTTP helpers ----------
 
-def cg_get(path, params=None, sleep=0.3):
+def cg_get(path, params=None, max_retries=3, base_sleep=1.0):
+    """
+    CoinGecko GET with simple retry on 429 (rate limit).
+    """
     if params is None:
         params = {}
     url = COINGECKO_BASE + path
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    time.sleep(sleep)
-    return r.json()
+
+    for attempt in range(max_retries):
+        r = requests.get(url, params=params, timeout=30)
+        if r.status_code == 429:
+            # Rate-limited; back off and retry
+            wait = base_sleep * (attempt + 1)
+            print(f"[cg_get] 429 Too Many Requests, sleeping {wait:.1f}s then retrying…")
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        return r.json()
+
+    # If we get here, we never succeeded
+    raise RuntimeError(f"CoinGecko error {r.status_code}: {r.text[:300]}")
 
 
 # ---------- HMI helpers ----------
@@ -111,14 +124,11 @@ def hmi_band_name_and_emoji(hmi: float):
         return "It's the future of finance", "🟢"
 
 
-# ---------- Dominance & prices ----------
+# ---------- Dominance & prices via /coins/markets ----------
 
-def fetch_dominance_and_alt_label():
+def fetch_markets():
     """
-    Returns (btc_dom_fraction, alt_label_str)
-
-    alt_label_str is concatenation of short names in order of current market cap,
-    e.g. 'EthBnbSol'.
+    Fetch /coins/markets once for all RISK_IDS.
     """
     js = cg_get(
         "/coins/markets",
@@ -129,7 +139,17 @@ def fetch_dominance_and_alt_label():
             "page": 1,
         },
     )
-    caps = {row["id"]: row["market_cap"] for row in js}
+    return js
+
+
+def fetch_dominance_and_alt_label(markets):
+    """
+    Returns (btc_dom_fraction, alt_label_str)
+
+    alt_label_str is concatenation of short names in order of current market cap,
+    e.g. 'EthBnbSol'.
+    """
+    caps = {row["id"]: row["market_cap"] for row in markets}
 
     btc_mc = caps.get("bitcoin", 0.0)
     alt_caps = [(aid, caps.get(aid, 0.0)) for aid in ALT_IDS]
@@ -147,23 +167,22 @@ def fetch_dominance_and_alt_label():
     return btc_dom, label
 
 
-def fetch_spot_prices():
+def fetch_spot_prices_from_markets(markets):
     """
-    Use CoinGecko simple price for BTC, ETH, BNB, SOL.
+    Extract BTC, ETH, BNB, SOL prices from the same /coins/markets response.
     """
-    js = cg_get(
-        "/simple/price",
-        params={
-            "ids": "bitcoin,ethereum,binancecoin,solana",
-            "vs_currencies": "usd",
-        },
-    )
-    prices = {
-        "BTC": js.get("bitcoin", {}).get("usd", None),
-        "ETH": js.get("ethereum", {}).get("usd", None),
-        "BNB": js.get("binancecoin", {}).get("usd", None),
-        "SOL": js.get("solana", {}).get("usd", None),
-    }
+    prices = {"BTC": None, "ETH": None, "BNB": None, "SOL": None}
+    for row in markets:
+        cid = row["id"]
+        price = row.get("current_price")
+        if cid == "bitcoin":
+            prices["BTC"] = price
+        elif cid == "ethereum":
+            prices["ETH"] = price
+        elif cid == "binancecoin":
+            prices["BNB"] = price
+        elif cid == "solana":
+            prices["SOL"] = price
     return prices
 
 
@@ -356,13 +375,13 @@ def format_signal_message():
         outperf,
     ) = compute_roi_fields(last_row)
 
-    # Dominance & alt label
-    btc_dom, alt_label = fetch_dominance_and_alt_label()
+    # Markets (one call): used for dominance + prices
+    markets = fetch_markets()
+    btc_dom, alt_label = fetch_dominance_and_alt_label(markets)
+    prices = fetch_spot_prices_from_markets(markets)
+
     btc_dom_pct = int(round(btc_dom * 100))
     alt_dom_pct = 100 - btc_dom_pct
-
-    # Prices
-    prices = fetch_spot_prices()
 
     # Allocation change
     flow_summary_text, main_flow, prev_w, curr_w = describe_allocation_change(prev_row, last_row)
@@ -503,4 +522,4 @@ def main():
 
 if __name__ == "__main__":
     main()
- 
+            
