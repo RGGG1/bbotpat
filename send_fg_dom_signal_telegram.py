@@ -4,10 +4,10 @@ Telegram alert for 'Hive' (HMI + BTC dominance rotation).
 
 Message layout:
 
-Hive   dd/mm/yy    💵 Balance: $xxx.xx
+Hive   dd/mm/yy    💵 $xxx.xx   ROI: +x.x%
 
-⚪ HMI: 49.7 — Stable
-📊 BTC vs EthSolBnb: 77/23
+🟠 HMI: 38.7 — Ngmi
+📊 BTC vs EthBnbSol: 76/24
 
 💰 Prices:
  • BTC: $...
@@ -15,22 +15,17 @@ Hive   dd/mm/yy    💵 Balance: $xxx.xx
  • SOL: $...
 
 🧠 Suggested allocation:
- • BTC: xx.x% - $X
- • ALTs: yy.y% - $Y
- • Stables: zz.z% - $Z
+ • BTC: 36.1% → 29.0% | $33.51 → $26.91
+ • ALTs: 63.9% → 71.0% | $59.38 → $65.99
+ • Stables: 0.0% → 0.0% | $0.00 → $0.00
 
-⚙️ Action: Rotate X% of SRC to DST.
+⚙️ Action: Rotate 19.7% of your BTC to ALTs.
 
-🔁 Portfolio Flow:
-Yesterday: a% BTC, b% ALTs, c% Stables
-Today:     d% BTC, e% ALTs, f% Stables
+🧠 Hive ROI:  -7.1% / -$7.11
+BTC buy & hold ROI: -4.8% / -$4.76
+Hive vs BTC: 0.96x
 
-🧠 Hive ROI:  +P% / +$P
-BTC buy & hold ROI: +Q% / +$Q
-Hive is outperforming BTC buy & hold by Yx.
-
-📈 Hive reallocations per year:
- • 2025: N trades
+Hive trades: 4
 """
 
 import os
@@ -62,7 +57,7 @@ ALT_LABEL = {
 EQUITY_CSV = "output/equity_curve_fg_dom.csv"
 HMI_CSV    = "output/fg2_daily.csv"
 
-INITIAL_CAPITAL_FOR_ROI = 100.0  # your original starting capital
+INITIAL_CAPITAL_FOR_ROI = 100.0  # starting capital
 
 
 # Support both TELEGRAM_* and TG_* env names
@@ -185,7 +180,7 @@ def fetch_spot_prices():
 
 def fetch_dominance_and_alt_label():
     """
-    Returns (btc_dom, label_str) where label_str is e.g. 'EthSolBnb'
+    Returns (btc_dom, label_str) where label_str is e.g. 'EthBnbSol'
     based on ALT_IDS sorted by *current* market cap.
     """
     js = cg_get(
@@ -236,10 +231,14 @@ def load_equity_snapshot(path=EQUITY_CSV):
 def describe_allocation_change(prev_row, curr_row):
     if prev_row is None or curr_row is None:
         return (
-            "No prior allocation history. (First run or file missing.)",
+            "No prior allocation history.",
             None,  # main_flow
             None,
-            None,
+            {
+                "btc": float(curr_row["w_btc"]) if curr_row is not None else 0.0,
+                "alts": float(curr_row["w_alts"]) if curr_row is not None else 0.0,
+                "stables": float(curr_row["w_stables"]) if curr_row is not None else 0.0,
+            } if curr_row is not None else None,
         )
 
     prev_w = {
@@ -256,9 +255,9 @@ def describe_allocation_change(prev_row, curr_row):
     deltas = {k: curr_w[k] - prev_w[k] for k in ["btc", "alts", "stables"]}
     deltas_pct = {k: round(100 * v, 1) for k, v in deltas.items()}
 
+    # If all small (<1%), still treat as "no major" but keep weights
     if all(abs(v) < 1.0 for v in deltas_pct.values()):
         text = (
-            "No major reallocation today.\n"
             f"Yesterday: BTC {prev_w['btc']*100:.1f}%, ALTs {prev_w['alts']*100:.1f}%, "
             f"Stables {prev_w['stables']*100:.1f}%\n"
             f"Today:     BTC {curr_w['btc']*100:.1f}%, ALTs {curr_w['alts']*100:.1f}%, "
@@ -269,8 +268,7 @@ def describe_allocation_change(prev_row, curr_row):
     # Find main source (most negative) and destination (most positive)
     src_asset = min(deltas, key=lambda k: deltas[k])
     dst_asset = max(deltas, key=lambda k: deltas[k])
-    flow_size = min(abs(deltas_pct[src_asset]), abs(deltas_pct[dst_asset]))
-    flow_size = round(flow_size, 1)
+    flow_size_total = min(abs(deltas_pct[src_asset]), abs(deltas_pct[dst_asset]))
 
     asset_names = {"btc": "BTC", "alts": "ALTs", "stables": "Stables"}
 
@@ -284,7 +282,9 @@ def describe_allocation_change(prev_row, curr_row):
     main_flow = {
         "src": asset_names[src_asset],
         "dst": asset_names[dst_asset],
-        "size": flow_size,
+        "size_total": flow_size_total,  # % of total portfolio moved
+        "src_key": src_asset,
+        "dst_key": dst_asset,
     }
 
     return summary, main_flow, prev_w, curr_w
@@ -293,9 +293,12 @@ def describe_allocation_change(prev_row, curr_row):
 def compute_roi_fields(last_row):
     """
     Returns:
-      hive_equity, btc_equity, hive_roi_pct, hive_profit,
+      equity, btc_equity, hive_roi_pct, hive_profit,
       btc_roi_pct, btc_profit, outperformance_multiple
-    All ROI vs INITIAL_CAPITAL_FOR_ROI (100).
+
+    outperformance_multiple = (Hive growth) / (BTC growth)
+                            = (equity / 100) / (btc_equity / 100)
+                            = equity / btc_equity
     """
     equity    = float(last_row["equity"])
     btc_only  = float(last_row["btc_only"])
@@ -306,31 +309,31 @@ def compute_roi_fields(last_row):
     hive_roi_pct = hive_profit / INITIAL_CAPITAL_FOR_ROI * 100.0
     btc_roi_pct  = btc_profit / INITIAL_CAPITAL_FOR_ROI * 100.0
 
-    if btc_profit <= 0:
+    if btc_only <= 0:
         outperf = None
     else:
-        outperf = hive_profit / btc_profit
+        outperf = equity / btc_only
 
     return equity, btc_only, hive_roi_pct, hive_profit, btc_roi_pct, btc_profit, outperf
 
 
-def summarise_trades_per_year(path=EQUITY_CSV, threshold=0.01):
+def summarise_trades_total(path=EQUITY_CSV, threshold=0.01):
     """
-    Count "trade days" per year where allocations changed
-    by more than 'threshold' (sum of abs deltas) vs previous day.
+    Count "trade days" where allocations changed by more than 'threshold'
+    (sum of abs deltas) vs previous day.
 
-    threshold = 0.01 -> 1% of portfolio moved.
+    threshold = 0.01 -> ~1% of portfolio moved.
+    Returns a single integer count.
     """
     if not os.path.exists(path):
-        return {}
+        return 0
 
     df = pd.read_csv(path, parse_dates=["date"])
     df = df.sort_values("date")
     if len(df) < 2:
-        return {}
+        return 0
 
-    trades_per_year = {}
-
+    total_trades = 0
     prev = df.iloc[0]
     for i in range(1, len(df)):
         curr = df.iloc[i]
@@ -349,12 +352,11 @@ def summarise_trades_per_year(path=EQUITY_CSV, threshold=0.01):
         total_move = sum(deltas)
 
         if total_move > threshold:
-            year = curr["date"].year
-            trades_per_year[year] = trades_per_year.get(year, 0) + 1
+            total_trades += 1
 
         prev = curr
 
-    return trades_per_year
+    return total_trades
 
 
 # ---------- Message Formatting ----------
@@ -388,50 +390,102 @@ def format_signal_message():
     # Prices (order by market cap: BTC, ETH, SOL)
     prices = fetch_spot_prices()
 
-    # Suggested allocation from LIVE dom + HMI (not from CSV)
-    w = allocation_from_dom_and_hmi(btc_dom, hmi)
-    sugg_btc = w["btc"] * 100
-    sugg_alt = w["alts"] * 100
-    sugg_stb = w["stables"] * 100
+    # Suggested allocation from LIVE dom + HMI (for dollars), but
+    # percentages come from prev_row/curr_row for flow view.
+    w_live = allocation_from_dom_and_hmi(btc_dom, hmi)
+    sugg_btc = w_live["btc"] * 100
+    sugg_alt = w_live["alts"] * 100
+    sugg_stb = w_live["stables"] * 100
 
-    # Dollar allocation from current balance
-    btc_usd = equity * w["btc"]
-    alt_usd = equity * w["alts"]
-    stb_usd = equity * w["stables"]
+    btc_usd_now = equity * w_live["btc"]
+    alt_usd_now = equity * w_live["alts"]
+    stb_usd_now = equity * w_live["stables"]
 
     # Allocation change & action text
     flow_summary_text, main_flow, prev_w, curr_w = describe_allocation_change(prev_row, last_row)
 
-    if main_flow is None:
-        action_line = "No action (Δ<1%)."
-    else:
-        action_line = f"Rotate {main_flow['size']:.1f}% of {main_flow['src']} to {main_flow['dst']}."
-
-    # Top line: Hive   dd/mm/yy    💵 Balance: $xxx.xx
+    # Top line: Hive   dd/mm/yy    💵 $xx.xx   ROI: +x.x%
     date_str = hmi_date.strftime("%d/%m/%y")
-    top_line = f"Hive   {date_str}    💵 Balance: ${equity:,.2f}"
+    top_line = f"Hive   {date_str}    💵 ${equity:,.2f}   ROI: {hive_roi_pct:+.1f}%"
 
-    # ROI text
+    # Suggested allocation lines: prev% -> curr% | prev$ -> curr$
+    allocation_block_lines = ["🧠 Suggested allocation:"]
+
+    if curr_w is not None:
+        curr_btc_pct = curr_w["btc"] * 100
+        curr_alt_pct = curr_w["alts"] * 100
+        curr_stb_pct = curr_w["stables"] * 100
+
+        curr_eq = equity
+        curr_btc_usd = curr_eq * curr_w["btc"]
+        curr_alt_usd = curr_eq * curr_w["alts"]
+        curr_stb_usd = curr_eq * curr_w["stables"]
+
+        if prev_w is not None and prev_row is not None:
+            prev_eq = float(prev_row["equity"])
+            prev_btc_pct = prev_w["btc"] * 100
+            prev_alt_pct = prev_w["alts"] * 100
+            prev_stb_pct = prev_w["stables"] * 100
+
+            prev_btc_usd = prev_eq * prev_w["btc"]
+            prev_alt_usd = prev_eq * prev_w["alts"]
+            prev_stb_usd = prev_eq * prev_w["stables"]
+
+            allocation_block_lines.append(
+                f" • BTC: {prev_btc_pct:.1f}% → {curr_btc_pct:.1f}% | ${prev_btc_usd:,.2f} → ${curr_btc_usd:,.2f}"
+            )
+            allocation_block_lines.append(
+                f" • ALTs: {prev_alt_pct:.1f}% → {curr_alt_pct:.1f}% | ${prev_alt_usd:,.2f} → ${curr_alt_usd:,.2f}"
+            )
+            allocation_block_lines.append(
+                f" • Stables: {prev_stb_pct:.1f}% → {curr_stb_pct:.1f}% | ${prev_stb_usd:,.2f} → ${curr_stb_usd:,.2f}"
+            )
+        else:
+            # No previous day
+            allocation_block_lines.append(
+                f" • BTC: {curr_btc_pct:.1f}% | ${curr_btc_usd:,.2f}"
+            )
+            allocation_block_lines.append(
+                f" • ALTs: {curr_alt_pct:.1f}% | ${curr_alt_usd:,.2f}"
+            )
+            allocation_block_lines.append(
+                f" • Stables: {curr_stb_pct:.1f}% | ${curr_stb_usd:,.2f}"
+            )
+    allocation_block = "\n".join(allocation_block_lines)
+
+    # Action line: % of source asset to move
+    if main_flow is None or prev_w is None or curr_w is None:
+        action_line = "No action."
+    else:
+        src_key = main_flow["src_key"]
+        src_label = main_flow["src"]
+        dst_label = main_flow["dst"]
+
+        prev_src_pct = prev_w[src_key] * 100.0
+        curr_src_pct = curr_w[src_key] * 100.0
+        delta_src_pct = abs(curr_src_pct - prev_src_pct)
+
+        if prev_src_pct > 0.1:
+            rel_move = delta_src_pct / prev_src_pct * 100.0
+            action_line = f"Rotate {rel_move:.1f}% of your {src_label} to {dst_label}."
+        else:
+            action_line = f"Rotate allocation toward {dst_label}."
+
+    # ROI lines
     hive_profit_sign = "+" if hive_profit >= 0 else "-"
     btc_profit_sign  = "+" if btc_profit >= 0 else "-"
 
     hive_roi_line = f"Hive ROI:  {hive_roi_pct:+.1f}% / {hive_profit_sign}${abs(hive_profit):,.2f}"
     btc_roi_line  = f"BTC buy & hold ROI: {btc_roi_pct:+.1f}% / {btc_profit_sign}${abs(btc_profit):,.2f}"
 
-    if outperf is None or outperf <= 0:
-        outperf_line = "Hive outperformance vs BTC buy & hold: n/a"
+    if outperf is None:
+        outperf_line = "Hive vs BTC: n/a"
     else:
-        outperf_line = f"Hive is outperforming BTC buy & hold by ~{outperf:.2f}x."
+        outperf_line = f"Hive vs BTC: {outperf:.2f}x"
 
-    # Trades per year
-    trades_per_year = summarise_trades_per_year()
-    if trades_per_year:
-        lines = ["📈 Hive reallocations per year:"]
-        for year in sorted(trades_per_year):
-            lines.append(f" • {year}: {trades_per_year[year]} trades")
-        trades_block = "\n".join(lines)
-    else:
-        trades_block = "📈 Hive reallocations per year:\n • No trades above 1% threshold yet."
+    # Trades total
+    total_trades = summarise_trades_total()
+    trades_line = f"Hive trades: {total_trades}"
 
     text = (
         f"{top_line}\n\n"
@@ -441,17 +495,12 @@ def format_signal_message():
         f" • BTC: ${prices['BTC']:.0f}\n"
         f" • ETH: ${prices['ETH']:.0f}\n"
         f" • SOL: ${prices['SOL']:.2f}\n\n"
-        f"🧠 Suggested allocation:\n"
-        f" • BTC: {sugg_btc:.1f}% - ${btc_usd:,.2f}\n"
-        f" • ALTs: {sugg_alt:.1f}% - ${alt_usd:,.2f}\n"
-        f" • Stables: {sugg_stb:.1f}% - ${stb_usd:,.2f}\n\n"
+        f"{allocation_block}\n\n"
         f"⚙️ Action: {action_line}\n\n"
-        f"🔁 Portfolio Flow:\n"
-        f"{flow_summary_text}\n\n"
         f"🧠 {hive_roi_line}\n"
         f"{btc_roi_line}\n"
         f"{outperf_line}\n\n"
-        f"{trades_block}"
+        f"{trades_line}"
     )
 
     return text
