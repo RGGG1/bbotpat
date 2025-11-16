@@ -1,0 +1,8 @@
+{
+  "as_of": "2025-11-16",
+  "pair": "btc_vs_ethbnbsol",
+  "dom_min": 0.70,
+  "dom_35": 0.75,
+  "dom_65": 0.80,
+  "dom_max": 0.85
+}
