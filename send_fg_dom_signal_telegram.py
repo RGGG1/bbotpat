@@ -191,16 +191,17 @@ def fetch_spot_prices_from_markets(markets):
 
 def format_market_cap(v: float) -> str:
     """
-    Format market cap as requested:
-
-    - >= 1e9  -> "$1.9B"  (one decimal)
-    - >= 1e6  -> "$650M"  (integer millions)
-    - else    -> "$123,456" raw
+    Format market cap as:
+    - >= 1e12 → X.yT
+    - >= 1e9  → XXXB (rounded, no decimals)
+    - >= 1e6  → XXXM (rounded, no decimals)
     """
     if v is None:
         return "$0"
+    if v >= 1e12:
+        return f"${v / 1e12:.1f}T"
     if v >= 1e9:
-        return f"${v / 1e9:.1f}B"
+        return f"${int(round(v / 1e9))}B"
     if v >= 1e6:
         return f"${int(round(v / 1e6))}M"
     return f"${int(v):,}"
@@ -596,4 +597,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
