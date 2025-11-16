@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>HiveAI – Hive Mind Index & Dominance</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #050508;
+      --bg-elevated: #101018;
+      --border-subtle: #262637;
+      --text-main: #f5f5f7;
+      --text-muted: #888aa0;
+      --accent-red: #ff4b5c;
+      --accent-green: #4dff88;
+      --accent-neutral: #ffffff;
+      --font-main: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                   "Inter", "Segoe UI", sans-serif;
+      --radius-card: 18px;
+      --shadow-soft: 0 18px 45px rgba(0,0,0,0.55);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: radial-gradient(circle at top left, #151522 0, #050508 55%, #000 100%);
+      color: var(--text-main);
+      font-family: var(--font-main);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 32px 16px;
+    }
+
+    .app-shell {
+      width: 100%;
+      max-width: 1040px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+
+    .logo-stack {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-slash {
+      font-size: 24px;
+      line-height: 1;
+      transform: translateY(-1px);
+    }
+
+    .logo-wordmark {
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .logo-hive {
+      transition: color 0.28s ease;
+    }
+
+    .logo-ai {
+      opacity: 0.9;
+    }
+
+    .logo-accent-red {
+      color: var(--accent-red);
+    }
+
+    .logo-accent-green {
+      color: var(--accent-green);
+    }
+
+    .logo-accent-neutral {
+      color: var(--accent-neutral);
+    }
+
+    .meta-topline {
+      text-align: right;
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      align-items: flex-end;
+    }
+
+    .meta-topline strong {
+      color: var(--text-main);
+      font-weight: 500;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.3fr);
+      gap: 18px;
+    }
+
+    @media (max-width: 800px) {
+      main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .meta-topline {
+        align-items: flex-start;
+      }
+    }
+
+    .card {
+      background: var(--bg-elevated);
+      border-radius: var(--radius-card);
+      border: 1px solid var(--border-subtle);
+      box-shadow: var(--shadow-soft);
+      padding: 18px 20px 20px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .chip {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #181828;
+      border: 1px solid var(--border-subtle);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .hmi-value {
+      font-size: 40px;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .hmi-band {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .hmi-band span {
+      font-weight: 500;
+      color: var(--text-main);
+    }
+
+    .dominance-main {
+      font-size: 24px;
+      font-weight: 500;
+      margin-bottom: 10px;
+    }
+
+    .dominance-sub {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .dominance-sub span {
+      color: var(--text-main);
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .pill {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #131322;
+      color: var(--text-muted);
+      border: 1px solid #222234;
+    }
+
+    .pill strong {
+      color: var(--text-main);
+      font-weight: 500;
+    }
+
+    .footer-note {
+      margin-top: 22px;
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: space-between;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+
+    .status-live {
+      background: var(--accent-green);
+    }
+
+    .status-stale {
+      background: var(--accent-red);
+    }
+
+    a {
+      color: var(--text-muted);
+      text-decoration: none;
+      border-bottom: 1px dotted rgba(255,255,255,0.16);
+    }
+
+    a:hover {
+      color: var(--text-main);
+      border-bottom-color: rgba(255,255,255,0.5);
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <div class="logo-stack">
+        <div class="logo-slash logo-accent-neutral" id="logo-slash">/</div>
+        <div class="logo-wordmark">
+          <span class="logo-hive logo-accent-neutral" id="logo-hive">Hive</span><span class="logo-ai">AI</span>
+        </div>
+      </div>
+      <div class="meta-topline">
+        <div><strong id="meta-date">--/--/--</strong></div>
+        <div>Last updated HMI: <span id="meta-hmi-time">–</span></div>
+        <div>Dominance refresh: <span id="meta-dom-time">–</span></div>
+      </div>
+    </header>
+
+    <main>
+      <!-- HMI CARD -->
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">Hive Mind Index</div>
+          <div class="chip" id="hmi-chip-label">HMI</div>
+        </div>
+        <div class="hmi-value" id="hmi-value">--.-</div>
+        <div class="hmi-band" id="hmi-band-text">
+          Band: <span>–</span>
+        </div>
+        <div class="pill-row">
+          <div class="pill">
+            <strong>Ranges</strong> &nbsp; &lt;10 Zombie • 10–25 McD Apps • 25–40 Ngmi
+          </div>
+          <div class="pill">
+            40–60 Stable • 60–80 We're early • 80+ Future of finance
+          </div>
+        </div>
+      </section>
+
+      <!-- DOMINANCE CARD -->
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">Dominance</div>
+          <div class="chip" id="dom-chip-label">BTC vs EthBnbSol</div>
+        </div>
+        <div class="dominance-main" id="dom-main-text">
+          BTC vs EthBnbSol: --/--
+        </div>
+        <div class="dominance-sub" id="dom-sub-text">
+          Market caps: <span>–</span>
+        </div>
+        <div class="pill-row">
+          <div class="pill" id="price-btc">BTC: –</div>
+          <div class="pill" id="price-eth">ETH: –</div>
+          <div class="pill" id="price-bnb">BNB: –</div>
+          <div class="pill" id="price-sol">SOL: –</div>
+        </div>
+      </section>
+    </main>
+
+    <div class="footer-note">
+      <div>
+        <span class="status-dot status-live"></span>HMI refreshes every 60s on visit.
+        Dominance & prices refresh every 6h.
+      </div>
+      <div>
+        Data via <a href="https://www.coingecko.com" target="_blank" rel="noreferrer">CoinGecko</a> and your HiveAI backend.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---- CONFIG ----
+    const HMI_SOURCE_URL = "/hmi_latest.json"; // you generate this from your pipeline
+    const HMI_REFRESH_MS = 60 * 1000;          // 1 minute
+    const DOM_REFRESH_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+    const HMI_NEUTRAL_LOW = 40;
+    const HMI_NEUTRAL_HIGH = 60;
+
+    // ---- UTILITIES ----
+    function formatTime(ts) {
+      const d = ts ? new Date(ts) : new Date();
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function formatDate(ts) {
+      const d = ts ? new Date(ts) : new Date();
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yy = String(d.getFullYear()).slice(-2);
+      return `${dd}/${mm}/${yy}`;
+    }
+
+    function formatMarketCap(v) {
+      if (!v || v <= 0) return "$0";
+      if (v >= 1e12) {
+        return `$${(v / 1e12).toFixed(1)}T`;
+      }
+      if (v >= 1e9) {
+        return `$${Math.round(v / 1e9)}B`;
+      }
+      if (v >= 1e6) {
+        return `$${Math.round(v / 1e6)}M`;
+      }
+      return `$${Math.round(v).toLocaleString()}`;
+    }
+
+    function hmiBandLabel(hmi) {
+      if (hmi < 10) return "Zombie apocalypse";
+      if (hmi < 25) return "McDonalds applications";
+      if (hmi < 40) return "Ngmi";
+      if (hmi < 60) return "Stable";
+      if (hmi < 80) return "We're early";
+      return "It's the future of finance";
+    }
+
+    function updateLogoColor(hmi) {
+      const slashEl = document.getElementById("logo-slash");
+      const hiveEl = document.getElementById("logo-hive");
+
+      // Reset
+      slashEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
+      hiveEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
+
+      // Decide band: below neutral = red, neutral = white, above = green
+      if (hmi < HMI_NEUTRAL_LOW) {
+        slashEl.classList.add("logo-accent-red");
+        hiveEl.classList.add("logo-accent-red");
+      } else if (hmi > HMI_NEUTRAL_HIGH) {
+        slashEl.classList.add("logo-accent-green");
+        hiveEl.classList.add("logo-accent-green");
+      } else {
+        slashEl.classList.add("logo-accent-neutral");
+        hiveEl.classList.add("logo-accent-neutral");
+      }
+    }
+
+    // ---- HMI FETCH ----
+    async function fetchHMI() {
+      try {
+        const resp = await fetch(HMI_SOURCE_URL, { cache: "no-store" });
+        if (!resp.ok) throw new Error("HMI fetch failed");
+        const data = await resp.json();
+
+        const hmi = typeof data.hmi === "number" ? data.hmi : parseFloat(data.hmi);
+        if (Number.isNaN(hmi)) throw new Error("Invalid HMI in JSON");
+
+        const band = hmiBandLabel(hmi);
+
+        document.getElementById("hmi-value").textContent = hmi.toFixed(1);
+        document.getElementById("hmi-band-text").innerHTML =
+          `Band: <span>${band}</span>`;
+        document.getElementById("hmi-chip-label").textContent = `HMI • ${band}`;
+        document.getElementById("meta-hmi-time").textContent = formatTime();
+        document.getElementById("meta-date").textContent = formatDate();
+
+        updateLogoColor(hmi);
+      } catch (err) {
+        console.error("HMI error:", err);
+        document.getElementById("hmi-value").textContent = "--.-";
+        document.getElementById("hmi-band-text").innerHTML =
+          `Band: <span>unavailable</span>`;
+        document.getElementById("hmi-chip-label").textContent = "HMI • error";
+      }
+    }
+
+    // ---- DOMINANCE & PRICES ----
+    async function fetchDominanceAndPrices() {
+      try {
+        const url = "https://api.coingecko.com/api/v3/coins/markets" +
+          "?vs_currency=usd&ids=bitcoin,ethereum,binancecoin,solana" +
+          "&per_page=4&page=1";
+
+        const resp = await fetch(url, { cache: "no-store" });
+        if (!resp.ok) throw new Error("Dominance fetch failed");
+        const rows = await resp.json();
+
+        const byId = {};
+        rows.forEach(r => { byId[r.id] = r; });
+
+        const btc = byId["bitcoin"];
+        const eth = byId["ethereum"];
+        const bnb = byId["binancecoin"];
+        const sol = byId["solana"];
+
+        const btcMc = btc?.market_cap || 0;
+        const altMc = (eth?.market_cap || 0) + (bnb?.market_cap || 0) + (sol?.market_cap || 0);
+
+        let btcDom = 0.5;
+        if (btcMc + altMc > 0) {
+          btcDom = btcMc / (btcMc + altMc);
+        }
+        const btcPct = Math.round(btcDom * 100);
+        const altPct = 100 - btcPct;
+
+        document.getElementById("dom-main-text").textContent =
+          `BTC vs EthBnbSol: ${btcPct}/${altPct}`;
+
+        const capsText = `${formatMarketCap(btcMc)} Vs ${formatMarketCap(altMc)}`;
+        document.getElementById("dom-sub-text").innerHTML =
+          `Market caps: <span>${capsText}</span>`;
+
+        // Prices
+        document.getElementById("price-btc").innerHTML =
+          `BTC: <strong>$${Math.round(btc?.current_price || 0).toLocaleString()}</strong>`;
+        document.getElementById("price-eth").innerHTML =
+          `ETH: <strong>$${Math.round(eth?.current_price || 0).toLocaleString()}</strong>`;
+        document.getElementById("price-bnb").innerHTML =
+          `BNB: <strong>$${Math.round(bnb?.current_price || 0).toLocaleString()}</strong>`;
+        document.getElementById("price-sol").innerHTML =
+          `SOL: <strong>$${(sol?.current_price || 0).toFixed(2)}</strong>`;
+
+        document.getElementById("meta-dom-time").textContent = formatTime();
+      } catch (err) {
+        console.error("Dominance error:", err);
+        document.getElementById("dom-main-text").textContent =
+          "BTC vs EthBnbSol: --/--";
+        document.getElementById("dom-sub-text").innerHTML =
+          "Market caps: <span>unavailable</span>";
+      }
+    }
+
+    // ---- INIT ----
+    (function init() {
+      // initial meta date
+      document.getElementById("meta-date").textContent = formatDate();
+
+      fetchHMI();
+      fetchDominanceAndPrices();
+
+      setInterval(fetchHMI, HMI_REFRESH_MS);
+      setInterval(fetchDominanceAndPrices, DOM_REFRESH_MS);
+    })();
+  </script>
+</body>
+</html>
+  
