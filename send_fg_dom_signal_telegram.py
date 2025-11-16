@@ -9,7 +9,8 @@ HiveAI Telegram Signal
 - Sends a daily Telegram message with:
     - Top line: HiveAI   dd/mm/yy    💵 $balance_live   ROI: +x.x% (LIVE estimate)
     - HMI value + band + circle emoji
-    - BTC vs ALT dominance (ETH+BNB+SOL)
+    - BTC vs ALT dominance (ETH+BNB+SOL), plus market caps:
+        e.g. 75/25 | $1.9B Vs $650M
     - Prices: BTC, ETH, BNB, SOL
     - Suggested allocation: yesterday%/$ → today%/$ (model, daily close)
     - Action: % of your BTC or ALTs to rotate (model, daily close)
@@ -146,7 +147,7 @@ def fetch_markets():
 
 def fetch_dominance_and_alt_label(markets):
     """
-    Returns (btc_dom_fraction, alt_label_str)
+    Returns (btc_dom_fraction, alt_label_str, btc_mc, alts_mc_sum)
 
     alt_label_str is concatenation of short names in order of current market cap,
     e.g. 'EthBnbSol'.
@@ -157,16 +158,16 @@ def fetch_dominance_and_alt_label(markets):
     alt_caps = [(aid, caps.get(aid, 0.0)) for aid in ALT_IDS]
     alt_caps_sorted = sorted(alt_caps, key=lambda x: x[1], reverse=True)
 
-    alt_mc_sum = sum(mc for _, mc in alt_caps_sorted)
+    alts_mc_sum = sum(mc for _, mc in alt_caps_sorted)
 
-    if btc_mc + alt_mc_sum == 0:
+    if btc_mc + alts_mc_sum == 0:
         btc_dom = 0.5
     else:
-        btc_dom = btc_mc / (btc_mc + alt_mc_sum)
+        btc_dom = btc_mc / (btc_mc + alts_mc_sum)
 
     label = "".join(ALT_LABEL.get(aid, aid[:3].title()) for aid, _ in alt_caps_sorted)
 
-    return btc_dom, label
+    return btc_dom, label, btc_mc, alts_mc_sum
 
 
 def fetch_spot_prices_from_markets(markets):
@@ -186,6 +187,23 @@ def fetch_spot_prices_from_markets(markets):
         elif cid == "solana":
             prices["SOL"] = price
     return prices
+
+
+def format_market_cap(v: float) -> str:
+    """
+    Format market cap as requested:
+
+    - >= 1e9  -> "$1.9B"  (one decimal)
+    - >= 1e6  -> "$650M"  (integer millions)
+    - else    -> "$123,456" raw
+    """
+    if v is None:
+        return "$0"
+    if v >= 1e9:
+        return f"${v / 1e9:.1f}B"
+    if v >= 1e6:
+        return f"${int(round(v / 1e6))}M"
+    return f"${int(v):,}"
 
 
 def compute_live_balance(equity_close, btc_only_close, w_btc, w_alts, w_stb, markets):
@@ -420,9 +438,9 @@ def format_signal_message():
         outperf_close,
     ) = compute_roi_fields(last_row)
 
-    # Markets (one call): used for dominance + prices + live equity approximation
+    # Markets (one call): used for dominance + caps + prices + live equity approximation
     markets = fetch_markets()
-    btc_dom, alt_label = fetch_dominance_and_alt_label(markets)
+    btc_dom, alt_label, btc_mc, alts_mc = fetch_dominance_and_alt_label(markets)
     prices = fetch_spot_prices_from_markets(markets)
 
     # Approximate live balance & live ROI from 24h % changes
@@ -435,6 +453,9 @@ def format_signal_message():
 
     btc_dom_pct = int(round(btc_dom * 100))
     alt_dom_pct = 100 - btc_dom_pct
+
+    btc_cap_str = format_market_cap(btc_mc)
+    alts_cap_str = format_market_cap(alts_mc)
 
     # Allocation change (yesterday → today) for %/$ block
     flow_summary_text, main_flow, prev_w, curr_w = describe_allocation_change(prev_row, last_row)
@@ -530,7 +551,7 @@ def format_signal_message():
     text = (
         f"{top_line}\n\n"
         f"{hmi_circle} HMI: {hmi:.1f} — {band_name}\n"
-        f"📊 BTC vs {alt_label}: {btc_dom_pct}/{alt_dom_pct}\n\n"
+        f"📊 BTC vs {alt_label}: {btc_dom_pct}/{alt_dom_pct} | {btc_cap_str} Vs {alts_cap_str}\n\n"
         f"💰 Prices:\n"
         f" • BTC: ${prices['BTC']:.0f}\n"
         f" • ETH: ${prices['ETH']:.0f}\n"
@@ -575,3 +596,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
