@@ -5,7 +5,7 @@ export_hmi_json.py
 Read the latest HMI value from output/fg2_daily.csv
 and write it to:
 
-- hmi_latest.json          (repo root, for backwards compat)
+- hmi_latest.json          (repo root, for scripts)
 - docs/hmi_latest.json     (for the website)
 
 Expected CSV columns include:
@@ -21,6 +21,20 @@ import pandas as pd
 FG_CSV = Path("output/fg2_daily.csv")
 OUT_JSON_ROOT = Path("hmi_latest.json")
 OUT_JSON_DOCS = Path("docs/hmi_latest.json")
+
+
+def band_for_hmi(h):
+    if h < 10:
+        return "Zombie apocalypse"
+    if h < 25:
+        return "McDonald's applications"
+    if h < 40:
+        return "Ngmi"
+    if h < 60:
+        return "Stable"
+    if h < 80:
+        return "We're early"
+    return "It's the future of finance"
 
 
 def main():
@@ -42,26 +56,16 @@ def main():
     except Exception:
         date_str = str(date_val)
 
-    # Simple band label – you can keep the same logic you used before
-    if hmi < 40:
-        band = "Ngmi"
-    elif hmi < 60:
-        band = "Stable"
-    elif hmi < 80:
-        band = "We're early"
-    else:
-        band = "Future of finance"
-
     payload = {
         "hmi": round(hmi, 1),
-        "band": band,
+        "band": band_for_hmi(hmi),
         "date": date_str,
     }
 
     text = json.dumps(payload, indent=2)
     OUT_JSON_ROOT.write_text(text)
     OUT_JSON_DOCS.write_text(text)
-    print(f"Wrote {OUT_JSON_ROOT} and {OUT_JSON_DOCS} with HMI={payload['hmi']} on {payload['date']}")
+    print(f"Wrote HMI JSONs: {OUT_JSON_ROOT}, {OUT_JSON_DOCS} (HMI={payload['hmi']})")
 
 
 if __name__ == "__main__":
