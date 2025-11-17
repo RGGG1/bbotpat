@@ -1,0 +1,80 @@
+name: HiveAI System
+
+on:
+  schedule:
+    # Daily HMI (00:03 UTC)
+    - cron: "3 0 * * *"
+
+    # Dominance + Prices every 6h (00:05, 06:05, 12:05, 18:05)
+    - cron: "5 0,6,12,18 * * *"
+
+    # Daily backtest (00:10 UTC)
+    - cron: "10 0 * * *"
+
+  workflow_dispatch: {}
+
+jobs:
+  hiveai:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Prepare environment
+        run: |
+          mkdir -p docs
+          mkdir -p output
+
+      # -------------------------------------
+      # DAILY HMI @ 00:03
+      # -------------------------------------
+      - name: Run HMI computation
+        if: startsWith(github.event.schedule, '3 ')
+        run: |
+          python compute_fg2_index.py
+          python export_hmi_json.py
+
+      # -------------------------------------
+      # DOMINANCE + PRICES every 6h @ 00:05 etc.
+      # -------------------------------------
+      - name: Update dominance + prices
+        if: startsWith(github.event.schedule, '5 ')
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          python compute_dynamic_bands.py
+          python update_dominance.py
+          python export_prices.py
+
+      # -------------------------------------
+      # BACKTEST @ 00:10
+      # -------------------------------------
+      - name: Run Backtest
+        if: startsWith(github.event.schedule, '10 ')
+        run: |
+          python backtest_dominance_rotation.py
+
+      # -------------------------------------
+      # Commit JSON/CSV changes
+      # -------------------------------------
+      - name: Commit changes
+        run: |
+          git config --global user.name "hiveai-bot"
+          git config --global user.email "bot@users.noreply.github.com"
+          git add docs/*.json || true
+          git add output/*.csv || true
+          git commit -m "Automated HiveAI update" || true
+          git push || true
