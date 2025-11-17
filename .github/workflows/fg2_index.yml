@@ -1,9 +1,9 @@
 name: Compute FG2 Index
 
 on:
-  workflow_dispatch: {}
-  schedule:
-    - cron: '10 0 * * *'  # daily at 00:10 UTC
+ # workflow_dispatch: {}
+ # schedule:
+   # - cron: '10 0 * * *'  # daily at 00:10 UTC
 
 jobs:
   fg2-index:
