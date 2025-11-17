@@ -8,10 +8,12 @@ Responsibilities:
 - Load latest HMI from hmi_latest.json (root or docs/)
 - Fetch live prices + market caps for:
     BTC, ETH, BNB, SOL, DOGE, TON, SUI, UNI, USDT, USDC
-- Compute per-token BTC dominance and 2-yr dominance ranges (BTC vs each alt)
-- Compute BTC vs ALL ALTS dominance (excluding stables) + 2-yr range
+- Compute per-token BTC dominance and ~2-yr dominance ranges (BTC vs each alt)
+    * target horizon: 730 days
+    * record the actual number of days of overlapping history
+- Compute BTC vs ALL ALTS dominance (excluding stables) + range + days
 - For each alt:
-    - Map dominance position within its 2-yr range to
+    - Map dominance position within its range to
       BTC / ALT / STABLE weights (35% / 30% / 35% bands)
 - Combine all per-token weights into one global allocation
     (BTC + each ALT + stables)
@@ -35,7 +37,7 @@ import requests
 # ------------------------------------------------------------------
 
 COINGECKO = "https://api.coingecko.com/api/v3"
-DAYS_HISTORY = 730
+DAYS_HISTORY_TARGET = 730  # approx 2 years
 
 ROOT = Path(".")
 DOCS = ROOT / "docs"
@@ -68,7 +70,10 @@ TOKENS = {
     "USDC": "usd-coin",
 }
 
-ALTS_FOR_DOM = ["ETH", "BNB", "SOL", "DOGE", "TON", "SUI", "UNI"]  # exclude USDTC
+# Alts used for BTC vs Alts dominance (exclude stables)
+ALTS_FOR_DOM = ["ETH", "BNB", "SOL", "DOGE", "TON", "SUI", "UNI"]
+
+# Order for website table
 DISPLAY_ORDER = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TON", "USDTC", "SUI", "UNI"]
 
 
@@ -101,11 +106,14 @@ def fmt_mc(v):
     if v <= 0:
         return "$0"
     if v >= 1e12:
+        # trillions: one decimal, e.g. $1.2T
         return f"${v/1e12:.1f}T"
     if v >= 1e9:
-        return f"${v/1e9:.1f}B"
+        # billions: integer, e.g. $600B
+        return f"${int(round(v/1e9))}B"
     if v >= 1e6:
-        return f"${v/1e6:.1f}M"
+        # millions: integer, e.g. $25M
+        return f"${int(round(v/1e6))}M"
     return f"${int(v):,}"
 
 
@@ -122,16 +130,13 @@ def weights_from_dom(dom_pct, dom_min, dom_max, hmi):
 
     span = dom_max - dom_min
     if span <= 0:
-        return 0.0, 0.0, 1.0  # degenerate => stables
+        # no meaningful range; safest is stables
+        return 0.0, 0.0, 1.0
 
     t = (dom_pct - dom_min) / span
-    # clip to [0,1]
-    if t < 0:
-        t = 0.0
-    if t > 1:
-        t = 1.0
+    t = max(0.0, min(1.0, t))
 
-    # lower 35%:  BTC-heavy -> mix -> hand-off to stables region
+    # lower 35%: BTC-heavy -> mix
     if t < 0.35:
         local = t / 0.35  # 0..1
         w_btc = 1.0 - local
@@ -162,6 +167,28 @@ def tg_send(text):
     }, timeout=30)
     if r.status_code != 200:
         print("[tg] Error:", r.text[:200])
+
+
+def fetch_mc_history(coin_id: str, days: int):
+    """
+    Fetch up to `days` of historical market caps for `coin_id`
+    and return a dict: date -> market_cap.
+    """
+    out = {}
+    try:
+        js = cg_get(
+            f"/coins/{coin_id}/market_chart",
+            params={"vs_currency": "usd", "days": str(days)},
+            timeout=80,
+        )
+    except Exception as e:
+        print("[dom] history error for", coin_id, ":", e)
+        return out
+
+    for ts, cap in js.get("market_caps", []):
+        d = datetime.utcfromtimestamp(ts / 1000.0).date()
+        out[d] = float(cap)
+    return out
 
 
 # ------------------------------------------------------------------
@@ -220,38 +247,22 @@ def main():
     btc_mc_now = mc("BTC")
     alt_mc_now_total = sum(mc(sym) for sym in ALTS_FOR_DOM)
 
-    # 3) Historical dominance ranges (2-yr) for BTC vs:
-    #    - each alt
-    #    - aggregate alts bucket
-    # We'll build daily MC dicts per token.
-    from datetime import date
-
-    def fetch_mc_history(coin_id):
-        out = {}
-        try:
-            js = cg_get(
-                f"/coins/{coin_id}/market_chart",
-                params={"vs_currency": "usd", "days": str(DAYS_HISTORY)},
-                timeout=80,
-            )
-        except Exception as e:
-            print("[dom] history error for", coin_id, ":", e)
-            return out
-        for ts, cap in js.get("market_caps", []):
-            d = datetime.utcfromtimestamp(ts / 1000.0).date()
-            out[d] = float(cap)
-        return out
+    # 3) Historical dominance ranges for BTC vs each alt & aggregate
 
     # Fetch BTC history once
-    btc_hist = fetch_mc_history(TOKENS["BTC"])
+    btc_hist = fetch_mc_history(TOKENS["BTC"], DAYS_HISTORY_TARGET)
 
-    # Per-alt dominance ranges
-    per_token_dom = {}      # sym -> (dom_now_pct, dom_min_pct, dom_max_pct)
-    per_token_weights = {}  # sym -> (w_btc, w_alt, w_stable)
-    per_token_dom_str = {}  # sym -> "min–max" string
+    # Fetch alt histories once and store
+    alt_histories = {sym: fetch_mc_history(TOKENS[sym], DAYS_HISTORY_TARGET)
+                     for sym in ALTS_FOR_DOM}
+
+    # Per-token dominance data: sym -> (dom_now, dom_min, dom_max, days_count)
+    per_token_dom = {}
+    per_token_weights = {}
+    per_token_days = {}
 
     for sym in ALTS_FOR_DOM:
-        alt_hist = fetch_mc_history(TOKENS[sym])
+        alt_hist = alt_histories.get(sym, {})
         dom_series = []
         for d, btc_cap in btc_hist.items():
             alt_cap = alt_hist.get(d)
@@ -261,35 +272,37 @@ def main():
             if tot <= 0:
                 continue
             dom_series.append(100.0 * btc_cap / tot)
-        if not dom_series:
-            continue
-        dom_min = min(dom_series)
-        dom_max = max(dom_series)
+
+        days_count = len(dom_series)
 
         # current dominance now
         alt_mc_now = mc(sym)
         tot_now = btc_mc_now + alt_mc_now
-        if tot_now <= 0:
-            dom_now = None
-        else:
-            dom_now = 100.0 * btc_mc_now / tot_now
+        dom_now = 100.0 * btc_mc_now / tot_now if tot_now > 0 else None
 
-        if dom_now is not None:
+        if days_count > 0:
+            dom_min = min(dom_series)
+            dom_max = max(dom_series)
+        elif dom_now is not None:
+            # no history, but we at least know today's dominance
+            dom_min = dom_max = dom_now
+        else:
+            dom_min = dom_max = 0.0
+
+        if dom_now is not None and dom_max > dom_min:
             w_btc, w_alt, w_st = weights_from_dom(dom_now, dom_min, dom_max, hmi)
         else:
+            # no safe range, default to stables
             w_btc, w_alt, w_st = (0.0, 0.0, 1.0)
 
         per_token_dom[sym] = (dom_now, dom_min, dom_max)
         per_token_weights[sym] = (w_btc, w_alt, w_st)
-        per_token_dom_str[sym] = f"{round(dom_min)}–{round(dom_max)}"
+        per_token_days[sym] = days_count
 
-    # 4) Aggregate BTC vs ALL ALTS dominance range
-
-    # build aggregate alt hist as sum of each alt's history
+    # Aggregate BTC vs ALL ALTS dominance range
     alt_hist_total = {}
     for sym in ALTS_FOR_DOM:
-        alt_hist = fetch_mc_history(TOKENS[sym])
-        for d, cap in alt_hist.items():
+        for d, cap in alt_histories.get(sym, {}).items():
             alt_hist_total[d] = alt_hist_total.get(d, 0.0) + cap
 
     dom_all_series = []
@@ -300,12 +313,13 @@ def main():
             continue
         dom_all_series.append(100.0 * btc_cap / tot)
 
-    if dom_all_series:
+    days_all = len(dom_all_series)
+
+    if days_all > 0:
         dom_all_min = min(dom_all_series)
         dom_all_max = max(dom_all_series)
     else:
-        dom_all_min = 70.0
-        dom_all_max = 90.0
+        dom_all_min = dom_all_max = 0.0
 
     if btc_mc_now + alt_mc_now_total > 0:
         btc_dom_all_now = 100.0 * btc_mc_now / (btc_mc_now + alt_mc_now_total)
@@ -314,10 +328,14 @@ def main():
         btc_dom_all_now = 50.0
         alt_dom_all_now = 50.0
 
-    # For aggregate action, we reuse weights_from_dom on BTC vs All Alts
-    w_btc_all, w_alt_all, w_st_all = weights_from_dom(
-        btc_dom_all_now, dom_all_min, dom_all_max, hmi
-    )
+    # For aggregate action, reuse weights_from_dom on BTC vs All Alts
+    if dom_all_max > dom_all_min:
+        w_btc_all, w_alt_all, w_st_all = weights_from_dom(
+            btc_dom_all_now, dom_all_min, dom_all_max, hmi
+        )
+    else:
+        w_btc_all, w_alt_all, w_st_all = (0.0, 0.0, 1.0)
+
     if w_st_all > max(w_btc_all, w_alt_all):
         agg_action = "Stable up"
     elif w_btc_all >= w_alt_all:
@@ -325,8 +343,7 @@ def main():
     else:
         agg_action = "Buy Alts"
 
-    # 5) Build prices_latest.json rows (for website)
-    #    includes per-token dom + range
+    # 4) Build prices_latest.json rows (for website)
     rows = []
 
     usdt_mc = mc("USDT")
@@ -340,22 +357,34 @@ def main():
             price_val = 1.0
             mc_val = usdctc_mc
             change_val = 0.0
-            dom_now, rng_str = (None, "")
+            dom_now = None
+            rng_str = ""
         elif sym == "BTC":
             price_val = price(sym)
             mc_val = mc(sym)
             change_val = change_24h(sym)
-            dom_now, rng_str = (None, "")
+            dom_now = None
+            rng_str = ""
         else:
             price_val = price(sym)
             mc_val = mc(sym)
             change_val = change_24h(sym)
             dom_info = per_token_dom.get(sym)
+            days_count = per_token_days.get(sym, 0)
             if dom_info:
                 dom_now, dom_min, dom_max = dom_info
-                rng_str = f"{dom_min:.1f}–{dom_max:.1f}"
+                mn_i = round(dom_min)
+                mx_i = round(dom_max)
+                base = f"{mn_i}–{mx_i}%"
+                if days_count and days_count < DAYS_HISTORY_TARGET:
+                    rng_str = f"{base} ({days_count}d)"
+                elif days_count:
+                    rng_str = base
+                else:
+                    rng_str = ""
             else:
-                dom_now, rng_str = (None, "")
+                dom_now = None
+                rng_str = ""
 
         rows.append({
             "token": sym,
@@ -375,14 +404,18 @@ def main():
     PRICES_JSON_ROOT.write_text(text_prices)
     PRICES_JSON_DOCS.write_text(text_prices)
 
-    # 6) Build dom_bands_latest.json (aggregate BTC vs Alts)
+    # 5) Build dom_bands_latest.json (aggregate BTC vs Alts)
+
+    agg_mn_i = round(dom_all_min) if days_all > 0 else 0
+    agg_mx_i = round(dom_all_max) if days_all > 0 else 0
 
     dom_payload = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "btc_pct": round(btc_dom_all_now, 1),
         "alt_pct": round(alt_dom_all_now, 1),
-        "min_pct": round(dom_all_min, 1),
-        "max_pct": round(dom_all_max, 1),
+        "min_pct": float(agg_mn_i),
+        "max_pct": float(agg_mx_i),
+        "days": days_all,
         "btc_mc_fmt": fmt_mc(btc_mc_now),
         "alt_mc_fmt": fmt_mc(alt_mc_now_total),
         "action": agg_action,
@@ -392,30 +425,23 @@ def main():
     DOM_JSON_DOCS.write_text(text_dom)
     health["bands_ok"] = True
 
-    # 7) Combine mini-portfolios into global allocation
+    # 6) Combine mini-portfolios into global allocation
 
-    # Start with zero BTC, each alt, and stables
     global_weights = {"BTC": 0.0, "STABLES": 0.0}
     for sym in ALTS_FOR_DOM:
         global_weights[sym] = 0.0
 
-    slot_count = len(ALTS_FOR_DOM)
-    if slot_count == 0:
-        slot_count = 1
+    slot_count = len(ALTS_FOR_DOM) or 1
 
     for sym in ALTS_FOR_DOM:
         w_btc, w_alt, w_st = per_token_weights.get(sym, (0.0, 0.0, 1.0))
-        # Conceptually, each token has equal "slot" of bankroll.
-        # So each per-token weight is divided by slot count.
         slot_factor = 1.0 / slot_count
         global_weights["BTC"] += w_btc * slot_factor
         global_weights["STABLES"] += w_st * slot_factor
         global_weights[sym] += w_alt * slot_factor
 
-    # Normalise to sum to 1.0
     total = sum(global_weights.values())
     if total <= 0:
-        # fallback: all stables
         global_weights = {k: (1.0 if k == "STABLES" else 0.0) for k in global_weights}
         total = 1.0
 
@@ -441,7 +467,7 @@ def main():
     PW_JSON_ROOT.write_text(text_pw)
     PW_JSON_DOCS.write_text(text_pw)
 
-    # 8) Telegram message
+    # 7) Telegram message
 
     def pct_str(x):
         return f"{x*100:.1f}%"
@@ -450,10 +476,15 @@ def main():
     lines.append("<b>HiveAI Rotation Update</b>")
     lines.append("")
     lines.append(f"HMI: <b>{hmi:.1f}</b> ({hmi_band})" if hmi is not None else "HMI: unavailable")
-    lines.append(
-        f"BTC vs Alts: <b>{dom_payload['btc_pct']:.1f}%</b> "
-        f"(2-yr range {dom_payload['min_pct']:.1f}–{dom_payload['max_pct']:.1f}%)"
-    )
+    if days_all > 0:
+        lines.append(
+            f"BTC vs Alts: <b>{dom_payload['btc_pct']:.1f}%</b> "
+            f"(range {agg_mn_i}–{agg_mx_i}% over {days_all}d)"
+        )
+    else:
+        lines.append(
+            f"BTC vs Alts: <b>{dom_payload['btc_pct']:.1f}%</b> (range unavailable)"
+        )
     lines.append(f"Action: <b>{agg_action}</b>")
     lines.append("")
     lines.append("<b>Portfolio weights</b>:")
@@ -475,3 +506,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+        
