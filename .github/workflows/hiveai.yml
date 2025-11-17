@@ -8,7 +8,7 @@ on:
     # Dominance + prices + TG twice per day: 05:15 & 17:15 UTC
     - cron: "15 5,17 * * *"
 
-  # allow manual runs if you want to test
+  # allow manual runs
   workflow_dispatch: {}
 
 jobs:
@@ -41,35 +41,33 @@ jobs:
           fi
 
       # ---------------------------------------------------
-      # 1) HMI update  (05:05 & 17:05 UTC)
+      # 1) HMI update  (05:05 & 17:05 UTC, or any manual run)
       # ---------------------------------------------------
       - name: Compute HMI (FG2 Index)
-        if: github.event_name == 'schedule' && github.event.schedule == '5 5,17 * * *'
+        # If it's a scheduled run, only run this step at 05:05/17:05.
+        # If it's NOT a schedule (manual), run it.
+        if: github.event_name != 'schedule' || github.event.schedule == '5 5,17 * * *'
         env:
           COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
         run: |
-          echo "Running HMI computation at 05:05/17:05 UTC"
+          echo "Running HMI computation"
           python compute_fg2_index.py
-          # write latest HMI JSON (this script should create hmi_latest.json)
           python export_hmi_json.py
 
       # ---------------------------------------------------
       # 2) Dominance + Telegram + prices
-      #     (05:15 & 17:15 UTC)
+      #     (05:15 & 17:15 UTC, or any manual run)
       # ---------------------------------------------------
       - name: Update dominance + send TG
-        if: github.event_name == 'schedule' && github.event.schedule == '15 5,17 * * *'
+        # If it's a scheduled run, only run this step at 05:15/17:15.
+        # If it's NOT a schedule (manual), run it.
+        if: github.event_name != 'schedule' || github.event.schedule == '15 5,17 * * *'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
         run: |
-          echo "Running dominance + TG at 05:15/17:15 UTC"
-          # Your Telegram script is assumed to:
-          #  - read latest HMI
-          #  - compute BTC vs Alts dominance & action
-          #  - update dom_bands_latest.json and/or prices_latest.json
-          #  - send the Telegram message
+          echo "Running dominance + Telegram + prices"
           python send_fg_dom_signal_telegram.py
 
       # ---------------------------------------------------
@@ -80,7 +78,6 @@ jobs:
         run: |
           mkdir -p docs
 
-          # copy root JSONs (if they exist) into docs/
           if [ -f hmi_latest.json ]; then
             cp hmi_latest.json docs/hmi_latest.json
           fi
@@ -93,11 +90,15 @@ jobs:
             cp prices_latest.json docs/prices_latest.json
           fi
 
+          if [ -f portfolio_weights.json ]; then
+            cp portfolio_weights.json docs/portfolio_weights.json
+          fi
+
           git config --global user.name "hiveai-bot"
           git config --global user.email "bot@users.noreply.github.com"
 
-          git add hmi_latest.json dom_bands_latest.json prices_latest.json docs/hmi_latest.json docs/dom_bands_latest.json docs/prices_latest.json 2>/dev/null || true
+          git add hmi_latest.json dom_bands_latest.json prices_latest.json portfolio_weights.json docs/hmi_latest.json docs/dom_bands_latest.json docs/prices_latest.json docs/portfolio_weights.json 2>/dev/null || true
 
-          # if there's nothing to commit, this will just no-op
-          git commit -m "HiveAI auto-update (HMI / Dominance / Prices)" || true
+          git commit -m "HiveAI auto-update (HMI / Dominance / Prices / Weights)" || true
           git push || true
+          
