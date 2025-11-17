@@ -1,62 +1,10 @@
 {
-  "timestamp": "2025-11-17T00:05:00Z",
-  "btc_pct": 72.5,
-  "alt_pct": 27.5,
-  "min_pct": 65.0,
-  "max_pct": 85.0,
-  "btc_mc_fmt": "$1.2T",
-  "alt_mc_fmt": "$0.4T",
-  "action": "Buy BTC",
-  "health": {
-    "coingecko_ok": true,
-    "bands_ok": true
-  },
-  "pairs": {
-    "ALT_BUCKET": {
-      "min": 65.0,
-      "max": 85.0,
-      "latest": 72.5
-    },
-    "ALL_ALTS": {
-      "min": 55.0,
-      "max": 90.0,
-      "latest": 70.0
-    },
-    "ETH": {
-      "min": 60.0,
-      "max": 82.0,
-      "latest": 74.1
-    },
-    "BNB": {
-      "min": 58.0,
-      "max": 84.0,
-      "latest": 71.3
-    },
-    "SOL": {
-      "min": 45.0,
-      "max": 80.0,
-      "latest": 62.7
-    },
-    "DOGE": {
-      "min": 40.0,
-      "max": 78.0,
-      "latest": 55.2
-    },
-    "TON": {
-      "min": 50.0,
-      "max": 88.0,
-      "latest": 69.4
-    },
-    "SUI": {
-      "min": 35.0,
-      "max": 75.0,
-      "latest": 48.9
-    },
-    "UNI": {
-      "min": 38.0,
-      "max": 79.0,
-      "latest": 52.3
-    }
-  }
+  "timestamp": "2025-11-17T23:06:37.047892Z",
+  "btc_pct": 75.4,
+  "alt_pct": 24.6,
+  "min_pct": 70.0,
+  "max_pct": 90.0,
+  "btc_mc_fmt": "$1.8T",
+  "alt_mc_fmt": "$600.0B",
+  "action": "Buy Alts"
 }
-

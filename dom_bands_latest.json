@@ -1,8 +1,10 @@
 {
-  "as_of": "2025-11-16",
-  "pair": "btc_vs_ethbnbsol",
-  "dom_min": 0.70,
-  "dom_35": 0.75,
-  "dom_65": 0.80,
-  "dom_max": 0.85
+  "timestamp": "2025-11-17T23:06:37.047892Z",
+  "btc_pct": 75.4,
+  "alt_pct": 24.6,
+  "min_pct": 70.0,
+  "max_pct": 90.0,
+  "btc_mc_fmt": "$1.8T",
+  "alt_mc_fmt": "$600.0B",
+  "action": "Buy Alts"
 }

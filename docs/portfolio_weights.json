@@ -1,0 +1,43 @@
+{
+  "timestamp": "2025-11-17T23:06:37.048048Z",
+  "hmi": 46.8,
+  "hmi_band": "Stable",
+  "weights": [
+    {
+      "asset": "BTC",
+      "weight": 0.0
+    },
+    {
+      "asset": "ETH",
+      "weight": 0.0
+    },
+    {
+      "asset": "BNB",
+      "weight": 0.0
+    },
+    {
+      "asset": "SOL",
+      "weight": 0.0
+    },
+    {
+      "asset": "DOGE",
+      "weight": 0.0
+    },
+    {
+      "asset": "TON",
+      "weight": 0.0
+    },
+    {
+      "asset": "SUI",
+      "weight": 0.0
+    },
+    {
+      "asset": "UNI",
+      "weight": 0.0
+    },
+    {
+      "asset": "STABLES",
+      "weight": 1.0
+    }
+  ]
+}
