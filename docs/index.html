@@ -39,14 +39,32 @@
       font-weight: 600;
     }
     .hmi-status {
-      font-size: 32px;
+      font-size: 18px;      /* same as section-title */
       margin-left: 12px;
-      color: #888;
+      color: #fff;          /* white */
     }
+
     .dom-block, .prices-block {
       padding: 16px 0;
       border-top: 1px solid #222;
     }
+
+    .dom-main {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .dom-value {
+      font-size: 48px;      /* same as HMI number */
+      font-weight: 600;
+    }
+    .dom-label {
+      font-size: 18px;      /* same as section-title */
+      font-weight: 500;
+      color: #fff;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -57,16 +75,52 @@
       text-align: left;
       font-weight: 600;
       color: #bbb;
-      padding-bottom: 6px;
+      padding: 6px 4px;
     }
-    td { padding: 4px 0; }
-    .red { color: #ff4b5c; }
-    .green { color: #4dff88; }
+    td {
+      padding: 6px 4px;
+    }
+
+    /* Center all columns except the token name (first column) */
+    th:nth-child(n+2),
+    td:nth-child(n+2) {
+      text-align: center;
+    }
+
+    .red {
+      color: #ff4b5c;
+    }
+    .green {
+      color: #4dff88;
+    }
+
     footer {
       margin-top: 40px;
       font-size: 12px;
       color: #777;
       line-height: 1.5;
+    }
+
+    /* Mobile tweaks */
+    @media (max-width: 640px) {
+      body {
+        padding: 16px;
+      }
+      header {
+        font-size: 26px;
+      }
+      .hmi-value {
+        font-size: 38px;
+      }
+      .dom-value {
+        font-size: 38px;
+      }
+      table {
+        font-size: 12px;
+      }
+      th, td {
+        padding: 4px 3px;
+      }
     }
   </style>
 </head>
@@ -74,6 +128,7 @@
 <div class="app">
   <header><span class="slash" id="slash">/</span>HiveAI</header>
 
+  <!-- HMI -->
   <div class="row" id="hmi-section">
     <div class="section-title">Hive Mind Index</div>
     <div class="hmi-value">
@@ -82,14 +137,19 @@
     </div>
   </div>
 
+  <!-- Dominance -->
   <div class="dom-block" id="dom-section">
     <div class="section-title">Dominance</div>
-    <div id="dom-main">BTC vs EthBnbSol: --/--</div>
+    <div class="dom-main">
+      <span class="dom-value" id="dom-value">--</span>
+      <span class="dom-label">BTC vs EthBnbSol</span>
+    </div>
     <div id="dom-range">2-yr range: --% – --%</div>
     <div id="dom-caps">Market caps: --</div>
     <div id="dom-action" style="margin-top:8px;">Action: --</div>
   </div>
 
+  <!-- Prices -->
   <div class="prices-block" id="prices-section">
     <div class="section-title">Prices</div>
     <table id="prices-table">
@@ -119,82 +179,134 @@
 </div>
 
 <script>
-// ---------- UTILITIES ----------
-function fmt(v){return Number(v).toLocaleString();}
-function mcFmt(v){
-  if(!v||v<=0)return "$0";
-  if(v>=1e12)return "$"+(v/1e12).toFixed(1)+"T";
-  if(v>=1e9)return "$"+Math.round(v/1e9)+"B";
-  if(v>=1e6)return "$"+Math.round(v/1e6)+"M";
-  return "$"+Math.round(v);
-}
-function colorSlash(hmi){
-  const s=document.getElementById("slash");
-  s.style.color = (hmi<40)?"#ff4b5c":(hmi>60?"#4dff88":"#fff");
-}
-
-// ---------- HMI ----------
-async function loadHMI(){
-  try{
-    const r=await fetch("hmi_latest.json",{cache:"no-store"});
-    const j=await r.json();
-    const h=j.hmi;
-    document.getElementById("hmi-val").textContent=h.toFixed(1);
-    document.getElementById("hmi-status").textContent=j.band || "";
-    colorSlash(h);
-  }catch(e){
-    console.error("HMI",e);
+  // ---------- UTILITIES ----------
+  function fmtNum(v){
+    return Number(v).toLocaleString();
   }
-}
-
-// ---------- DOMINANCE ----------
-async function loadDom(){
-  try{
-    const r=await fetch("dom_bands_latest.json",{cache:"no-store"});
-    const j=await r.json();
-    document.getElementById("dom-main").textContent=
-      `BTC vs EthBnbSol: ${j.btc_pct}/${j.alt_pct}`;
-    document.getElementById("dom-range").textContent=
-      `2-yr range: ${j.min_pct}% – ${j.max_pct}%`;
-    document.getElementById("dom-caps").textContent=
-      `Market caps: ${j.btc_mc_fmt} vs ${j.alt_mc_fmt}`;
-    document.getElementById("dom-action").textContent=
-      `Action: ${j.action}`;
-  }catch(e){
-    console.error("DOM",e);
+  function mcFmt(v){
+    if(!v || v <= 0) return "$0";
+    if(v >= 1e12) return "$" + (v/1e12).toFixed(1) + "T";
+    if(v >= 1e9)  return "$" + (v/1e9).toFixed(1) + "B";
+    if(v >= 1e6)  return "$" + (v/1e6).toFixed(1) + "M";
+    return "$" + Math.round(v).toLocaleString();
   }
-}
-
-// ---------- PRICES ----------
-async function loadPrices(){
-  try{
-    const r=await fetch("prices_latest.json",{cache:"no-store"});
-    const j=await r.json();
-    const body=document.getElementById("prices-body");
-    body.innerHTML="";
-    j.rows.forEach(r=>{
-      const tr=document.createElement("tr");
-      const priceClass = r.change_24h<0?"red":"green";
-      tr.innerHTML = `
-        <td>${r.token}</td>
-        <td class="${priceClass}">$${fmt(r.price)}</td>
-        <td>${mcFmt(r.mc)}</td>
-        <td>${r.change_24h.toFixed(1)}%</td>
-        <td>${r.btc_dom||""}</td>
-        <td>${r.range||""}</td>`;
-      body.appendChild(tr);
-    });
-  }catch(e){
-    console.error("Prices",e);
+  function colorSlash(hmi){
+    const s = document.getElementById("slash");
+    if (isNaN(hmi)) {
+      s.style.color = "#fff";
+      return;
+    }
+    s.style.color = (hmi < 40) ? "#ff4b5c" : (hmi > 60 ? "#4dff88" : "#fff");
   }
-}
 
-// ---------- INIT ----------
-loadHMI();
-loadDom();
-loadPrices();
-setInterval(loadHMI,60000);
-setInterval(loadDom,21600000);
+  // ---------- HMI ----------
+  async function loadHMI(){
+    try{
+      const r = await fetch("hmi_latest.json",{cache:"no-store"});
+      const j = await r.json();
+      const h = Number(j.hmi);
+      const band = j.band || "";
+      if (!isNaN(h)) {
+        document.getElementById("hmi-val").textContent = h.toFixed(1);
+        document.getElementById("hmi-status").textContent = band;
+        colorSlash(h);
+      }
+    }catch(e){
+      console.error("HMI", e);
+    }
+  }
+
+  // ---------- DOMINANCE ----------
+  async function loadDom(){
+    try{
+      const r = await fetch("dom_bands_latest.json",{cache:"no-store"});
+      const j = await r.json();
+      const btcPct = j.btc_pct;
+      const minPct = j.min_pct;
+      const maxPct = j.max_pct;
+
+      if (btcPct != null) {
+        // e.g. "77 BTC vs EthBnbSol"
+        document.getElementById("dom-value").textContent = Math.round(btcPct);
+      }
+
+      if (minPct != null && maxPct != null) {
+        document.getElementById("dom-range").textContent =
+          `2-yr range: ${Math.round(minPct)}% – ${Math.round(maxPct)}%`;
+      }
+
+      const caps = `Market caps: ${j.btc_mc_fmt || "--"} vs ${j.alt_mc_fmt || "--"}`;
+      document.getElementById("dom-caps").textContent = caps;
+
+      const action = j.action || "--";
+      document.getElementById("dom-action").textContent = `Action: ${action}`;
+    }catch(e){
+      console.error("DOM", e);
+    }
+  }
+
+  // ---------- PRICES ----------
+  // format "60.0–80.3" => "60%–80%"
+  function formatRange(rng) {
+    if (!rng || typeof rng !== "string") return "";
+    const parts = rng.split("–");
+    if (parts.length !== 2) return rng;
+    const lo = Math.round(parseFloat(parts[0]));
+    const hi = Math.round(parseFloat(parts[1]));
+    if (isNaN(lo) || isNaN(hi)) return rng;
+    return `${lo}%–${hi}%`;
+  }
+
+  async function loadPrices(){
+    try{
+      const r = await fetch("prices_latest.json",{cache:"no-store"});
+      const j = await r.json();
+      const body = document.getElementById("prices-body");
+      body.innerHTML = "";
+
+      if (!j.rows || !Array.isArray(j.rows) || j.rows.length === 0) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="6">No data</td>`;
+        body.appendChild(tr);
+        return;
+      }
+
+      j.rows.forEach(row => {
+        const tr = document.createElement("tr");
+
+        const token = row.token || "";
+        const price = row.price != null ? `$${fmtNum(row.price)}` : "--";
+        const mc = mcFmt(row.mc || 0);
+        const change = Number(row.change_24h || 0);
+        const btcDom = row.btc_dom != null ? `${row.btc_dom}` : "";
+        const range = formatRange(row.range || "");
+
+        // 24h colour class
+        let changeClass = "";
+        if (change > 0) changeClass = "green";
+        else if (change < 0) changeClass = "red";
+
+        tr.innerHTML = `
+          <td>${token}</td>
+          <td>${price}</td>
+          <td>${mc}</td>
+          <td class="${changeClass}">${change.toFixed(1)}%</td>
+          <td>${btcDom}</td>
+          <td>${range}</td>
+        `;
+        body.appendChild(tr);
+      });
+    }catch(e){
+      console.error("Prices", e);
+    }
+  }
+
+  // ---------- INIT ----------
+  loadHMI();
+  loadDom();
+  loadPrices();
+  setInterval(loadHMI, 60000);
+  setInterval(loadDom, 21600000); // 6h
 </script>
 
 </body>
