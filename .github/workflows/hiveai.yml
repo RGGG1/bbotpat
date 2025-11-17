@@ -1,16 +1,14 @@
-name: HiveAI System
+name: HiveAI System (12h HMI + Dominance)
 
 on:
+  # HMI twice per day: 05:05 & 17:05 UTC
   schedule:
-    # Daily HMI (00:03 UTC)
-    - cron: "3 0 * * *"
+    - cron: "5 5,17 * * *"
 
-    # Dominance + Prices every 6h (00:05, 06:05, 12:05, 18:05)
-    - cron: "5 0,6,12,18 * * *"
+    # Dominance + prices + TG twice per day: 05:15 & 17:15 UTC
+    - cron: "15 5,17 * * *"
 
-    # Daily backtest (00:10 UTC)
-    - cron: "10 0 * * *"
-
+  # allow manual runs if you want to test
   workflow_dispatch: {}
 
 jobs:
@@ -18,6 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
+      COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
 
     steps:
       - name: Checkout repo
@@ -30,51 +34,70 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests pandas numpy python-telegram-bot
+          fi
 
-      - name: Prepare environment
+      # ---------------------------------------------------
+      # 1) HMI update  (05:05 & 17:05 UTC)
+      # ---------------------------------------------------
+      - name: Compute HMI (FG2 Index)
+        if: github.event_name == 'schedule' && github.event.schedule == '5 5,17 * * *'
+        env:
+          COINALYZE_API_KEY: ${{ secrets.COINALYZE_API_KEY }}
         run: |
-          mkdir -p docs
-          mkdir -p output
-
-      # -------------------------------------
-      # DAILY HMI @ 00:03
-      # -------------------------------------
-      - name: Run HMI computation
-        if: startsWith(github.event.schedule, '3 ')
-        run: |
+          echo "Running HMI computation at 05:05/17:05 UTC"
           python compute_fg2_index.py
+          # write latest HMI JSON (this script should create hmi_latest.json)
           python export_hmi_json.py
 
-      # -------------------------------------
-      # DOMINANCE + PRICES every 6h @ 00:05 etc.
-      # -------------------------------------
-      - name: Update dominance + prices
-        if: startsWith(github.event.schedule, '5 ')
+      # ---------------------------------------------------
+      # 2) Dominance + Telegram + prices
+      #     (05:15 & 17:15 UTC)
+      # ---------------------------------------------------
+      - name: Update dominance + send TG
+        if: github.event_name == 'schedule' && github.event.schedule == '15 5,17 * * *'
         env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
         run: |
-          python compute_dynamic_bands.py
-          python update_dominance.py
-          python export_prices.py
+          echo "Running dominance + TG at 05:15/17:15 UTC"
+          # Your Telegram script is assumed to:
+          #  - read latest HMI
+          #  - compute BTC vs Alts dominance & action
+          #  - update dom_bands_latest.json and/or prices_latest.json
+          #  - send the Telegram message
+          python send_fg_dom_signal_telegram.py
 
-      # -------------------------------------
-      # BACKTEST @ 00:10
-      # -------------------------------------
-      - name: Run Backtest
-        if: startsWith(github.event.schedule, '10 ')
+      # ---------------------------------------------------
+      # 3) Sync JSONs into docs/ for the website
+      #    and commit them back to the repo
+      # ---------------------------------------------------
+      - name: Sync JSONs into docs/ and commit
         run: |
-          python backtest_dominance_rotation.py
+          mkdir -p docs
 
-      # -------------------------------------
-      # Commit JSON/CSV changes
-      # -------------------------------------
-      - name: Commit changes
-        run: |
+          # copy root JSONs (if they exist) into docs/
+          if [ -f hmi_latest.json ]; then
+            cp hmi_latest.json docs/hmi_latest.json
+          fi
+
+          if [ -f dom_bands_latest.json ]; then
+            cp dom_bands_latest.json docs/dom_bands_latest.json
+          fi
+
+          if [ -f prices_latest.json ]; then
+            cp prices_latest.json docs/prices_latest.json
+          fi
+
           git config --global user.name "hiveai-bot"
           git config --global user.email "bot@users.noreply.github.com"
-          git add docs/*.json || true
-          git add output/*.csv || true
-          git commit -m "Automated HiveAI update" || true
+
+          git add hmi_latest.json dom_bands_latest.json prices_latest.json docs/hmi_latest.json docs/dom_bands_latest.json docs/prices_latest.json 2>/dev/null || true
+
+          # if there's nothing to commit, this will just no-op
+          git commit -m "HiveAI auto-update (HMI / Dominance / Prices)" || true
           git push || true
