@@ -1,4 +1,81 @@
-const j = await r.json();
-j.rows.forEach(r => {
-  // uses r.token, r.price, r.mc, r.change_24h, r.btc_dom, r.range
-});
+{
+  "timestamp": "2025-11-17T00:05:00Z",
+  "health": {
+    "coingecko_ok": true,
+    "bands_ok": true
+  },
+  "rows": [
+    {
+      "token": "BTC",
+      "price": 57250,
+      "mc": 1200000000000,
+      "change_24h": 1.8,
+      "btc_dom": null,
+      "range": ""
+    },
+    {
+      "token": "ETH",
+      "price": 2950,
+      "mc": 350000000000,
+      "change_24h": 2.3,
+      "btc_dom": 77.0,
+      "range": "60.0–82.0"
+    },
+    {
+      "token": "BNB",
+      "price": 420,
+      "mc": 65000000000,
+      "change_24h": -0.7,
+      "btc_dom": 80.1,
+      "range": "58.0–84.0"
+    },
+    {
+      "token": "SOL",
+      "price": 165,
+      "mc": 70000000000,
+      "change_24h": 4.5,
+      "btc_dom": 65.3,
+      "range": "45.0–80.0"
+    },
+    {
+      "token": "DOGE",
+      "price": 0.18,
+      "mc": 25000000000,
+      "change_24h": -1.2,
+      "btc_dom": 82.4,
+      "range": "40.0–78.0"
+    },
+    {
+      "token": "TON",
+      "price": 6.20,
+      "mc": 21000000000,
+      "change_24h": 3.1,
+      "btc_dom": 79.6,
+      "range": "50.0–88.0"
+    },
+    {
+      "token": "USDTC",
+      "price": 1.00,
+      "mc": 140000000000,
+      "change_24h": 0.0,
+      "btc_dom": null,
+      "range": ""
+    },
+    {
+      "token": "SUI",
+      "price": 1.35,
+      "mc": 1500000000,
+      "change_24h": 5.0,
+      "btc_dom": 90.2,
+      "range": "35.0–75.0"
+    },
+    {
+      "token": "UNI",
+      "price": 8.40,
+      "mc": 6200000000,
+      "change_24h": 0.9,
+      "btc_dom": 86.7,
+      "range": "38.0–79.0"
+    }
+  ]
+}
