@@ -1,9 +1,7 @@
 name: FG + Dominance Telegram Daily
 
 on:
- # schedule:
-  #  - cron: "2 0 * * *"   # runs at 00:02 UTC daily
-  workflow_dispatch:
+ workflow_dispatch:
 
 jobs:
   send_signal:
