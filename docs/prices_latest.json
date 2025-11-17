@@ -1,1 +1,4 @@
-
+const j = await r.json();
+j.rows.forEach(r => {
+  // uses r.token, r.price, r.mc, r.change_24h, r.btc_dom, r.range
+});
