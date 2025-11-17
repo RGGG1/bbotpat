@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>/ HiveAI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="favicon.svg" />
+  <style>
+    body {
+      background: #000;
+      color: #fff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+      margin: 0;
+      padding: 24px;
+    }
+    .app {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    header {
+      font-size: 32px;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+    .slash {
+      display: inline-block;
+      margin-right: 6px;
+      transition: color 0.3s ease;
+    }
+    .row { margin-bottom: 28px; }
+    .section-title {
+      font-size: 18px;
+      font-weight: 500;
+      margin-bottom: 12px;
+      color: #bbb;
+    }
+    .hmi-value {
+      font-size: 48px;
+      font-weight: 600;
+    }
+    .hmi-status {
+      font-size: 32px;
+      margin-left: 12px;
+      color: #888;
+    }
+    .dom-block, .prices-block {
+      padding: 16px 0;
+      border-top: 1px solid #222;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+    th {
+      text-align: left;
+      font-weight: 600;
+      color: #bbb;
+      padding-bottom: 6px;
+    }
+    td { padding: 4px 0; }
+    .red { color: #ff4b5c; }
+    .green { color: #4dff88; }
+    footer {
+      margin-top: 40px;
+      font-size: 12px;
+      color: #777;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header><span class="slash" id="slash">/</span>HiveAI</header>
+
+  <div class="row" id="hmi-section">
+    <div class="section-title">Hive Mind Index</div>
+    <div class="hmi-value">
+      <span id="hmi-val">--.-</span>
+      <span class="hmi-status" id="hmi-status">loading</span>
+    </div>
+  </div>
+
+  <div class="dom-block" id="dom-section">
+    <div class="section-title">Dominance</div>
+    <div id="dom-main">BTC vs EthBnbSol: --/--</div>
+    <div id="dom-range">2-yr range: --% – --%</div>
+    <div id="dom-caps">Market caps: --</div>
+    <div id="dom-action" style="margin-top:8px;">Action: --</div>
+  </div>
+
+  <div class="prices-block" id="prices-section">
+    <div class="section-title">Prices</div>
+    <table id="prices-table">
+      <thead>
+        <tr>
+          <th>Token</th>
+          <th>Price</th>
+          <th>MC</th>
+          <th>24h</th>
+          <th>BTC Dom</th>
+          <th>Range</th>
+        </tr>
+      </thead>
+      <tbody id="prices-body">
+        <tr><td colspan="6">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <footer>
+    <strong>Refresh rates</strong><br/>
+    HMI: every 60s.<br/>
+    Dominance: every 6h.<br/>
+    Prices: on page load.
+  </footer>
+
+</div>
+
+<script>
+// ---------- UTILITIES ----------
+function fmt(v){return Number(v).toLocaleString();}
+function mcFmt(v){
+  if(!v||v<=0)return "$0";
+  if(v>=1e12)return "$"+(v/1e12).toFixed(1)+"T";
+  if(v>=1e9)return "$"+Math.round(v/1e9)+"B";
+  if(v>=1e6)return "$"+Math.round(v/1e6)+"M";
+  return "$"+Math.round(v);
+}
+function colorSlash(hmi){
+  const s=document.getElementById("slash");
+  s.style.color = (hmi<40)?"#ff4b5c":(hmi>60?"#4dff88":"#fff");
+}
+
+// ---------- HMI ----------
+async function loadHMI(){
+  try{
+    const r=await fetch("hmi_latest.json",{cache:"no-store"});
+    const j=await r.json();
+    const h=j.hmi;
+    document.getElementById("hmi-val").textContent=h.toFixed(1);
+    document.getElementById("hmi-status").textContent=j.band || "";
+    colorSlash(h);
+  }catch(e){
+    console.error("HMI",e);
+  }
+}
+
+// ---------- DOMINANCE ----------
+async function loadDom(){
+  try{
+    const r=await fetch("dom_bands_latest.json",{cache:"no-store"});
+    const j=await r.json();
+    document.getElementById("dom-main").textContent=
+      `BTC vs EthBnbSol: ${j.btc_pct}/${j.alt_pct}`;
+    document.getElementById("dom-range").textContent=
+      `2-yr range: ${j.min_pct}% – ${j.max_pct}%`;
+    document.getElementById("dom-caps").textContent=
+      `Market caps: ${j.btc_mc_fmt} vs ${j.alt_mc_fmt}`;
+    document.getElementById("dom-action").textContent=
+      `Action: ${j.action}`;
+  }catch(e){
+    console.error("DOM",e);
+  }
+}
+
+// ---------- PRICES ----------
+async function loadPrices(){
+  try{
+    const r=await fetch("prices_latest.json",{cache:"no-store"});
+    const j=await r.json();
+    const body=document.getElementById("prices-body");
+    body.innerHTML="";
+    j.rows.forEach(r=>{
+      const tr=document.createElement("tr");
+      const priceClass = r.change_24h<0?"red":"green";
+      tr.innerHTML = `
+        <td>${r.token}</td>
+        <td class="${priceClass}">$${fmt(r.price)}</td>
+        <td>${mcFmt(r.mc)}</td>
+        <td>${r.change_24h.toFixed(1)}%</td>
+        <td>${r.btc_dom||""}</td>
+        <td>${r.range||""}</td>`;
+      body.appendChild(tr);
+    });
+  }catch(e){
+    console.error("Prices",e);
+  }
+}
+
+// ---------- INIT ----------
+loadHMI();
+loadDom();
+loadPrices();
+setInterval(loadHMI,60000);
+setInterval(loadDom,21600000);
+</script>
+
+</body>
+</html>
