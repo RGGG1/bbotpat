@@ -29,6 +29,7 @@ Responsibilities:
 
 import json
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -66,7 +67,7 @@ TOKENS = {
     "BNB":  "binancecoin",
     "SOL":  "solana",
     "DOGE": "dogecoin",
-    "TON":  "the-open-network",
+    "TON":  "the-open-network",  # CoinGecko id
     "SUI":  "sui",
     "UNI":  "uniswap",
     "USDT": "tether",
@@ -85,6 +86,7 @@ DISPLAY_ORDER = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TON", "USDTC", "SUI", "UNI
 # ------------------------------------------------------------------
 
 def cg_get(path, params=None, timeout=60):
+    """Simple GET for live markets; fail fast on error."""
     if params is None:
         params = {}
     url = COINGECKO + path
@@ -92,6 +94,41 @@ def cg_get(path, params=None, timeout=60):
     if r.status_code != 200:
         raise RuntimeError(f"CoinGecko error {r.status_code}: {r.text[:200]}")
     return r.json()
+
+
+def cg_get_history(path, params=None, timeout=60, max_retries=4, base_pause=2.0):
+    """
+    GET for historical endpoints (market_chart) with retries + exponential backoff.
+    Retries on network errors, 429, and 5xx.
+    """
+    if params is None:
+        params = {}
+    url = COINGECKO + path
+    last_err = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.get(url, params=params, timeout=timeout)
+        except Exception as e:
+            last_err = e
+        else:
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code in (429, 500, 502, 503, 504):
+                last_err = RuntimeError(
+                    f"status {r.status_code}: {r.text[:200]}"
+                )
+            else:
+                # hard failure (4xx other than 429)
+                raise RuntimeError(
+                    f"CoinGecko history error {r.status_code}: {r.text[:200]}"
+                )
+        # backoff
+        sleep_s = base_pause * attempt
+        print(f"[history] retrying in {sleep_s:.1f}s for {path}")
+        time.sleep(sleep_s)
+
+    raise RuntimeError(f"CoinGecko history failed after retries: {last_err}")
 
 
 def load_hmi():
@@ -183,10 +220,12 @@ def fetch_mc_history(coin_id: str):
     last_err = None
     for days in FALLBACK_HORIZONS:
         try:
-            js = cg_get(
+            js = cg_get_history(
                 f"/coins/{coin_id}/market_chart",
                 params={"vs_currency": "usd", "days": str(days)},
                 timeout=80,
+                max_retries=4,
+                base_pause=2.0,
             )
         except Exception as e:
             last_err = e
@@ -578,3 +617,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
