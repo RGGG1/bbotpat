@@ -2,6 +2,25 @@
 set -e
 
 cd /root/bbotpat
+
+# Load secrets
+source .env
+
+# Activate Python virtualenv
+source .venv/bin/activate
+
+git pull
+
+# Dominance + prices + portfolio
+python send_fg_dom_signal_telegram.py
+
+git add -A
+git commit -m "Update dominance/prices/portfolio (auto)" || true
+git push
+#!/usr/bin/env bash
+set -e
+
+cd /root/bbotpat
 source .env
 
 git pull

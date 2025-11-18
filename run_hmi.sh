@@ -1,4 +1,58 @@
 #!/usr/bin/env bash
+#!/usr/bin/env bash
+set -e
+
+cd /root/bbotpat
+
+# Load secrets
+source .env
+
+# Activate Python virtualenv
+source .venv/bin/activate
+
+# Make sure we have the latest code
+git pull
+
+# Compute HMI and export JSON
+python compute_fg2_index.py
+python export_hmi_json.py
+
+# Ensure docs copy exists for GitHub Pages
+if [ -f hmi_latest.json ]; then
+  cp hmi_latest.json docs/hmi_latest.json
+fi
+
+# Commit and push any changes
+git add -A
+git commit -m "Update HMI (auto)" || true
+git push
+set -e
+
+cd /root/bbotpat
+
+# Load secrets
+source .env
+
+# Activate Python virtualenv
+source .venv/bin/activate
+
+# Make sure we have the latest code
+git pull
+
+# Compute HMI and export JSON
+python compute_fg2_index.py
+python export_hmi_json.py
+
+# Ensure docs copy exists for GitHub Pages
+if [ -f hmi_latest.json ]; then
+  cp hmi_latest.json docs/hmi_latest.json
+fi
+
+# Commit and push any changes
+git add -A
+git commit -m "Update HMI (auto)" || true
+git push
+#!/usr/bin/env bash
 set -e
 
 cd /root/bbotpat
