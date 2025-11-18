@@ -1,11 +1,11 @@
 {
-  "timestamp": "2025-11-18T22:52:56.672864Z",
+  "timestamp": "2025-11-18T23:20:21.634612Z",
   "hmi": NaN,
   "hmi_band": "It's the future of finance",
   "weights": [
     {
       "asset": "BTC",
-      "weight": 0.2982
+      "weight": 0.2985
     },
     {
       "asset": "ETH",
@@ -13,7 +13,7 @@
     },
     {
       "asset": "BNB",
-      "weight": 0.085
+      "weight": 0.0839
     },
     {
       "asset": "SOL",
@@ -21,7 +21,7 @@
     },
     {
       "asset": "DOGE",
-      "weight": 0.1096
+      "weight": 0.1101
     },
     {
       "asset": "TON",
@@ -29,11 +29,11 @@
     },
     {
       "asset": "SUI",
-      "weight": 0.0673
+      "weight": 0.0677
     },
     {
       "asset": "UNI",
-      "weight": 0.0714
+      "weight": 0.0713
     },
     {
       "asset": "STABLES",
