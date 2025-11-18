@@ -9,9 +9,11 @@ Responsibilities:
 - Fetch live prices + market caps for:
     BTC, ETH, BNB, SOL, DOGE, TON, SUI, UNI, USDT, USDC
 - Compute per-token BTC dominance and ~2-yr dominance ranges (BTC vs each alt)
-    * target horizon: 730 days
+    * target horizon: 730 days, with fallbacks to 365 and 180 days
     * record the actual number of days of overlapping history
+    * if no new history, reuse last-good ranges from previous JSON
 - Compute BTC vs ALL ALTS dominance (excluding stables) + range + days
+    * if no new history, reuse last-good aggregate range
 - For each alt:
     - Map dominance position within its range to
       BTC / ALT / STABLE weights (35% / 30% / 35% bands)
@@ -206,6 +208,37 @@ def fetch_mc_history(coin_id: str):
     return {}, 0
 
 
+def load_previous_prices_ranges():
+    """
+    Load previous per-token Range strings from prices_latest.json (if any)
+    so that we can reuse them when a fresh run can't compute new ranges.
+    """
+    for p in [PRICES_JSON_ROOT, PRICES_JSON_DOCS]:
+        if p.exists():
+            try:
+                js = json.loads(p.read_text())
+                rows = js.get("rows", [])
+                return {row.get("token"): row.get("range", "") for row in rows}
+            except Exception:
+                continue
+    return {}
+
+
+def load_previous_dom_range():
+    """
+    Load previous aggregate BTC vs Alts range from dom_bands_latest.json (if any).
+    Returns (min_pct, max_pct, days).
+    """
+    for p in [DOM_JSON_ROOT, DOM_JSON_DOCS]:
+        if p.exists():
+            try:
+                js = json.loads(p.read_text())
+                return js.get("min_pct"), js.get("max_pct"), js.get("days")
+            except Exception:
+                continue
+    return None, None, None
+
+
 # ------------------------------------------------------------------
 # Main logic
 # ------------------------------------------------------------------
@@ -223,7 +256,11 @@ def main():
     if hmi is not None:
         health["hmi_ok"] = True
 
-    # 2) Live prices & MCs (single call)
+    # 2) Load previous ranges for caching
+    prev_ranges = load_previous_prices_ranges()
+    prev_min_pct, prev_max_pct, prev_days_all = load_previous_dom_range()
+
+    # 3) Live prices & MCs (single call)
     try:
         ids_str = ",".join(TOKENS.values())
         js = cg_get(
@@ -262,7 +299,7 @@ def main():
     btc_mc_now = mc("BTC")
     alt_mc_now_total = sum(mc(sym) for sym in ALTS_FOR_DOM)
 
-    # 3) Historical dominance ranges for BTC vs each alt & aggregate
+    # 4) Historical dominance ranges for BTC vs each alt & aggregate
 
     # Fetch BTC history once
     btc_hist, btc_hist_days = fetch_mc_history(TOKENS["BTC"])
@@ -345,8 +382,14 @@ def main():
         dom_all_min = min(dom_all_series)
         dom_all_max = max(dom_all_series)
     else:
-        # no aggregate history; fall back to today's dominance as a point estimate
-        dom_all_min = dom_all_max = btc_dom_all_now
+        # no aggregate history this run; reuse previous if possible
+        if prev_min_pct is not None and prev_max_pct is not None:
+            dom_all_min = float(prev_min_pct)
+            dom_all_max = float(prev_max_pct)
+            days_all = prev_days_all or 0
+        else:
+            # absolute last resort: treat today's dominance as degenerate range
+            dom_all_min = dom_all_max = btc_dom_all_now
 
     # For aggregate action, reuse weights_from_dom on BTC vs All Alts
     if dom_all_max > dom_all_min:
@@ -363,7 +406,7 @@ def main():
     else:
         agg_action = "Buy Alts"
 
-    # 4) Build prices_latest.json rows (for website)
+    # 5) Build prices_latest.json rows (for website)
     rows = []
 
     usdt_mc = mc("USDT")
@@ -406,11 +449,13 @@ def main():
                     else:
                         rng_str = base
                 else:
-                    # no history at all, but we *do* have Dom_now
-                    rng_str = "N/A (0d)"
+                    # no new history this run; try to reuse previous range
+                    prev = prev_ranges.get(sym)
+                    rng_str = prev if prev else "N/A (0d)"
             else:
                 dom_now = None
-                rng_str = "N/A (0d)"
+                prev = prev_ranges.get(sym)
+                rng_str = prev if prev else "N/A (0d)"
 
         rows.append({
             "token": sym,
@@ -430,7 +475,7 @@ def main():
     PRICES_JSON_ROOT.write_text(text_prices)
     PRICES_JSON_DOCS.write_text(text_prices)
 
-    # 5) Build dom_bands_latest.json (aggregate BTC vs Alts)
+    # 6) Build dom_bands_latest.json (aggregate BTC vs Alts)
 
     agg_mn_i = round(dom_all_min)
     agg_mx_i = round(dom_all_max)
@@ -451,7 +496,7 @@ def main():
     DOM_JSON_DOCS.write_text(text_dom)
     health["bands_ok"] = True
 
-    # 6) Combine mini-portfolios into global allocation
+    # 7) Combine mini-portfolios into global allocation
 
     global_weights = {"BTC": 0.0, "STABLES": 0.0}
     for sym in ALTS_FOR_DOM:
@@ -493,7 +538,7 @@ def main():
     PW_JSON_ROOT.write_text(text_pw)
     PW_JSON_DOCS.write_text(text_pw)
 
-    # 7) Telegram message
+    # 8) Telegram message
 
     def pct_str(x):
         return f"{x*100:.1f}%"
@@ -533,4 +578,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
