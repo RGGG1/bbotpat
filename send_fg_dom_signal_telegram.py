@@ -9,7 +9,7 @@ Responsibilities:
 - Fetch live prices + market caps for:
     BTC, ETH, BNB, SOL, DOGE, TON, SUI, UNI, USDT, USDC
 - Compute per-token BTC dominance and ~2-yr dominance ranges (BTC vs each alt)
-    * target horizon: 730 days, with fallbacks to 365 and 180 days
+    * target horizon: 730 days, with fallbacks to 365, 180 and 'max'
     * record the actual number of days of overlapping history
     * if no new history, reuse last-good ranges from previous JSON
 - Compute BTC vs ALL ALTS dominance (excluding stables) + range + days
@@ -41,7 +41,8 @@ import requests
 
 COINGECKO = "https://api.coingecko.com/api/v3"
 DAYS_HISTORY_TARGET = 730  # approx 2 years
-FALLBACK_HORIZONS = [DAYS_HISTORY_TARGET, 365, 180]
+# note: last entry 'max' uses CoinGecko's full-history shortcut
+FALLBACK_HORIZONS = [DAYS_HISTORY_TARGET, 365, 180, "max"]
 
 ROOT = Path(".")
 DOCS = ROOT / "docs"
@@ -125,7 +126,7 @@ def cg_get_history(path, params=None, timeout=60, max_retries=4, base_pause=2.0)
                 )
         # backoff
         sleep_s = base_pause * attempt
-        print(f"[history] retrying in {sleep_s:.1f}s for {path}")
+        print(f"[history] retrying in {sleep_s:.1f}s for {path} with params {params}")
         time.sleep(sleep_s)
 
     raise RuntimeError(f"CoinGecko history failed after retries: {last_err}")
@@ -212,17 +213,22 @@ def tg_send(text):
 def fetch_mc_history(coin_id: str):
     """
     Try to fetch historical market caps for `coin_id` using several horizons
-    (730d, 365d, 180d). Return (history_dict, days_available):
+    (730d, 365d, 180d, max). Return (history_dict, days_available):
 
     - history_dict: {date -> market_cap}
     - days_available: number of distinct dates
     """
     last_err = None
-    for days in FALLBACK_HORIZONS:
+    for horizon in FALLBACK_HORIZONS:
         try:
+            if horizon == "max":
+                params = {"vs_currency": "usd", "days": "max"}
+            else:
+                params = {"vs_currency": "usd", "days": str(horizon)}
+
             js = cg_get_history(
                 f"/coins/{coin_id}/market_chart",
-                params={"vs_currency": "usd", "days": str(days)},
+                params=params,
                 timeout=80,
                 max_retries=4,
                 base_pause=2.0,
@@ -237,7 +243,7 @@ def fetch_mc_history(coin_id: str):
             out[d] = float(cap)
 
         if out:
-            print(f"[history] {coin_id}: {len(out)} days (requested {days})")
+            print(f"[history] {coin_id}: {len(out)} days (requested {horizon})")
             return out, len(out)
 
     if last_err:
@@ -617,4 +623,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+        
