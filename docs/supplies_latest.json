@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-11-18T23:20:31.900758Z",
+  "timestamp": "2025-11-18T23:31:40.996158Z",
   "source": "coingecko",
   "supplies": {
     "BTC": {
@@ -24,7 +24,7 @@
     },
     "TON": {
       "id": "the-open-network",
-      "circulating_supply": 2489338751.096048
+      "circulating_supply": 2489339533.664503
     },
     "SUI": {
       "id": "sui",
