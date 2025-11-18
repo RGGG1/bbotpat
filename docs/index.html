@@ -2,317 +2,607 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>/ HiveAI</title>
+  <title>/ HiveAI – Hive Mind Index & Dominance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="icon" href="favicon.svg" />
   <style>
-    body {
-      background: #000;
-      color: #fff;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    :root {
+      --bg: #000000;
+      --bg-elevated: #050509;
+      --border-subtle: #22232f;
+      --text-main: #f5f5f7;
+      --text-muted: #888aa0;
+      --accent-red: #ff4b5c;
+      --accent-green: #4dff88;
+      --accent-neutral: #ffffff;
+      --font-main: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                   "Inter", "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
       margin: 0;
-      padding: 24px;
+      padding: 0;
     }
-    .app {
-      max-width: 1100px;
-      margin: 0 auto;
+
+    body {
+      background: var(--bg);
+      color: var(--text-main);
+      font-family: var(--font-main);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 24px 12px 40px;
     }
+
+    .app-shell {
+      width: 100%;
+      max-width: 1040px;
+    }
+
     header {
-      font-size: 32px;
-      font-weight: 600;
-      margin-bottom: 24px;
-    }
-    .slash {
-      display: inline-block;
-      margin-right: 6px;
-      transition: color 0.3s ease;
-    }
-    .row {
-      margin-bottom: 18px; /* slightly tighter */
-    }
-    .section-title {
-      font-size: 18px;
-      font-weight: 500;
-      margin-bottom: 12px;
-      color: #bbb;
-    }
-    .hmi-value {
-      font-size: 48px;
-      font-weight: 600;
-    }
-    .hmi-status {
-      font-size: 18px;      /* same as section-title */
-      margin-left: 4px;     /* more like a normal word gap */
-      color: #fff;          /* white */
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
     }
 
-    .dom-block, .prices-block {
-      padding: 8px 0 16px;  /* smaller top padding to remove double space feel */
-      border-top: 1px solid #222;
-    }
-
-    .dom-main {
+    .title-stack {
       display: flex;
       align-items: baseline;
-      gap: 8px;
+      gap: 6px;
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .logo-slash {
+      font-size: 24px;
+      line-height: 1;
+      transition: color 0.28s ease;
+    }
+
+    .logo-accent-red {
+      color: var(--accent-red);
+    }
+    .logo-accent-green {
+      color: var(--accent-green);
+    }
+    .logo-accent-neutral {
+      color: var(--accent-neutral);
+    }
+
+    .meta-topline {
+      text-align: right;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    main {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .grid-top {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+      gap: 16px;
+    }
+
+    @media (max-width: 800px) {
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+      .meta-topline {
+        text-align: left;
+      }
+      .grid-top {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background: var(--bg-elevated);
+      border-radius: 10px;
+      border: 1px solid var(--border-subtle);
+      padding: 10px 12px 12px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
       margin-bottom: 6px;
     }
-    .dom-value {
-      font-size: 48px;      /* same as HMI number */
-      font-weight: 600;
-    }
-    .dom-label {
-      font-size: 18px;      /* same as section-title */
+
+    .card-title {
+      font-size: 12px;
       font-weight: 500;
-      color: #fff;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
     }
 
-    table {
+    .chip {
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #11111a;
+      border: 1px solid #232332;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    /* HMI section */
+    .hmi-value-row {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .hmi-value {
+      font-size: 36px;
+      font-weight: 600;
+    }
+
+    .hmi-status {
+      font-size: 12px; /* same as title text scale */
+      color: var(--accent-neutral);
+      text-transform: capitalize;
+    }
+
+    .hmi-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Dominance */
+    .dom-main-line {
+      font-size: 20px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .dom-main-line .dom-value {
+      font-size: 28px;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+
+    .dom-main-line .dom-label {
+      font-size: 13px;
+      color: var(--accent-neutral);
+    }
+
+    .dom-sub-line {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 3px;
+    }
+
+    .dom-sub-line span {
+      color: var(--text-main);
+    }
+
+    .dom-range-line {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .dom-range-line span {
+      color: var(--text-main);
+    }
+
+    .dom-action {
+      font-size: 11px;
+      color: var(--text-main);
+      margin-top: 6px;
+    }
+
+    /* Prices table */
+    .prices-card {
+      margin-top: 4px;
+    }
+
+    .prices-last-updated {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .prices-table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 8px;
-      font-size: 14px;
+      font-size: 12px;
     }
-    th {
-      text-align: left;
-      font-weight: 600;
-      color: #bbb;
-      padding: 6px 4px;
+
+    .prices-table thead {
+      border-bottom: 1px solid var(--border-subtle);
     }
-    td {
+
+    .prices-table th,
+    .prices-table td {
       padding: 6px 4px;
     }
 
-    /* Center all columns except the token name (first column) */
-    th:nth-child(n+2),
-    td:nth-child(n+2) {
+    .prices-table th {
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .prices-table th.token-col,
+    .prices-table td.token-col {
+      text-align: left;
+    }
+
+    .prices-table th.center,
+    .prices-table td.center {
       text-align: center;
     }
 
-    .red {
-      color: #ff4b5c;
-    }
-    .green {
-      color: #4dff88;
+    .prices-table tbody tr:nth-child(even) {
+      background: #070711;
     }
 
-    footer {
-      margin-top: 40px;
-      font-size: 12px;
-      color: #777;
+    .prices-table tbody tr:nth-child(odd) {
+      background: #050509;
+    }
+
+    .price-positive {
+      color: var(--accent-green);
+    }
+
+    .price-negative {
+      color: var(--accent-red);
+    }
+
+    .price-neutral {
+      color: var(--text-main);
+    }
+
+    .footer-note {
+      margin-top: 14px;
+      font-size: 11px;
+      color: var(--text-muted);
       line-height: 1.5;
     }
 
-    /* Mobile tweaks */
-    @media (max-width: 640px) {
-      body {
-        padding: 16px;
+    .footer-note-title {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 10px;
+      margin-bottom: 2px;
+    }
+
+    @media (max-width: 700px) {
+      .prices-table {
+        font-size: 11px;
       }
-      header {
-        font-size: 26px;
+      .prices-table th,
+      .prices-table td {
+        padding: 5px 3px;
       }
       .hmi-value {
-        font-size: 38px;
+        font-size: 30px;
       }
-      .dom-value {
-        font-size: 38px;
-      }
-      table {
-        font-size: 12px;
-      }
-      th, td {
-        padding: 4px 3px;
+      .dom-main-line .dom-value {
+        font-size: 24px;
       }
     }
   </style>
 </head>
 <body>
-<div class="app">
-  <header><span class="slash" id="slash">/</span>HiveAI</header>
+  <div class="app-shell">
+    <header>
+      <div class="title-stack">
+        <span id="logo-slash" class="logo-slash logo-accent-neutral">/</span>
+        <span>HiveAI</span>
+      </div>
+      <div class="meta-topline">
+        <div id="meta-date">--/--/--</div>
+      </div>
+    </header>
 
-  <!-- HMI -->
-  <div class="row" id="hmi-section">
-    <div class="section-title">Hive Mind Index</div>
-    <div class="hmi-value">
-      <span id="hmi-val">--.-</span>
-      <span class="hmi-status" id="hmi-status">loading</span>
-    </div>
+    <main>
+      <div class="grid-top">
+        <!-- HMI CARD -->
+        <section class="card">
+          <div class="card-header">
+            <div class="card-title">Hive Mind Index</div>
+            <div class="chip" id="hmi-chip">HMI</div>
+          </div>
+          <div class="hmi-value-row">
+            <div class="hmi-value" id="hmi-value">--.-</div>
+            <div class="hmi-status" id="hmi-status">unavailable</div>
+          </div>
+          <div class="hmi-meta" id="hmi-meta">
+            Last update: --/--/-- --:--
+          </div>
+        </section>
+
+        <!-- DOMINANCE CARD -->
+        <section class="card">
+          <div class="card-header">
+            <div class="card-title">Dominance</div>
+            <div class="chip">BTC vs Alts</div>
+          </div>
+          <div class="dom-main-line" id="dom-main-line">
+            <span class="dom-value">--</span>
+            <span class="dom-label">BTC vs Alts</span>
+          </div>
+          <div class="dom-sub-line" id="dom-sub-line">
+            Market caps: <span>–</span>
+          </div>
+          <div class="dom-range-line" id="dom-range-line">
+            2-yr range: <span>–</span>
+          </div>
+          <div class="dom-action" id="dom-action">
+            Action: –
+          </div>
+        </section>
+      </div>
+
+      <!-- PRICES / TOKENS CARD -->
+      <section class="card prices-card">
+        <div class="card-header">
+          <div class="card-title">Tokens</div>
+        </div>
+        <div class="prices-last-updated" id="prices-last-updated">
+          Last update: --/--/-- --:--
+        </div>
+        <table class="prices-table">
+          <thead>
+            <tr>
+              <th class="token-col">Token</th>
+              <th class="center">Price</th>
+              <th class="center">MC</th>
+              <th class="center">24h</th>
+              <th class="center">Dom</th>
+              <th class="center">Range</th>
+            </tr>
+          </thead>
+          <tbody id="prices-tbody">
+            <!-- rows injected by JS -->
+          </tbody>
+        </table>
+      </section>
+
+      <div class="footer-note">
+        <div class="footer-note-title">Refresh rates</div>
+        <div>
+          HMI: every 60s.<br />
+          Dominance: every 6h.<br />
+          Prices: on page load.
+        </div>
+      </div>
+    </main>
   </div>
 
-  <!-- Dominance -->
-  <div class="dom-block" id="dom-section">
-    <div class="section-title">Dominance</div>
-    <div class="dom-main">
-      <span class="dom-value" id="dom-value">--</span>
-      <span class="dom-label">BTC vs Alts</span>
-    </div>
-    <div id="dom-range">2-yr range: --% – --%</div>
-    <div id="dom-caps">Market caps: --</div>
-    <div id="dom-action" style="margin-top:8px;">Action: --</div>
-  </div>
+  <script>
+    const HMI_NEUTRAL_LOW = 40;
+    const HMI_NEUTRAL_HIGH = 60;
 
-  <!-- Prices -->
-  <div class="prices-block" id="prices-section">
-    <!-- Title removed as requested -->
-    <table id="prices-table">
-      <thead>
-        <tr>
-          <th>Token</th>
-          <th>Price</th>
-          <th>MC</th>
-          <th>24h</th>
-          <th>Dom</th>
-          <th>Range</th>
-        </tr>
-      </thead>
-      <tbody id="prices-body">
-        <tr><td colspan="6">Loading…</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <footer>
-    <strong>Refresh rates</strong><br/>
-    HMI: every 60s.<br/>
-    Dominance: every 6h.<br/>
-    Prices: on page load.
-  </footer>
-
-</div>
-
-<script>
-  // ---------- UTILITIES ----------
-  function fmtNum(v){
-    return Number(v).toLocaleString();
-  }
-  function mcFmt(v){
-    if(!v || v <= 0) return "$0";
-    if(v >= 1e12) return "$" + (v/1e12).toFixed(1) + "T";
-    if(v >= 1e9)  return "$" + (v/1e9).toFixed(1) + "B";
-    if(v >= 1e6)  return "$" + (v/1e6).toFixed(1) + "M";
-    return "$" + Math.round(v).toLocaleString();
-  }
-  function colorSlash(hmi){
-    const s = document.getElementById("slash");
-    if (isNaN(hmi)) {
-      s.style.color = "#fff";
-      return;
+    function formatDate(ts) {
+      const d = ts ? new Date(ts) : new Date();
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yy = String(d.getFullYear()).slice(-2);
+      return `${dd}/${mm}/${yy}`;
     }
-    s.style.color = (hmi < 40) ? "#ff4b5c" : (hmi > 60 ? "#4dff88" : "#fff");
-  }
 
-  // ---------- HMI ----------
-  async function loadHMI(){
-    try{
-      const r = await fetch("hmi_latest.json",{cache:"no-store"});
-      const j = await r.json();
-      const h = Number(j.hmi);
-      const band = j.band || "";
-      if (!isNaN(h)) {
-        document.getElementById("hmi-val").textContent = h.toFixed(1);
+    function formatDateTime(ts) {
+      if (!ts) return "--/--/-- --:--";
+      const d = new Date(ts);
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yy = String(d.getFullYear()).slice(-2);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mi = String(d.getMinutes()).padStart(2, "0");
+      return `${dd}/${mm}/${yy} ${hh}:${mi}`;
+    }
+
+    function formatMC(v) {
+      if (!v || v <= 0) return "$0";
+      if (v >= 1e12) {
+        return `$${(v / 1e12).toFixed(1)}T`;
+      }
+      if (v >= 1e9) {
+        return `$${Math.round(v / 1e9)}B`;
+      }
+      if (v >= 1e6) {
+        return `$${Math.round(v / 1e6)}M`;
+      }
+      return `$${Math.round(v).toLocaleString()}`;
+    }
+
+    function updateLogoColor(hmi) {
+      const slashEl = document.getElementById("logo-slash");
+      slashEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
+
+      if (hmi < HMI_NEUTRAL_LOW) {
+        slashEl.classList.add("logo-accent-red");
+      } else if (hmi > HMI_NEUTRAL_HIGH) {
+        slashEl.classList.add("logo-accent-green");
+      } else {
+        slashEl.classList.add("logo-accent-neutral");
+      }
+    }
+
+    function hmiBandLabel(hmi) {
+      if (hmi < 10) return "zombie apocalypse";
+      if (hmi < 25) return "McDonald's applications";
+      if (hmi < 40) return "ngmi";
+      if (hmi < 60) return "stable";
+      if (hmi < 80) return "we're early";
+      return "it's the future of finance";
+    }
+
+    async function fetchHMI() {
+      try {
+        const resp = await fetch("hmi_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("HMI fetch failed");
+        const data = await resp.json();
+
+        const hmi = typeof data.hmi === "number" ? data.hmi : parseFloat(data.hmi);
+        if (Number.isNaN(hmi)) throw new Error("Invalid HMI in JSON");
+
+        const band = data.band || hmiBandLabel(hmi);
+
+        document.getElementById("hmi-value").textContent = hmi.toFixed(1);
         document.getElementById("hmi-status").textContent = band;
-        colorSlash(h);
+        document.getElementById("hmi-chip").textContent = `HMI • ${band}`;
+        document.getElementById("hmi-meta").textContent =
+          "Last update: " + formatDateTime(data.timestamp || data.date);
+
+        document.getElementById("meta-date").textContent = formatDate();
+        updateLogoColor(hmi);
+      } catch (err) {
+        console.error("HMI error:", err);
+        document.getElementById("hmi-value").textContent = "--.-";
+        document.getElementById("hmi-status").textContent = "unavailable";
+        document.getElementById("hmi-chip").textContent = "HMI • error";
       }
-    }catch(e){
-      console.error("HMI", e);
     }
-  }
 
-  // ---------- DOMINANCE ----------
-  async function loadDom(){
-    try{
-      const r = await fetch("dom_bands_latest.json",{cache:"no-store"});
-      const j = await r.json();
-      const btcPct = j.btc_pct;
-      const minPct = j.min_pct;
-      const maxPct = j.max_pct;
+    async function fetchDominance() {
+      try {
+        const resp = await fetch("dom_bands_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("dom bands fetch failed");
+        const data = await resp.json();
 
-      if (btcPct != null) {
-        // e.g. "77 BTC vs EthBnbSol"
-        document.getElementById("dom-value").textContent = Math.round(btcPct);
-      }
+        const btcPct = typeof data.btc_pct === "number" ? data.btc_pct : parseFloat(data.btc_pct);
+        const altPct = typeof data.alt_pct === "number" ? data.alt_pct : 100 - btcPct;
 
-      if (minPct != null && maxPct != null) {
-        document.getElementById("dom-range").textContent =
-          `2-yr range: ${Math.round(minPct)}% – ${Math.round(maxPct)}%`;
-      }
-
-      const caps = `Market caps: ${j.btc_mc_fmt || "--"} vs ${j.alt_mc_fmt || "--"}`;
-      document.getElementById("dom-caps").textContent = caps;
-
-      const action = j.action || "--";
-      document.getElementById("dom-action").textContent = `Action: ${action}`;
-    }catch(e){
-      console.error("DOM", e);
-    }
-  }
-
-  // ---------- PRICES ----------
-  // format "60.0–80.3" => "60%–80%"
-  function formatRange(rng) {
-    if (!rng || typeof rng !== "string") return "";
-    const parts = rng.split("–");
-    if (parts.length !== 2) return rng;
-    const lo = Math.round(parseFloat(parts[0]));
-    const hi = Math.round(parseFloat(parts[1]));
-    if (isNaN(lo) || isNaN(hi)) return rng;
-    return `${lo}%–${hi}%`;
-  }
-
-  async function loadPrices(){
-    try{
-      const r = await fetch("prices_latest.json",{cache:"no-store"});
-      const j = await r.json();
-      const body = document.getElementById("prices-body");
-      body.innerHTML = "";
-
-      if (!j.rows || !Array.isArray(j.rows) || j.rows.length === 0) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td colspan="6">No data</td>`;
-        body.appendChild(tr);
-        return;
-      }
-
-      // Sort tokens by market cap descending
-      j.rows.sort((a, b) => (b.mc || 0) - (a.mc || 0));
-
-      j.rows.forEach(row => {
-        const tr = document.createElement("tr");
-
-        const token = row.token || "";
-        const price = row.price != null ? `$${fmtNum(row.price)}` : "--";
-        const mc = mcFmt(row.mc || 0);
-        const change = Number(row.change_24h || 0);
-        const btcDom = row.btc_dom != null ? `${row.btc_dom}` : "";
-        const range = formatRange(row.range || "");
-
-        // 24h colour class
-        let changeClass = "";
-        if (change > 0) changeClass = "green";
-        else if (change < 0) changeClass = "red";
-
-        tr.innerHTML = `
-          <td>${token}</td>
-          <td>${price}</td>
-          <td>${mc}</td>
-          <td class="${changeClass}">${change.toFixed(1)}%</td>
-          <td>${btcDom}</td>
-          <td>${range}</td>
+        const domMainEl = document.getElementById("dom-main-line");
+        domMainEl.innerHTML = `
+          <span class="dom-value">${Math.round(btcPct)}</span>
+          <span class="dom-label">BTC vs Alts</span>
         `;
-        body.appendChild(tr);
-      });
-    }catch(e){
-      console.error("Prices", e);
+
+        const capsText = `${data.btc_mc_fmt || "–"} vs ${data.alt_mc_fmt || "–"}`;
+        document.getElementById("dom-sub-line").innerHTML =
+          `Market caps: <span>${capsText}</span>`;
+
+        const minPct = data.min_pct;
+        const maxPct = data.max_pct;
+        const days = data.days;
+        let rangeStr = "--";
+        if (typeof minPct === "number" && typeof maxPct === "number") {
+          rangeStr = `${Math.round(minPct)}–${Math.round(maxPct)}%`;
+          if (days && days > 0 && days < 730) {
+            rangeStr += ` (${days}d)`;
+          }
+        }
+        document.getElementById("dom-range-line").innerHTML =
+          `2-yr range: <span>${rangeStr}</span>`;
+
+        document.getElementById("dom-action").textContent =
+          `Action: ${data.action || "–"}`;
+      } catch (err) {
+        console.error("Dominance error:", err);
+        document.getElementById("dom-main-line").innerHTML =
+          `<span class="dom-value">--</span><span class="dom-label">BTC vs Alts</span>`;
+        document.getElementById("dom-sub-line").innerHTML =
+          `Market caps: <span>unavailable</span>`;
+        document.getElementById("dom-range-line").innerHTML =
+          `2-yr range: <span>--</span>`;
+        document.getElementById("dom-action").textContent = "Action: –";
+      }
     }
-  }
 
-  // ---------- INIT ----------
-  loadHMI();
-  loadDom();
-  loadPrices();
-  setInterval(loadHMI, 60000);
-  setInterval(loadDom, 21600000); // 6h
-</script>
+    async function fetchPrices() {
+      try {
+        const resp = await fetch("prices_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("prices fetch failed");
+        const data = await resp.json();
 
+        const tsEl = document.getElementById("prices-last-updated");
+        if (tsEl) {
+          tsEl.textContent = "Last update: " + formatDateTime(data.timestamp);
+        }
+
+        const tbody = document.getElementById("prices-tbody");
+        tbody.innerHTML = "";
+
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+
+        rows.forEach(row => {
+          const tr = document.createElement("tr");
+
+          const tdToken = document.createElement("td");
+          tdToken.className = "token-col";
+          tdToken.textContent = row.token || "";
+          tr.appendChild(tdToken);
+
+          const tdPrice = document.createElement("td");
+          tdPrice.className = "center";
+          const priceVal = typeof row.price === "number" ? row.price : parseFloat(row.price || "0");
+          tdPrice.textContent = priceVal > 0 ? `$${priceVal.toLocaleString(undefined, { maximumFractionDigits: 4 })}` : "–";
+          tr.appendChild(tdPrice);
+
+          const tdMC = document.createElement("td");
+          tdMC.className = "center";
+          tdMC.textContent = formatMC(row.mc || 0);
+          tr.appendChild(tdMC);
+
+          const tdChange = document.createElement("td");
+          tdChange.className = "center";
+          const ch = typeof row.change_24h === "number" ? row.change_24h : parseFloat(row.change_24h || "0");
+          const chText = `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`;
+          if (ch > 0.05) {
+            tdChange.classList.add("price-positive");
+          } else if (ch < -0.05) {
+            tdChange.classList.add("price-negative");
+          } else {
+            tdChange.classList.add("price-neutral");
+          }
+          tdChange.textContent = chText;
+          tr.appendChild(tdChange);
+
+          const tdDom = document.createElement("td");
+          tdDom.className = "center";
+          if (row.btc_dom != null) {
+            tdDom.textContent = `${row.btc_dom.toFixed(1)}%`;
+          } else {
+            tdDom.textContent = "—";
+          }
+          tr.appendChild(tdDom);
+
+          const tdRange = document.createElement("td");
+          tdRange.className = "center";
+          tdRange.textContent = row.range || "—";
+          tr.appendChild(tdRange);
+
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error("Prices error:", err);
+        const tsEl = document.getElementById("prices-last-updated");
+        if (tsEl) {
+          tsEl.textContent = "Last update: unavailable";
+        }
+      }
+    }
+
+    (function init() {
+      document.getElementById("meta-date").textContent = formatDate();
+      fetchHMI();
+      fetchDominance();
+      fetchPrices();
+
+      setInterval(fetchHMI, 60 * 1000);          // 60s
+      setInterval(fetchDominance, 6 * 60 * 60 * 1000); // 6h
+      // Prices only refresh on page load as requested
+    })();
+  </script>
 </body>
 </html>
