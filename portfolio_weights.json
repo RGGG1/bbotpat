@@ -1,11 +1,11 @@
 {
-  "timestamp": "2025-11-18T23:20:21.634612Z",
+  "timestamp": "2025-11-18T23:20:29.120484Z",
   "hmi": NaN,
   "hmi_band": "It's the future of finance",
   "weights": [
     {
       "asset": "BTC",
-      "weight": 0.2985
+      "weight": 0.2987
     },
     {
       "asset": "ETH",
@@ -13,15 +13,15 @@
     },
     {
       "asset": "BNB",
-      "weight": 0.0839
+      "weight": 0.0838
     },
     {
       "asset": "SOL",
-      "weight": 0.0873
+      "weight": 0.0872
     },
     {
       "asset": "DOGE",
-      "weight": 0.1101
+      "weight": 0.11
     },
     {
       "asset": "TON",
