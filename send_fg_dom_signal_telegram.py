@@ -4,27 +4,29 @@ send_fg_dom_signal_telegram.py
 
 Runs twice daily (05:15, 17:15 UTC).
 
-Responsibilities:
+Binance + supplies version:
+
 - Load latest HMI from hmi_latest.json (root or docs/)
-- Fetch live prices + market caps for:
-    BTC, ETH, BNB, SOL, DOGE, TON, SUI, UNI, USDT, USDC
+- Load circulating supplies from supplies_latest.json (root or docs/)
+- Use Binance spot API for:
+    * live prices and 24h change (ticker/24hr)
+    * daily close prices (klines) for BTC + all alts (up to ~730d)
+- Compute market caps = price * circulating_supply
 - Compute per-token BTC dominance and ~2-yr dominance ranges (BTC vs each alt)
-    * target horizon: 730 days, with fallbacks to 365, 180 and 'max'
-    * record the actual number of days of overlapping history
-    * if no new history, reuse last-good ranges from previous JSON
+    * range horizon: up to 730 days of overlapping price history
+    * record actual number of days used
 - Compute BTC vs ALL ALTS dominance (excluding stables) + range + days
-    * if no new history, reuse last-good aggregate range
 - For each alt:
     - Map dominance position within its range to
-      BTC / ALT / STABLE weights (35% / 30% / 35% bands)
+      BTC / ALT / STABLE weights (35% / 30% / 35% bands), respecting HMI
 - Combine all per-token weights into one global allocation
     (BTC + each ALT + stables)
 - Write:
-    - dom_bands_latest.json (BTC vs Alts aggregate)
-    - prices_latest.json (for website token table)
-    - portfolio_weights.json (combined allocation)
+    - dom_bands_latest.json
+    - prices_latest.json
+    - portfolio_weights.json
   in both root and docs/
-- Send a Telegram message with summary + service health.
+- Send a Telegram message with summary + service health
 """
 
 import json
@@ -39,16 +41,15 @@ import requests
 # Config
 # ------------------------------------------------------------------
 
-COINGECKO = "https://api.coingecko.com/api/v3"
-DAYS_HISTORY_TARGET = 730  # approx 2 years
-# note: last entry 'max' uses CoinGecko's full-history shortcut
-FALLBACK_HORIZONS = [DAYS_HISTORY_TARGET, 365, 180, "max"]
+BINANCE_SPOT = "https://api.binance.com"
 
 ROOT = Path(".")
 DOCS = ROOT / "docs"
 DOCS.mkdir(exist_ok=True, parents=True)
 
 HMI_FILES = [ROOT / "hmi_latest.json", DOCS / "hmi_latest.json"]
+SUPPLIES_FILES = [ROOT / "supplies_latest.json", DOCS / "supplies_latest.json"]
+
 DOM_JSON_ROOT = ROOT / "dom_bands_latest.json"
 DOM_JSON_DOCS = DOCS / "dom_bands_latest.json"
 PRICES_JSON_ROOT = ROOT / "prices_latest.json"
@@ -60,19 +61,20 @@ TG_TOKEN = os.getenv("TG_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT = os.getenv("TG_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
 
 GREED_STABLE_THRESHOLD = 77.0
+DAYS_HISTORY_TARGET = 730
 
-# Token universe
-TOKENS = {
-    "BTC":  "bitcoin",
-    "ETH":  "ethereum",
-    "BNB":  "binancecoin",
-    "SOL":  "solana",
-    "DOGE": "dogecoin",
-    "TON":  "the-open-network",  # CoinGecko id
-    "SUI":  "sui",
-    "UNI":  "uniswap",
-    "USDT": "tether",
-    "USDC": "usd-coin",
+# Symbols and their Binance pairs for USD-equivalent pricing
+BINANCE_SYMBOLS = {
+    "BTC":  "BTCUSDT",
+    "ETH":  "ETHUSDT",
+    "BNB":  "BNBUSDT",
+    "SOL":  "SOLUSDT",
+    "DOGE": "DOGEUSDT",
+    "TON":  "TONUSDT",
+    "SUI":  "SUIUSDT",
+    "UNI":  "UNIUSDT",
+    "USDT": None,         # treat as $1
+    "USDC": "USDCUSDT",
 }
 
 # Alts used for BTC vs Alts dominance (exclude stables)
@@ -83,53 +85,32 @@ DISPLAY_ORDER = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TON", "USDTC", "SUI", "UNI
 
 
 # ------------------------------------------------------------------
-# Utility
+# Helpers
 # ------------------------------------------------------------------
 
-def cg_get(path, params=None, timeout=60):
-    """Simple GET for live markets; fail fast on error."""
+def bn_spot_get(path, params=None, timeout=30, sleep=0.1, max_retries=5):
     if params is None:
         params = {}
-    url = COINGECKO + path
-    r = requests.get(url, params=params, timeout=timeout)
-    if r.status_code != 200:
-        raise RuntimeError(f"CoinGecko error {r.status_code}: {r.text[:200]}")
-    return r.json()
-
-
-def cg_get_history(path, params=None, timeout=60, max_retries=4, base_pause=2.0):
-    """
-    GET for historical endpoints (market_chart) with retries + exponential backoff.
-    Retries on network errors, 429, and 5xx.
-    """
-    if params is None:
-        params = {}
-    url = COINGECKO + path
-    last_err = None
-
+    url = BINANCE_SPOT + path
+    last_err = ""
     for attempt in range(1, max_retries + 1):
         try:
             r = requests.get(url, params=params, timeout=timeout)
-        except Exception as e:
-            last_err = e
+        except requests.RequestException as e:
+            last_err = str(e)
         else:
             if r.status_code == 200:
+                time.sleep(sleep)
                 return r.json()
-            if r.status_code in (429, 500, 502, 503, 504):
-                last_err = RuntimeError(
-                    f"status {r.status_code}: {r.text[:200]}"
-                )
+            if r.status_code in (429, 418, 500, 502, 503, 504):
+                last_err = r.text[:300]
             else:
-                # hard failure (4xx other than 429)
-                raise RuntimeError(
-                    f"CoinGecko history error {r.status_code}: {r.text[:200]}"
-                )
-        # backoff
-        sleep_s = base_pause * attempt
-        print(f"[history] retrying in {sleep_s:.1f}s for {path} with params {params}")
-        time.sleep(sleep_s)
-
-    raise RuntimeError(f"CoinGecko history failed after retries: {last_err}")
+                raise RuntimeError(f"Binance error {r.status_code}: {r.text[:300]}")
+        if attempt < max_retries:
+            delay = sleep * attempt
+            print(f"[Binance] retry {attempt}/{max_retries} in {delay:.2f}s…")
+            time.sleep(delay)
+    raise RuntimeError(f"Binance error after retries: {last_err}")
 
 
 def load_hmi():
@@ -143,17 +124,40 @@ def load_hmi():
     return None, ""
 
 
+def load_supplies():
+    """
+    Load circulating supplies from supplies_latest.json.
+    Returns (supplies_dict, supplies_ok, missing_list).
+    supplies_dict: sym -> circulating_supply (float)
+    """
+    for p in SUPPLIES_FILES:
+        if p.exists():
+            try:
+                js = json.loads(p.read_text())
+                sup = js.get("supplies", {})
+                out = {}
+                for sym, entry in sup.items():
+                    try:
+                        out[sym] = float(entry.get("circulating_supply"))
+                    except Exception:
+                        continue
+                missing = js.get("missing", [])
+                return out, True, missing
+            except Exception as e:
+                print("[supplies] Error parsing", p, ":", e)
+
+    # no file
+    return {}, False, []
+
+
 def fmt_mc(v):
     if v <= 0:
         return "$0"
     if v >= 1e12:
-        # trillions: one decimal, e.g. $1.2T
         return f"${v/1e12:.1f}T"
     if v >= 1e9:
-        # billions: integer, e.g. $600B
         return f"${int(round(v/1e9))}B"
     if v >= 1e6:
-        # millions: integer, e.g. $25M
         return f"${int(round(v/1e6))}M"
     return f"${int(v):,}"
 
@@ -171,25 +175,21 @@ def weights_from_dom(dom_pct, dom_min, dom_max, hmi):
 
     span = dom_max - dom_min
     if span <= 0:
-        # no meaningful range; safest is stables
         return 0.0, 0.0, 1.0
 
     t = (dom_pct - dom_min) / span
     t = max(0.0, min(1.0, t))
 
-    # lower 35%: BTC-heavy -> mix
     if t < 0.35:
-        local = t / 0.35  # 0..1
+        local = t / 0.35
         w_btc = 1.0 - local
         w_alt = local
         return w_btc, w_alt, 0.0
 
-    # middle 30%: stable midzone
     if t < 0.65:
         return 0.0, 0.0, 1.0
 
-    # upper 35%: fade BTC to ALTs
-    local = (t - 0.65) / 0.35  # 0..1
+    local = (t - 0.65) / 0.35
     w_btc = 1.0 - local
     w_alt = local
     return w_btc, w_alt, 0.0
@@ -200,64 +200,44 @@ def tg_send(text):
         print("[tg] Missing TG token or chat ID, skipping Telegram.")
         return
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    r = requests.post(url, json={
-        "chat_id": TG_CHAT,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }, timeout=30)
-    if r.status_code != 200:
-        print("[tg] Error:", r.text[:200])
+    try:
+        r = requests.post(
+            url,
+            json={
+                "chat_id": TG_CHAT,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            },
+            timeout=30,
+        )
+        if r.status_code != 200:
+            print("[tg] Error:", r.text[:200])
+    except Exception as e:
+        print("[tg] Exception:", e)
 
 
-def fetch_mc_history(coin_id: str):
+def fetch_price_history(symbol: str, days_limit=730):
     """
-    Try to fetch historical market caps for `coin_id` using several horizons
-    (730d, 365d, 180d, max). Return (history_dict, days_available):
+    Fetch up to `days_limit` daily closing prices for a Binance spot symbol,
+    using /api/v3/klines with interval=1d and limit=days_limit.
 
-    - history_dict: {date -> market_cap}
-    - days_available: number of distinct dates
+    Returns {date -> close_price}.
     """
-    last_err = None
-    for horizon in FALLBACK_HORIZONS:
-        try:
-            if horizon == "max":
-                params = {"vs_currency": "usd", "days": "max"}
-            else:
-                params = {"vs_currency": "usd", "days": str(horizon)}
-
-            js = cg_get_history(
-                f"/coins/{coin_id}/market_chart",
-                params=params,
-                timeout=80,
-                max_retries=4,
-                base_pause=2.0,
-            )
-        except Exception as e:
-            last_err = e
-            continue
-
-        out = {}
-        for ts, cap in js.get("market_caps", []):
-            d = datetime.utcfromtimestamp(ts / 1000.0).date()
-            out[d] = float(cap)
-
-        if out:
-            print(f"[history] {coin_id}: {len(out)} days (requested {horizon})")
-            return out, len(out)
-
-    if last_err:
-        print(f"[history] {coin_id} failed: {last_err}")
-    else:
-        print(f"[history] {coin_id}: no data returned")
-    return {}, 0
+    data = bn_spot_get(
+        "/api/v3/klines",
+        params={"symbol": symbol, "interval": "1d", "limit": days_limit},
+    )
+    out = {}
+    for k in data:
+        open_time_ms = k[0]
+        close_price = float(k[4])
+        d = datetime.utcfromtimestamp(open_time_ms / 1000.0).date()
+        out[d] = close_price
+    return out
 
 
 def load_previous_prices_ranges():
-    """
-    Load previous per-token Range strings from prices_latest.json (if any)
-    so that we can reuse them when a fresh run can't compute new ranges.
-    """
     for p in [PRICES_JSON_ROOT, PRICES_JSON_DOCS]:
         if p.exists():
             try:
@@ -270,10 +250,6 @@ def load_previous_prices_ranges():
 
 
 def load_previous_dom_range():
-    """
-    Load previous aggregate BTC vs Alts range from dom_bands_latest.json (if any).
-    Returns (min_pct, max_pct, days).
-    """
     for p in [DOM_JSON_ROOT, DOM_JSON_DOCS]:
         if p.exists():
             try:
@@ -285,107 +261,141 @@ def load_previous_dom_range():
 
 
 # ------------------------------------------------------------------
-# Main logic
+# Main
 # ------------------------------------------------------------------
 
 def main():
     health = {
         "hmi_ok": False,
-        "cg_ok": True,
+        "binance_ok": True,
+        "supplies_ok": False,
         "bands_ok": False,
         "prices_ok": False,
     }
 
-    # 1) Load HMI
+    # 1) HMI
     hmi, hmi_band = load_hmi()
     if hmi is not None:
         health["hmi_ok"] = True
 
-    # 2) Load previous ranges for caching
+    # 2) Supplies
+    supplies, supplies_ok, missing_sup = load_supplies()
+    health["supplies_ok"] = supplies_ok
+
+    # 3) Previous ranges for caching
     prev_ranges = load_previous_prices_ranges()
     prev_min_pct, prev_max_pct, prev_days_all = load_previous_dom_range()
 
-    # 3) Live prices & MCs (single call)
+    # 4) Live prices & tickers from Binance
     try:
-        ids_str = ",".join(TOKENS.values())
-        js = cg_get(
-            "/coins/markets",
-            params={
-                "vs_currency": "usd",
-                "ids": ids_str,
-                "order": "market_cap_desc",
-                "per_page": 250,
-                "page": 1,
-                "sparkline": "false",
-                "price_change_percentage": "24h",
-            },
-        )
-        by_id = {row["id"]: row for row in js}
+        ticker_list = bn_spot_get("/api/v3/ticker/24hr")
+        by_symbol = {row["symbol"]: row for row in ticker_list}
     except Exception as e:
-        print("[dom] CoinGecko markets error:", e)
-        health["cg_ok"] = False
-        by_id = {}
+        print("[dom] Binance ticker error:", e)
+        health["binance_ok"] = False
+        by_symbol = {}
 
-    def price(sym):
-        r = by_id.get(TOKENS[sym])
-        return float(r["current_price"]) if r else 0.0
-
-    def mc(sym):
-        r = by_id.get(TOKENS[sym])
-        return float(r["market_cap"]) if r and r.get("market_cap") else 0.0
-
-    def change_24h(sym):
-        r = by_id.get(TOKENS[sym])
-        if not r:
+    def live_price(sym):
+        if sym in ("USDT", "USDTC"):
+            return 1.0
+        bsym = BINANCE_SYMBOLS.get(sym)
+        if not bsym:
             return 0.0
-        v = r.get("price_change_percentage_24h")
-        return float(v) if v is not None else 0.0
+        row = by_symbol.get(bsym)
+        if not row:
+            return 0.0
+        try:
+            return float(row["lastPrice"])
+        except Exception:
+            return 0.0
 
-    btc_mc_now = mc("BTC")
-    alt_mc_now_total = sum(mc(sym) for sym in ALTS_FOR_DOM)
+    def live_change_24h(sym):
+        if sym in ("USDT", "USDTC"):
+            return 0.0
+        bsym = BINANCE_SYMBOLS.get(sym)
+        if not bsym:
+            return 0.0
+        row = by_symbol.get(bsym)
+        if not row:
+            return 0.0
+        try:
+            return float(row.get("priceChangePercent", 0.0))
+        except Exception:
+            return 0.0
 
-    # 4) Historical dominance ranges for BTC vs each alt & aggregate
+    def supply(sym):
+        return float(supplies.get(sym, 0.0))
 
-    # Fetch BTC history once
-    btc_hist, btc_hist_days = fetch_mc_history(TOKENS["BTC"])
+    def mc_live(sym):
+        if sym == "USDTC":
+            return supply("USDT") * 1.0 + supply("USDC") * 1.0
+        p = live_price(sym)
+        s = supply(sym)
+        return p * s
 
-    # Fetch alt histories once and store
+    # live MCs
+    btc_mc_now = mc_live("BTC")
+    alt_mc_now_map = {sym: mc_live(sym) for sym in ALTS_FOR_DOM}
+    alt_mc_now_total = sum(alt_mc_now_map.values())
+
+    # 5) Historical price series (close prices) for BTC + alts
+    btc_hist = {}
     alt_histories = {}
-    alt_hist_days = {}
-    for sym in ALTS_FOR_DOM:
-        hdict, dcount = fetch_mc_history(TOKENS[sym])
-        alt_histories[sym] = hdict
-        alt_hist_days[sym] = dcount
+    try:
+        bsym_btc = BINANCE_SYMBOLS["BTC"]
+        btc_hist = fetch_price_history(bsym_btc, days_limit=DAYS_HISTORY_TARGET)
+        for sym in ALTS_FOR_DOM:
+            bsym_alt = BINANCE_SYMBOLS.get(sym)
+            if not bsym_alt:
+                alt_histories[sym] = {}
+                continue
+            alt_histories[sym] = fetch_price_history(bsym_alt, days_limit=DAYS_HISTORY_TARGET)
+    except Exception as e:
+        print("[dom] Binance klines error:", e)
+        health["binance_ok"] = False
 
-    # Per-token dominance data: sym -> (dom_now, dom_min, dom_max, days_count)
+    # 6) Per-token dominance and weights
+
     per_token_dom = {}
     per_token_weights = {}
     per_token_days = {}
 
     for sym in ALTS_FOR_DOM:
-        alt_hist = alt_histories.get(sym, {})
+        s_btc = supply("BTC")
+        s_alt = supply(sym)
+        if s_btc <= 0 or s_alt <= 0:
+            per_token_dom[sym] = (None, 0.0, 0.0)
+            per_token_weights[sym] = (0.0, 0.0, 1.0)
+            per_token_days[sym] = 0
+            continue
+
         dom_series = []
-        for d, btc_cap in btc_hist.items():
-            alt_cap = alt_hist.get(d)
-            if alt_cap is None:
+        btc_prices = btc_hist or {}
+        alt_prices = alt_histories.get(sym, {}) or {}
+
+        for d, p_btc in btc_prices.items():
+            p_alt = alt_prices.get(d)
+            if p_alt is None:
                 continue
-            tot = btc_cap + alt_cap
+            mc_btc_d = p_btc * s_btc
+            mc_alt_d = p_alt * s_alt
+            tot = mc_btc_d + mc_alt_d
             if tot <= 0:
                 continue
-            dom_series.append(100.0 * btc_cap / tot)
+            dom_series.append(100.0 * mc_btc_d / tot)
 
         days_count = len(dom_series)
 
         # current dominance now
-        alt_mc_now = mc(sym)
-        tot_now = btc_mc_now + alt_mc_now
-        dom_now = 100.0 * btc_mc_now / tot_now if tot_now > 0 else None
+        mc_btc_now_sym = btc_mc_now
+        mc_alt_now_sym = alt_mc_now_map.get(sym, 0.0)
+        tot_now = mc_btc_now_sym + mc_alt_now_sym
+        dom_now = 100.0 * mc_btc_now_sym / tot_now if tot_now > 0 else None
 
         if days_count > 0:
             dom_min = min(dom_series)
             dom_max = max(dom_series)
         elif dom_now is not None:
-            # no overlapping history, but we at least know today's dominance
             dom_min = dom_max = dom_now
         else:
             dom_min = dom_max = 0.0
@@ -393,26 +403,36 @@ def main():
         if dom_now is not None and dom_max > dom_min:
             w_btc, w_alt, w_st = weights_from_dom(dom_now, dom_min, dom_max, hmi)
         else:
-            # no safe range, default to stables
             w_btc, w_alt, w_st = (0.0, 0.0, 1.0)
 
         per_token_dom[sym] = (dom_now, dom_min, dom_max)
         per_token_weights[sym] = (w_btc, w_alt, w_st)
         per_token_days[sym] = days_count
 
-    # Aggregate BTC vs ALL ALTS dominance range
+    # 7) Aggregate BTC vs ALL ALTS dominance range
+
+    s_btc = supply("BTC")
+    alt_supplies = {sym: supply(sym) for sym in ALTS_FOR_DOM}
     alt_hist_total = {}
+
     for sym in ALTS_FOR_DOM:
-        for d, cap in alt_histories.get(sym, {}).items():
-            alt_hist_total[d] = alt_hist_total.get(d, 0.0) + cap
+        s_alt = alt_supplies.get(sym, 0.0)
+        if s_alt <= 0:
+            continue
+        for d, p_alt in (alt_histories.get(sym, {}) or {}).items():
+            alt_hist_total.setdefault(d, 0.0)
+            alt_hist_total[d] += p_alt * s_alt
 
     dom_all_series = []
-    for d, btc_cap in btc_hist.items():
-        alt_cap = alt_hist_total.get(d, 0.0)
-        tot = btc_cap + alt_cap
+    btc_prices = btc_hist or {}
+
+    for d, p_btc in btc_prices.items():
+        mc_btc_d = p_btc * s_btc
+        mc_alt_d = alt_hist_total.get(d, 0.0)
+        tot = mc_btc_d + mc_alt_d
         if tot <= 0:
             continue
-        dom_all_series.append(100.0 * btc_cap / tot)
+        dom_all_series.append(100.0 * mc_btc_d / tot)
 
     days_all = len(dom_all_series)
 
@@ -427,16 +447,13 @@ def main():
         dom_all_min = min(dom_all_series)
         dom_all_max = max(dom_all_series)
     else:
-        # no aggregate history this run; reuse previous if possible
         if prev_min_pct is not None and prev_max_pct is not None:
             dom_all_min = float(prev_min_pct)
             dom_all_max = float(prev_max_pct)
             days_all = prev_days_all or 0
         else:
-            # absolute last resort: treat today's dominance as degenerate range
             dom_all_min = dom_all_max = btc_dom_all_now
 
-    # For aggregate action, reuse weights_from_dom on BTC vs All Alts
     if dom_all_max > dom_all_min:
         w_btc_all, w_alt_all, w_st_all = weights_from_dom(
             btc_dom_all_now, dom_all_min, dom_all_max, hmi
@@ -451,50 +468,52 @@ def main():
     else:
         agg_action = "Buy Alts"
 
-    # 5) Build prices_latest.json rows (for website)
+    # 8) Build prices_latest.json rows for website
+
     rows = []
 
-    usdt_mc = mc("USDT")
-    usdc_mc = mc("USDC")
-    usdctc_mc = usdt_mc + usdc_mc
+    mc_usdt = mc_live("USDT")
+    mc_usdc = mc_live("USDC")
+    mc_usdtc = mc_usdt + mc_usdc
 
-    health["prices_ok"] = bool(by_id)
+    health["prices_ok"] = bool(by_symbol)
 
     for sym in DISPLAY_ORDER:
         if sym == "USDTC":
             price_val = 1.0
-            mc_val = usdctc_mc
+            mc_val = mc_usdtc
             change_val = 0.0
             dom_now = None
             rng_str = ""
         elif sym == "BTC":
-            price_val = price(sym)
-            mc_val = mc(sym)
-            change_val = change_24h(sym)
+            price_val = live_price(sym)
+            mc_val = btc_mc_now
+            change_val = live_change_24h(sym)
             dom_now = None
             rng_str = ""
         else:
-            price_val = price(sym)
-            mc_val = mc(sym)
-            change_val = change_24h(sym)
+            price_val = live_price(sym)
+            mc_val = mc_live(sym)
+            change_val = live_change_24h(sym)
 
             dom_info = per_token_dom.get(sym)
             days_count = per_token_days.get(sym, 0)
 
             if dom_info:
                 dom_now, dom_min, dom_max = dom_info
-                mn_i = round(dom_min)
-                mx_i = round(dom_max)
-                base = f"{mn_i}–{mx_i}%"
-
-                if days_count > 0:
-                    # show range and days if we have any history
-                    if days_count < DAYS_HISTORY_TARGET:
-                        rng_str = f"{base} ({days_count}d)"
+                if dom_now is not None:
+                    mn_i = round(dom_min)
+                    mx_i = round(dom_max)
+                    base = f"{mn_i}–{mx_i}%"
+                    if days_count > 0:
+                        if days_count < DAYS_HISTORY_TARGET:
+                            rng_str = f"{base} ({days_count}d)"
+                        else:
+                            rng_str = base
                     else:
-                        rng_str = base
+                        prev = prev_ranges.get(sym)
+                        rng_str = prev if prev else "N/A (0d)"
                 else:
-                    # no new history this run; try to reuse previous range
                     prev = prev_ranges.get(sym)
                     rng_str = prev if prev else "N/A (0d)"
             else:
@@ -512,15 +531,15 @@ def main():
         })
 
     prices_payload = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "health": health,
-        "rows": rows,
+      "timestamp": datetime.utcnow().isoformat() + "Z",
+      "health": health,
+      "rows": rows,
     }
     text_prices = json.dumps(prices_payload, indent=2)
     PRICES_JSON_ROOT.write_text(text_prices)
     PRICES_JSON_DOCS.write_text(text_prices)
 
-    # 6) Build dom_bands_latest.json (aggregate BTC vs Alts)
+    # 9) Build dom_bands_latest.json
 
     agg_mn_i = round(dom_all_min)
     agg_mx_i = round(dom_all_max)
@@ -541,7 +560,7 @@ def main():
     DOM_JSON_DOCS.write_text(text_dom)
     health["bands_ok"] = True
 
-    # 7) Combine mini-portfolios into global allocation
+    # 10) Combine mini-portfolios into global allocation
 
     global_weights = {"BTC": 0.0, "STABLES": 0.0}
     for sym in ALTS_FOR_DOM:
@@ -570,7 +589,7 @@ def main():
             continue
         portfolio_rows.append({
             "asset": k,
-            "weight": round(global_weights[k], 4)
+            "weight": round(global_weights[k], 4),
         })
 
     pw_payload = {
@@ -583,7 +602,7 @@ def main():
     PW_JSON_ROOT.write_text(text_pw)
     PW_JSON_DOCS.write_text(text_pw)
 
-    # 8) Telegram message
+    # 11) Telegram message
 
     def pct_str(x):
         return f"{x*100:.1f}%"
@@ -591,7 +610,11 @@ def main():
     lines = []
     lines.append("<b>HiveAI Rotation Update</b>")
     lines.append("")
-    lines.append(f"HMI: <b>{hmi:.1f}</b> ({hmi_band})" if hmi is not None else "HMI: unavailable")
+    if hmi is not None:
+        lines.append(f"HMI: <b>{hmi:.1f}</b> ({hmi_band})")
+    else:
+        lines.append("HMI: unavailable")
+
     if days_all > 0:
         lines.append(
             f"BTC vs Alts: <b>{dom_payload['btc_pct']:.1f}%</b> "
@@ -612,7 +635,8 @@ def main():
     lines.append("")
     lines.append("<b>Service health</b>:")
     lines.append(f"HMI: {'yes' if health['hmi_ok'] else 'no'}")
-    lines.append(f"CoinGecko: {'yes' if health['cg_ok'] else 'no'}")
+    lines.append(f"Binance: {'yes' if health['binance_ok'] else 'no'}")
+    lines.append(f"Supplies file: {'yes' if health['supplies_ok'] else 'no'}")
     lines.append(f"Bands: {'yes' if health['bands_ok'] else 'no'}")
     lines.append(f"Prices: {'yes' if health['prices_ok'] else 'no'}")
 
