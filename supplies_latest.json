@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-11-18T22:33:04.667723Z",
+  "timestamp": "2025-11-18T22:52:58.442265Z",
   "source": "coingecko",
   "supplies": {
     "BTC": {
@@ -12,11 +12,11 @@
     },
     "BNB": {
       "id": "binancecoin",
-      "circulating_supply": 137736849.78
+      "circulating_supply": 137736848.75
     },
     "SOL": {
       "id": "solana",
-      "circulating_supply": 554270894.5010749
+      "circulating_supply": 554270883.1822184
     },
     "DOGE": {
       "id": "dogecoin",
@@ -24,7 +24,7 @@
     },
     "TON": {
       "id": "the-open-network",
-      "circulating_supply": 2489335089.939259
+      "circulating_supply": 2489337245.578913
     },
     "SUI": {
       "id": "sui",
