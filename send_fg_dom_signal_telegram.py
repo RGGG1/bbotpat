@@ -38,6 +38,7 @@ import requests
 
 COINGECKO = "https://api.coingecko.com/api/v3"
 DAYS_HISTORY_TARGET = 730  # approx 2 years
+FALLBACK_HORIZONS = [DAYS_HISTORY_TARGET, 365, 180]
 
 ROOT = Path(".")
 DOCS = ROOT / "docs"
@@ -169,26 +170,40 @@ def tg_send(text):
         print("[tg] Error:", r.text[:200])
 
 
-def fetch_mc_history(coin_id: str, days: int):
+def fetch_mc_history(coin_id: str):
     """
-    Fetch up to `days` of historical market caps for `coin_id`
-    and return a dict: date -> market_cap.
-    """
-    out = {}
-    try:
-        js = cg_get(
-            f"/coins/{coin_id}/market_chart",
-            params={"vs_currency": "usd", "days": str(days)},
-            timeout=80,
-        )
-    except Exception as e:
-        print("[dom] history error for", coin_id, ":", e)
-        return out
+    Try to fetch historical market caps for `coin_id` using several horizons
+    (730d, 365d, 180d). Return (history_dict, days_available):
 
-    for ts, cap in js.get("market_caps", []):
-        d = datetime.utcfromtimestamp(ts / 1000.0).date()
-        out[d] = float(cap)
-    return out
+    - history_dict: {date -> market_cap}
+    - days_available: number of distinct dates
+    """
+    last_err = None
+    for days in FALLBACK_HORIZONS:
+        try:
+            js = cg_get(
+                f"/coins/{coin_id}/market_chart",
+                params={"vs_currency": "usd", "days": str(days)},
+                timeout=80,
+            )
+        except Exception as e:
+            last_err = e
+            continue
+
+        out = {}
+        for ts, cap in js.get("market_caps", []):
+            d = datetime.utcfromtimestamp(ts / 1000.0).date()
+            out[d] = float(cap)
+
+        if out:
+            print(f"[history] {coin_id}: {len(out)} days (requested {days})")
+            return out, len(out)
+
+    if last_err:
+        print(f"[history] {coin_id} failed: {last_err}")
+    else:
+        print(f"[history] {coin_id}: no data returned")
+    return {}, 0
 
 
 # ------------------------------------------------------------------
@@ -250,11 +265,15 @@ def main():
     # 3) Historical dominance ranges for BTC vs each alt & aggregate
 
     # Fetch BTC history once
-    btc_hist = fetch_mc_history(TOKENS["BTC"], DAYS_HISTORY_TARGET)
+    btc_hist, btc_hist_days = fetch_mc_history(TOKENS["BTC"])
 
     # Fetch alt histories once and store
-    alt_histories = {sym: fetch_mc_history(TOKENS[sym], DAYS_HISTORY_TARGET)
-                     for sym in ALTS_FOR_DOM}
+    alt_histories = {}
+    alt_hist_days = {}
+    for sym in ALTS_FOR_DOM:
+        hdict, dcount = fetch_mc_history(TOKENS[sym])
+        alt_histories[sym] = hdict
+        alt_hist_days[sym] = dcount
 
     # Per-token dominance data: sym -> (dom_now, dom_min, dom_max, days_count)
     per_token_dom = {}
@@ -284,7 +303,7 @@ def main():
             dom_min = min(dom_series)
             dom_max = max(dom_series)
         elif dom_now is not None:
-            # no history, but we at least know today's dominance
+            # no overlapping history, but we at least know today's dominance
             dom_min = dom_max = dom_now
         else:
             dom_min = dom_max = 0.0
@@ -315,18 +334,19 @@ def main():
 
     days_all = len(dom_all_series)
 
-    if days_all > 0:
-        dom_all_min = min(dom_all_series)
-        dom_all_max = max(dom_all_series)
-    else:
-        dom_all_min = dom_all_max = 0.0
-
     if btc_mc_now + alt_mc_now_total > 0:
         btc_dom_all_now = 100.0 * btc_mc_now / (btc_mc_now + alt_mc_now_total)
         alt_dom_all_now = 100.0 - btc_dom_all_now
     else:
         btc_dom_all_now = 50.0
         alt_dom_all_now = 50.0
+
+    if days_all > 0:
+        dom_all_min = min(dom_all_series)
+        dom_all_max = max(dom_all_series)
+    else:
+        # no aggregate history; fall back to today's dominance as a point estimate
+        dom_all_min = dom_all_max = btc_dom_all_now
 
     # For aggregate action, reuse weights_from_dom on BTC vs All Alts
     if dom_all_max > dom_all_min:
@@ -369,22 +389,28 @@ def main():
             price_val = price(sym)
             mc_val = mc(sym)
             change_val = change_24h(sym)
+
             dom_info = per_token_dom.get(sym)
             days_count = per_token_days.get(sym, 0)
+
             if dom_info:
                 dom_now, dom_min, dom_max = dom_info
                 mn_i = round(dom_min)
                 mx_i = round(dom_max)
                 base = f"{mn_i}–{mx_i}%"
-                if days_count and days_count < DAYS_HISTORY_TARGET:
-                    rng_str = f"{base} ({days_count}d)"
-                elif days_count:
-                    rng_str = base
+
+                if days_count > 0:
+                    # show range and days if we have any history
+                    if days_count < DAYS_HISTORY_TARGET:
+                        rng_str = f"{base} ({days_count}d)"
+                    else:
+                        rng_str = base
                 else:
-                    rng_str = ""
+                    # no history at all, but we *do* have Dom_now
+                    rng_str = "N/A (0d)"
             else:
                 dom_now = None
-                rng_str = ""
+                rng_str = "N/A (0d)"
 
         rows.append({
             "token": sym,
@@ -406,8 +432,8 @@ def main():
 
     # 5) Build dom_bands_latest.json (aggregate BTC vs Alts)
 
-    agg_mn_i = round(dom_all_min) if days_all > 0 else 0
-    agg_mx_i = round(dom_all_max) if days_all > 0 else 0
+    agg_mn_i = round(dom_all_min)
+    agg_mx_i = round(dom_all_max)
 
     dom_payload = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -483,7 +509,8 @@ def main():
         )
     else:
         lines.append(
-            f"BTC vs Alts: <b>{dom_payload['btc_pct']:.1f}%</b> (range unavailable)"
+            f"BTC vs Alts: <b>{dom_payload['btc_pct']:.1f}%</b> "
+            f"(range {agg_mn_i}–{agg_mx_i}%, 0d)"
         )
     lines.append(f"Action: <b>{agg_action}</b>")
     lines.append("")
@@ -506,4 +533,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
+    
