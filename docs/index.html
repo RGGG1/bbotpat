@@ -32,7 +32,7 @@
       display: flex;
       justify-content: center;
       align-items: flex-start;
-      padding: 24px 12px 40px;
+      padding: 24px 16px;
     }
 
     .app-shell {
@@ -62,12 +62,23 @@
       transition: color 0.28s ease;
     }
 
+    .logo-hive {
+      transition: color 0.28s ease;
+    }
+
+    .logo-ai {
+      color: var(--text-main);
+      opacity: 0.9;
+    }
+
     .logo-accent-red {
       color: var(--accent-red);
     }
+
     .logo-accent-green {
       color: var(--accent-green);
     }
+
     .logo-accent-neutral {
       color: var(--accent-neutral);
     }
@@ -106,8 +117,9 @@
 
     .card {
       background: var(--bg-elevated);
-      border-radius: 10px;
+      border-radius: 8px;
       border: 1px solid var(--border-subtle);
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
       padding: 10px 12px 12px;
     }
 
@@ -150,18 +162,6 @@
       font-weight: 600;
     }
 
-    .hmi-status {
-      font-size: 12px; /* same as title text scale */
-      color: var(--accent-neutral);
-      text-transform: capitalize;
-    }
-
-    .hmi-meta {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
-
     /* Dominance */
     .dom-main-line {
       font-size: 20px;
@@ -170,7 +170,7 @@
     }
 
     .dom-main-line .dom-value {
-      font-size: 28px;
+      font-size: 36px;
       font-weight: 600;
       margin-right: 6px;
     }
@@ -210,16 +210,11 @@
       margin-top: 4px;
     }
 
-    .prices-last-updated {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-bottom: 4px;
-    }
-
     .prices-table {
       width: 100%;
       border-collapse: collapse;
       font-size: 12px;
+      margin-top: 6px;
     }
 
     .prices-table thead {
@@ -247,6 +242,14 @@
     .prices-table th.center,
     .prices-table td.center {
       text-align: center;
+    }
+
+    .prices-table tbody tr {
+      border-bottom: 1px solid #11111a;
+    }
+
+    .prices-table tbody tr:last-child {
+      border-bottom: none;
     }
 
     .prices-table tbody tr:nth-child(even) {
@@ -292,10 +295,10 @@
         padding: 5px 3px;
       }
       .hmi-value {
-        font-size: 30px;
+        font-size: 32px;
       }
       .dom-main-line .dom-value {
-        font-size: 24px;
+        font-size: 32px;
       }
     }
   </style>
@@ -305,10 +308,12 @@
     <header>
       <div class="title-stack">
         <span id="logo-slash" class="logo-slash logo-accent-neutral">/</span>
-        <span>HiveAI</span>
+        <span class="logo-wordmark">
+          <span id="logo-hive" class="logo-hive logo-accent-neutral">Hive</span><span class="logo-ai">AI</span>
+        </span>
       </div>
       <div class="meta-topline">
-        <div id="meta-date">--/--/--</div>
+        <div id="meta-date">--/--/-- --:--</div>
       </div>
     </header>
 
@@ -318,14 +323,9 @@
         <section class="card">
           <div class="card-header">
             <div class="card-title">Hive Mind Index</div>
-            <div class="chip" id="hmi-chip">HMI</div>
           </div>
           <div class="hmi-value-row">
             <div class="hmi-value" id="hmi-value">--.-</div>
-            <div class="hmi-status" id="hmi-status">unavailable</div>
-          </div>
-          <div class="hmi-meta" id="hmi-meta">
-            Last update: --/--/-- --:--
           </div>
         </section>
 
@@ -356,9 +356,6 @@
         <div class="card-header">
           <div class="card-title">Tokens</div>
         </div>
-        <div class="prices-last-updated" id="prices-last-updated">
-          Last update: --/--/-- --:--
-        </div>
         <table class="prices-table">
           <thead>
             <tr>
@@ -374,30 +371,27 @@
             <!-- rows injected by JS -->
           </tbody>
         </table>
-      </section>
 
-      <div class="footer-note">
-        <div class="footer-note-title">Refresh rates</div>
-        <div>
-          HMI: every 60s.<br />
-          Dominance: every 6h.<br />
-          Prices: on page load.
+        <div class="footer-note">
+          <div class="footer-note-title">HiveAI Oracle Notes</div>
+          <div>
+            <ul style="margin-top:6px;line-height:1.35;list-style:disc;padding-left:18px;">
+              <li>Hive Mind Index (HMI) is our custom fear and greed index, factored for predictive signaling.</li>
+              <li>HMI and Dom values updated every 12 hours, at 07:15 and 19:15 CEST.</li>
+              <li>'Dom' represents BTC dominance against token.</li>
+              <li>'Range' represents up to 2-year BTC Dom range against token.</li>
+              <li>USDTC = USDT and USDC combined.</li>
+              <li>Additional token listing available on request.</li>
+            </ul>
+          </div>
         </div>
-      </div>
+      </section>
     </main>
   </div>
 
   <script>
     const HMI_NEUTRAL_LOW = 40;
     const HMI_NEUTRAL_HIGH = 60;
-
-    function formatDate(ts) {
-      const d = ts ? new Date(ts) : new Date();
-      const dd = String(d.getDate()).padStart(2, "0");
-      const mm = String(d.getMonth() + 1).padStart(2, "0");
-      const yy = String(d.getFullYear()).slice(-2);
-      return `${dd}/${mm}/${yy}`;
-    }
 
     function formatDateTime(ts) {
       if (!ts) return "--/--/-- --:--";
@@ -426,14 +420,28 @@
 
     function updateLogoColor(hmi) {
       const slashEl = document.getElementById("logo-slash");
+      const hiveEl = document.getElementById("logo-hive");
+
+      if (!slashEl || !hiveEl) return;
+
       slashEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
+      hiveEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
+
+      if (typeof hmi !== "number" || Number.isNaN(hmi)) {
+        slashEl.classList.add("logo-accent-neutral");
+        hiveEl.classList.add("logo-accent-neutral");
+        return;
+      }
 
       if (hmi < HMI_NEUTRAL_LOW) {
         slashEl.classList.add("logo-accent-red");
+        hiveEl.classList.add("logo-accent-red");
       } else if (hmi > HMI_NEUTRAL_HIGH) {
         slashEl.classList.add("logo-accent-green");
+        hiveEl.classList.add("logo-accent-green");
       } else {
         slashEl.classList.add("logo-accent-neutral");
+        hiveEl.classList.add("logo-accent-neutral");
       }
     }
 
@@ -452,61 +460,57 @@
         if (!resp.ok) throw new Error("HMI fetch failed");
         const data = await resp.json();
 
-        const hmi = typeof data.hmi === "number" ? data.hmi : parseFloat(data.hmi);
-        if (Number.isNaN(hmi)) throw new Error("Invalid HMI in JSON");
+        const hmiRaw = (typeof data.hmi === "number") ? data.hmi : parseFloat(data.hmi);
+        const hmi = Number.isNaN(hmiRaw) ? null : hmiRaw;
 
-        const band = data.band || hmiBandLabel(hmi);
+        if (hmi === null) {
+          throw new Error("Invalid HMI in JSON");
+        }
 
         document.getElementById("hmi-value").textContent = hmi.toFixed(1);
-        document.getElementById("hmi-status").textContent = band;
-        document.getElementById("hmi-chip").textContent = `HMI • ${band}`;
-        document.getElementById("hmi-meta").textContent =
-          "Last update: " + formatDateTime(data.timestamp || data.date);
-
-        document.getElementById("meta-date").textContent = formatDate();
         updateLogoColor(hmi);
       } catch (err) {
         console.error("HMI error:", err);
-        document.getElementById("hmi-value").textContent = "--.-";
-        document.getElementById("hmi-status").textContent = "unavailable";
-        document.getElementById("hmi-chip").textContent = "HMI • error";
+        const hmiEl = document.getElementById("hmi-value");
+        if (hmiEl) hmiEl.textContent = "--.-";
+        updateLogoColor(NaN);
       }
     }
 
     async function fetchDominance() {
       try {
         const resp = await fetch("dom_bands_latest.json", { cache: "no-store" });
-        if (!resp.ok) throw new Error("dom bands fetch failed");
+        if (!resp.ok) throw new Error("Dominance fetch failed");
         const data = await resp.json();
 
-        const btcPct = typeof data.btc_pct === "number" ? data.btc_pct : parseFloat(data.btc_pct);
-        const altPct = typeof data.alt_pct === "number" ? data.alt_pct : 100 - btcPct;
+        const btcPct = typeof data.btc_pct === "number"
+          ? data.btc_pct
+          : parseFloat(data.btc_pct || "0");
+        const minPct = typeof data.min_pct === "number"
+          ? data.min_pct
+          : parseFloat(data.min_pct || "0");
+        const maxPct = typeof data.max_pct === "number"
+          ? data.max_pct
+          : parseFloat(data.max_pct || "0");
+
+        const btcFmt = Number.isNaN(btcPct) ? "--" : btcPct.toFixed(1);
 
         const domMainEl = document.getElementById("dom-main-line");
-        domMainEl.innerHTML = `
-          <span class="dom-value">${Math.round(btcPct)}</span>
-          <span class="dom-label">BTC vs Alts</span>
-        `;
+        domMainEl.innerHTML =
+          `<span class="dom-value">${btcFmt}</span><span class="dom-label">BTC vs Alts</span>`;
 
-        const capsText = `${data.btc_mc_fmt || "–"} vs ${data.alt_mc_fmt || "–"}`;
-        document.getElementById("dom-sub-line").innerHTML =
-          `Market caps: <span>${capsText}</span>`;
+        const mcLine = `Market caps: <span>${data.btc_mc_fmt || "–"} vs ${data.alt_mc_fmt || "–"}</span>`;
+        document.getElementById("dom-sub-line").innerHTML = mcLine;
 
-        const minPct = data.min_pct;
-        const maxPct = data.max_pct;
-        const days = data.days;
-        let rangeStr = "--";
-        if (typeof minPct === "number" && typeof maxPct === "number") {
-          rangeStr = `${Math.round(minPct)}–${Math.round(maxPct)}%`;
-          if (days && days > 0 && days < 730) {
-            rangeStr += ` (${days}d)`;
-          }
+        let rangeTxt = "–";
+        if (!Number.isNaN(minPct) && !Number.isNaN(maxPct) && maxPct >= minPct) {
+          rangeTxt = `${Math.round(minPct)}–${Math.round(maxPct)}%`;
         }
         document.getElementById("dom-range-line").innerHTML =
-          `2-yr range: <span>${rangeStr}</span>`;
+          `2-yr range: <span>${rangeTxt}</span>`;
 
-        document.getElementById("dom-action").textContent =
-          `Action: ${data.action || "–"}`;
+        const action = data.action || "–";
+        document.getElementById("dom-action").textContent = `Action: ${action}`;
       } catch (err) {
         console.error("Dominance error:", err);
         document.getElementById("dom-main-line").innerHTML =
@@ -525,9 +529,9 @@
         if (!resp.ok) throw new Error("prices fetch failed");
         const data = await resp.json();
 
-        const tsEl = document.getElementById("prices-last-updated");
-        if (tsEl) {
-          tsEl.textContent = "Last update: " + formatDateTime(data.timestamp);
+        const metaEl = document.getElementById("meta-date");
+        if (metaEl && data && data.timestamp) {
+          metaEl.textContent = formatDateTime(data.timestamp);
         }
 
         const tbody = document.getElementById("prices-tbody");
@@ -546,7 +550,15 @@
           const tdPrice = document.createElement("td");
           tdPrice.className = "center";
           const priceVal = typeof row.price === "number" ? row.price : parseFloat(row.price || "0");
-          tdPrice.textContent = priceVal > 0 ? `$${priceVal.toLocaleString(undefined, { maximumFractionDigits: 4 })}` : "–";
+          if (!Number.isNaN(priceVal) && priceVal > 0) {
+            if (priceVal >= 1000) {
+              tdPrice.textContent = "$" + Math.round(priceVal).toLocaleString();
+            } else {
+              tdPrice.textContent = "$" + priceVal.toFixed(2);
+            }
+          } else {
+            tdPrice.textContent = "–";
+          }
           tr.appendChild(tdPrice);
 
           const tdMC = document.createElement("td");
@@ -556,51 +568,56 @@
 
           const tdChange = document.createElement("td");
           tdChange.className = "center";
-          const ch = typeof row.change_24h === "number" ? row.change_24h : parseFloat(row.change_24h || "0");
-          const chText = `${ch > 0 ? "+" : ""}${ch.toFixed(1)}%`;
-          if (ch > 0.05) {
-            tdChange.classList.add("price-positive");
-          } else if (ch < -0.05) {
-            tdChange.classList.add("price-negative");
-          } else {
+          const ch = typeof row.change_24h === "number"
+            ? row.change_24h
+            : parseFloat(row.change_24h || "0");
+          if (Number.isNaN(ch)) {
+            tdChange.textContent = "–";
             tdChange.classList.add("price-neutral");
+          } else {
+            const sign = ch > 0 ? "+" : "";
+            tdChange.textContent = `${sign}${ch.toFixed(1)}%`;
+            if (ch > 0) {
+              tdChange.classList.add("price-positive");
+            } else if (ch < 0) {
+              tdChange.classList.add("price-negative");
+            } else {
+              tdChange.classList.add("price-neutral");
+            }
           }
-          tdChange.textContent = chText;
           tr.appendChild(tdChange);
 
           const tdDom = document.createElement("td");
           tdDom.className = "center";
-          if (row.btc_dom != null) {
-            tdDom.textContent = `${row.btc_dom.toFixed(1)}%`;
+          const dom = typeof row.btc_dom === "number" ? row.btc_dom : null;
+          if (dom === null || Number.isNaN(dom)) {
+            tdDom.textContent = "–";
           } else {
-            tdDom.textContent = "—";
+            tdDom.textContent = dom.toFixed(1) + "%";
           }
           tr.appendChild(tdDom);
 
           const tdRange = document.createElement("td");
           tdRange.className = "center";
-          tdRange.textContent = row.range || "—";
+          tdRange.textContent = row.range || "–";
           tr.appendChild(tdRange);
 
           tbody.appendChild(tr);
         });
       } catch (err) {
         console.error("Prices error:", err);
-        const tsEl = document.getElementById("prices-last-updated");
-        if (tsEl) {
-          tsEl.textContent = "Last update: unavailable";
-        }
+        const tbody = document.getElementById("prices-tbody");
+        tbody.innerHTML = "";
       }
     }
 
     (function init() {
-      document.getElementById("meta-date").textContent = formatDate();
       fetchHMI();
       fetchDominance();
       fetchPrices();
 
-      setInterval(fetchHMI, 60 * 1000);          // 60s
-      setInterval(fetchDominance, 6 * 60 * 60 * 1000); // 6h
+      setInterval(fetchHMI, 60 * 1000);               // 60s polling of HMI JSON
+      setInterval(fetchDominance, 6 * 60 * 60 * 1000); // 6h polling of Dom JSON
       // Prices only refresh on page load as requested
     })();
   </script>
