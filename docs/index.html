@@ -162,6 +162,13 @@
       font-weight: 600;
     }
 
+    .hmi-status {
+      font-size: 12px;       /* same size as "Hive Mind Index" title */
+      font-weight: 500;
+      color: var(--accent-neutral); /* white */
+      text-transform: lowercase;
+    }
+
     /* Dominance */
     .dom-main-line {
       font-size: 20px;
@@ -313,7 +320,7 @@
         </span>
       </div>
       <div class="meta-topline">
-        <div id="meta-date">--/--/-- --:--</div>
+        Updated: <span id="meta-date">--/--/-- --:--</span>
       </div>
     </header>
 
@@ -326,6 +333,7 @@
           </div>
           <div class="hmi-value-row">
             <div class="hmi-value" id="hmi-value">--.-</div>
+            <div class="hmi-status" id="hmi-status">–</div>
           </div>
         </section>
 
@@ -377,9 +385,9 @@
           <div>
             <ul style="margin-top:6px;line-height:1.35;list-style:disc;padding-left:18px;">
               <li>Hive Mind Index (HMI) is our custom fear and greed index, factored for predictive signaling.</li>
-              <li>HMI and Dom values updated every 12 hours, at 07:15 and 19:15 CEST.</li>
-              <li>'Dom' represents BTC dominance against token.</li>
-              <li>'Range' represents up to 2-year BTC Dom range against token.</li>
+              <li>HMI and Dom values update daily at 07:15 and 19:15 CEST.</li>
+              <li>Dom column represents BTC dominance against token.</li>
+              <li>Range column represents up to 2-year BTC Dom range against token.</li>
               <li>USDTC = USDT and USDC combined.</li>
               <li>Additional token listing available on request.</li>
             </ul>
@@ -467,12 +475,18 @@
           throw new Error("Invalid HMI in JSON");
         }
 
-        document.getElementById("hmi-value").textContent = hmi.toFixed(1);
+        const hmiEl = document.getElementById("hmi-value");
+        const statusEl = document.getElementById("hmi-status");
+        if (hmiEl) hmiEl.textContent = hmi.toFixed(1);
+        if (statusEl) statusEl.textContent = hmiBandLabel(hmi);
+
         updateLogoColor(hmi);
       } catch (err) {
         console.error("HMI error:", err);
         const hmiEl = document.getElementById("hmi-value");
+        const statusEl = document.getElementById("hmi-status");
         if (hmiEl) hmiEl.textContent = "--.-";
+        if (statusEl) statusEl.textContent = "unavailable";
         updateLogoColor(NaN);
       }
     }
