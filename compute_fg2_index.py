@@ -234,11 +234,14 @@ def write_history(df: pd.DataFrame):
 
 
 def write_hmi_json(fg_df: pd.DataFrame):
-    # Require at least 365 days of non-NaN FG_lite
+    # Relaxed minimum: need at least 200 valid FG_lite rows
+    MIN_VALID_ROWS = 200
+
     valid = fg_df.dropna(subset=["FG_lite"]).copy()
-    if valid.empty or len(valid) < 365:
+    if valid.empty or len(valid) < MIN_VALID_ROWS:
         raise RuntimeError(
-            f"Not enough valid FG_lite history ({len(valid)} rows) to compute HMI (need >=365)."
+            f"Not enough valid FG_lite history ({len(valid)} rows) to compute HMI "
+            f"(need >={MIN_VALID_ROWS})."
         )
 
     last_row = valid.iloc[-1]
@@ -275,7 +278,7 @@ def main():
     OUT_CSV.parent.mkdir(exist_ok=True)
     fg_df.to_csv(OUT_CSV, index=False)
     print(f"Saved HMI data to {OUT_CSV}")
-    print(fg_df[["date", "FG_lite", "FG_vol", "FG_oi", "FG_spotperp"]].tail())
+    print(fg_df[['date', 'FG_lite', 'FG_vol', 'FG_oi', 'FG_spotperp']].tail())
 
     write_hmi_json(fg_df)
 
