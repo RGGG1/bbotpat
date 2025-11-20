@@ -1,0 +1,139 @@
+[Thu Nov 20 21:12:53 UTC 2025] --- run_dom.sh START ---
+[Thu Nov 20 21:12:53 UTC 2025] Running git pull…
+Already up to date.
+[Thu Nov 20 21:12:53 UTC 2025] Running send_fg_dom_signal_telegram.py…
+  File "/root/bbotpat/send_fg_dom_signal_telegram.py", line 616
+    w_btc_all, w_alt_all, w_st_all = weights_from_dom(
+                                                     ^
+SyntaxError: '(' was never closed
+[Thu Nov 20 21:55:12 UTC 2025] --- run_dom.sh START ---
+[Thu Nov 20 21:55:12 UTC 2025] Running git pull…
+From https://github.com/RGGG1/bbotpat
+   d182858..3b527d3  main       -> origin/main
+Updating d182858..3b527d3
+Fast-forward
+ send_fg_dom_signal_telegram.py | 196 +++++++++++++++++++++++++++++++++++------
+ 1 file changed, 171 insertions(+), 25 deletions(-)
+[Thu Nov 20 21:55:12 UTC 2025] Running send_fg_dom_signal_telegram.py…
+/root/bbotpat/send_fg_dom_signal_telegram.py:258: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  d = datetime.utcfromtimestamp(open_time_ms / 1000.0).date().isoformat()
+/root/bbotpat/send_fg_dom_signal_telegram.py:587: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:601: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:649: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+[dom] Building snapshot (attempt 1/3)...
+[dom] Updated dom_bands_latest.json, prices_latest.json, portfolio_weights.json
+[Thu Nov 20 21:55:17 UTC 2025] dom_bands_latest.json present
+[Thu Nov 20 21:55:17 UTC 2025] prices_latest.json present
+[Thu Nov 20 21:55:17 UTC 2025] portfolio_weights.json present
+[Thu Nov 20 21:55:17 UTC 2025] Staging DOM/prices/portfolio artefacts…
+[Thu Nov 20 21:55:17 UTC 2025] Committing DOM changes if any…
+[main 91d4d87] Update dominance/prices/portfolio (auto)
+ 6 files changed, 90 insertions(+), 90 deletions(-)
+[Thu Nov 20 21:55:17 UTC 2025] Pushing to origin…
+To https://github.com/RGGG1/bbotpat.git
+   3b527d3..91d4d87  main -> main
+[Thu Nov 20 21:55:18 UTC 2025] --- run_dom.sh END ---
+[Thu Nov 20 22:02:21 UTC 2025] --- run_dom.sh START ---
+[Thu Nov 20 22:02:21 UTC 2025] Running git pull…
+Already up to date.
+[Thu Nov 20 22:02:21 UTC 2025] Running send_fg_dom_signal_telegram.py…
+/root/bbotpat/send_fg_dom_signal_telegram.py:258: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  d = datetime.utcfromtimestamp(open_time_ms / 1000.0).date().isoformat()
+/root/bbotpat/send_fg_dom_signal_telegram.py:587: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:601: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:649: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+[dom] Building snapshot (attempt 1/3)...
+[dom] Updated dom_bands_latest.json, prices_latest.json, portfolio_weights.json
+[Thu Nov 20 22:02:25 UTC 2025] dom_bands_latest.json present
+[Thu Nov 20 22:02:25 UTC 2025] prices_latest.json present
+[Thu Nov 20 22:02:25 UTC 2025] portfolio_weights.json present
+[Thu Nov 20 22:02:25 UTC 2025] Staging DOM/prices/portfolio artefacts…
+[Thu Nov 20 22:02:25 UTC 2025] Committing DOM changes if any…
+[main 197826c] Update dominance/prices/portfolio (auto)
+ 6 files changed, 74 insertions(+), 74 deletions(-)
+[Thu Nov 20 22:02:25 UTC 2025] Pushing to origin…
+To https://github.com/RGGG1/bbotpat.git
+   91d4d87..197826c  main -> main
+[Thu Nov 20 22:02:26 UTC 2025] --- run_dom.sh END ---
+[Thu Nov 20 22:13:21 UTC 2025] --- run_dom.sh START ---
+[Thu Nov 20 22:13:21 UTC 2025] Running git pull…
+Already up to date.
+[Thu Nov 20 22:13:21 UTC 2025] Running send_fg_dom_signal_telegram.py…
+/root/bbotpat/send_fg_dom_signal_telegram.py:263: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  d = datetime.utcfromtimestamp(open_time_ms / 1000.0).date()
+/root/bbotpat/send_fg_dom_signal_telegram.py:570: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:584: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:633: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+[dom] Attempt 1/3 building snapshot…
+[tg] Error: {"ok":false,"error_code":400,"description":"Bad Request: can't parse entities: Unsupported start tag \"730\" at byte offset 184"}
+[dom] Updated dom_bands_latest.json, prices_latest.json, portfolio_weights.json
+[Thu Nov 20 22:13:26 UTC 2025] dom_bands_latest.json present
+[Thu Nov 20 22:13:26 UTC 2025] prices_latest.json present
+[Thu Nov 20 22:13:26 UTC 2025] portfolio_weights.json present
+[Thu Nov 20 22:13:26 UTC 2025] Staging DOM/prices/portfolio artefacts…
+[Thu Nov 20 22:13:26 UTC 2025] Committing DOM changes if any…
+[main f9625db] Update dominance/prices/portfolio (auto)
+ 6 files changed, 74 insertions(+), 74 deletions(-)
+[Thu Nov 20 22:13:26 UTC 2025] Pushing to origin…
+To https://github.com/RGGG1/bbotpat.git
+   914b159..f9625db  main -> main
+[Thu Nov 20 22:13:27 UTC 2025] --- run_dom.sh END ---
+[Thu Nov 20 22:28:50 UTC 2025] --- run_dom.sh START ---
+[Thu Nov 20 22:28:50 UTC 2025] Running git pull…
+Already up to date.
+[Thu Nov 20 22:28:50 UTC 2025] Running send_fg_dom_signal_telegram.py…
+/root/bbotpat/send_fg_dom_signal_telegram.py:263: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  d = datetime.utcfromtimestamp(open_time_ms / 1000.0).date()
+/root/bbotpat/send_fg_dom_signal_telegram.py:570: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:584: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:633: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+[dom] Attempt 1/3 building snapshot…
+[tg] Error: {"ok":false,"error_code":400,"description":"Bad Request: can't parse entities: Unsupported start tag \"730\" at byte offset 184"}
+[dom] Updated dom_bands_latest.json, prices_latest.json, portfolio_weights.json
+[Thu Nov 20 22:28:55 UTC 2025] dom_bands_latest.json present
+[Thu Nov 20 22:28:55 UTC 2025] prices_latest.json present
+[Thu Nov 20 22:28:55 UTC 2025] portfolio_weights.json present
+[Thu Nov 20 22:28:55 UTC 2025] Staging DOM/prices/portfolio artefacts…
+[Thu Nov 20 22:28:55 UTC 2025] Committing DOM changes if any…
+[main 01c96ff] Update dominance/prices/portfolio (auto)
+ 6 files changed, 74 insertions(+), 74 deletions(-)
+[Thu Nov 20 22:28:55 UTC 2025] Pushing to origin…
+To https://github.com/RGGG1/bbotpat.git
+   70cc63c..01c96ff  main -> main
+[Thu Nov 20 22:28:55 UTC 2025] --- run_dom.sh END ---
+[Thu Nov 20 22:53:06 UTC 2025] --- run_dom.sh START ---
+[Thu Nov 20 22:53:06 UTC 2025] Running git pull…
+Already up to date.
+[Thu Nov 20 22:53:06 UTC 2025] Running send_fg_dom_signal_telegram.py…
+/root/bbotpat/send_fg_dom_signal_telegram.py:242: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  d = datetime.utcfromtimestamp(open_time_ms / 1000.0).date()
+/root/bbotpat/send_fg_dom_signal_telegram.py:538: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:565: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+/root/bbotpat/send_fg_dom_signal_telegram.py:613: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+[dom] Updated dom_bands_latest.json, prices_latest.json, portfolio_weights.json
+[Thu Nov 20 22:53:10 UTC 2025] dom_bands_latest.json present
+[Thu Nov 20 22:53:10 UTC 2025] prices_latest.json present
+[Thu Nov 20 22:53:10 UTC 2025] portfolio_weights.json present
+[Thu Nov 20 22:53:10 UTC 2025] Staging DOM/prices/portfolio artefacts…
+[Thu Nov 20 22:53:10 UTC 2025] Committing DOM changes if any…
+[main 0323861] Update dominance/prices/portfolio (auto)
+ 6 files changed, 72 insertions(+), 72 deletions(-)
+[Thu Nov 20 22:53:10 UTC 2025] Pushing to origin…
+To https://github.com/RGGG1/bbotpat.git
+   56e572b..0323861  main -> main
+[Thu Nov 20 22:53:11 UTC 2025] --- run_dom.sh END ---
