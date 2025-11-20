@@ -138,7 +138,7 @@
       text-transform: lowercase;
     }
 
-    /* Dominance (Oracle) */
+    /* Dominance Oracle */
     .oracle-card {
       margin-top: 2px;
       position: relative;
@@ -152,22 +152,15 @@
       margin-bottom: 8px;
     }
 
-    .oracle-header-left {
-      flex: 0 0 auto;
-    }
-
     .oracle-header-right {
       display: flex;
       align-items: center;
       gap: 10px;
-      flex-wrap: nowrap;
-      justify-content: flex-end;
-      flex: 1 1 auto;
+      flex-wrap: wrap;
     }
 
     .oracle-pill-wrapper {
       position: relative;
-      flex: 0 0 auto;
     }
 
     .oracle-pill {
@@ -180,7 +173,7 @@
       border: 1px solid #33334a;
       background: #080814;
       cursor: pointer;
-      min-width: 96px;
+      min-width: 110px;
       font-size: 11px;
       color: var(--text-main);
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
@@ -202,7 +195,6 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--text-muted);
-      flex: 0 0 auto;
     }
 
     .oracle-dropdown {
@@ -396,6 +388,7 @@
     }
 
     .footer-note {
+      margin-top: 14px;
       font-size: 11px;
       color: var(--text-muted);
       line-height: 1.5;
@@ -422,18 +415,9 @@
       .oracle-main-line .dom-value {
         font-size: 32px;
       }
-      .oracle-header-row {
-        align-items: flex-start;
-      }
-      .oracle-header-right {
-        justify-content: flex-end;
-      }
-      .oracle-pill {
-        min-width: 88px;
-      }
       .oracle-dropdown {
         left: 0;
-        right: auto;
+        right: 0;
       }
     }
   </style>
@@ -464,12 +448,10 @@
         </div>
       </section>
 
-      <!-- DOMINANCE (Oracle UI) -->
+      <!-- DOMINANCE ORACLE -->
       <section class="card oracle-card">
         <div class="oracle-header-row">
-          <div class="oracle-header-left">
-            <div class="card-title">Dominance</div>
-          </div>
+          <div class="card-title">Dominance Oracle</div>
           <div class="oracle-header-right">
             <div class="oracle-pill-wrapper">
               <div class="oracle-pill" id="oracle-x-pill">
@@ -505,7 +487,7 @@
         <div class="oracle-error" id="oracle-error"></div>
       </section>
 
-      <!-- TOKENS CARD -->
+      <!-- PRICES / TOKENS CARD -->
       <section class="card prices-card">
         <div class="card-header">
           <div class="card-title">Tokens</div>
@@ -524,18 +506,15 @@
           <tbody id="prices-tbody">
           </tbody>
         </table>
-      </section>
 
-      <!-- HIVEAI ORACLE NOTES CARD (separate) -->
-      <section class="card">
         <div class="footer-note">
           <div class="footer-note-title">HiveAI Oracle Notes</div>
           <div>
             <ul style="margin-top:6px;line-height:1.35;list-style:disc;padding-left:18px;">
               <li>Hive Mind Index (HMI) is our custom fear and greed index, factored for predictive signaling.</li>
-              <li>HMI and Dom values update daily at 07:15 and 19:15 CEST.</li>
-              <li>Dom represents BTC dominance against token.</li>
-              <li>Range represents up to 2-year BTC Dom range against token.</li>
+              <li>HMI and Dom values updated every 12 hours, at 07:15 and 19:15 CEST.</li>
+              <li>'Dom' represents BTC dominance against token.</li>
+              <li>'Range' represents up to 2-year BTC Dom range against token.</li>
               <li>USDTC = USDT and USDC combined.</li>
               <li>Additional token listing available on request.</li>
             </ul>
@@ -545,17 +524,596 @@
     </main>
   </div>
 
-  <!-- existing JS from your current file should stay here -->
   <script>
-    /*  NOTE:
-        I have left this script section unchanged from your current working
-        version so that HMI, dominance logic, Oracle maths etc keep behaving
-        as they do now.
+    const HMI_NEUTRAL_LOW = 40;
+    const HMI_NEUTRAL_HIGH = 60;
 
-        When you paste this file, copy your existing <script>…</script>
-        block from the current site and drop it here, or keep what you
-        already have if you’re editing in-place.
-    */
+    const ORACLE_TOKENS = [
+      "BTC",
+      "ETH",
+      "BNB",
+      "SOL",
+      "DOGE",
+      "TON",
+      "SUI",
+      "UNI"
+    ];
+
+    const BINANCE_SYMBOLS = {
+      BTC: "BTCUSDT",
+      ETH: "ETHUSDT",
+      BNB: "BNBUSDT",
+      SOL: "SOLUSDT",
+      DOGE: "DOGEUSDT",
+      TON: "TONUSDT",
+      SUI: "SUIUSDT",
+      UNI: "UNIUSDT"
+    };
+
+    let pricesRowsGlobal = [];
+    let suppliesGlobal = null;
+    let oracleHistories = {};
+
+    let oracleSelectedX = ["BTC"];   // default
+    let oracleSelectedY = ["ALTS"];  // default: all alts (not BTC)
+
+    function formatDateTime(ts) {
+      if (!ts) return "--/--/-- --:--";
+      const d = new Date(ts);
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yy = String(d.getFullYear()).slice(-2);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mi = String(d.getMinutes()).padStart(2, "0");
+      return `${dd}/${mm}/${yy} ${hh}:${mi}`;
+    }
+
+    function formatMC(v) {
+      if (!v || v <= 0) return "$0";
+      if (v >= 1e12) {
+        return `$${(v / 1e12).toFixed(1)}T`;
+      }
+      if (v >= 1e9) {
+        return `$${Math.round(v / 1e9)}B`;
+      }
+      if (v >= 1e6) {
+        return `$${Math.round(v / 1e6)}M`;
+      }
+      return `$${Math.round(v).toLocaleString()}`;
+    }
+
+    function updateLogoColor(hmi) {
+      const slashEl = document.getElementById("logo-slash");
+      const hiveEl = document.getElementById("logo-hive");
+
+      if (!slashEl || !hiveEl) return;
+
+      slashEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
+      hiveEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
+
+      if (typeof hmi !== "number" || Number.isNaN(hmi)) {
+        slashEl.classList.add("logo-accent-neutral");
+        hiveEl.classList.add("logo-accent-neutral");
+        return;
+      }
+
+      if (hmi < HMI_NEUTRAL_LOW) {
+        slashEl.classList.add("logo-accent-red");
+        hiveEl.classList.add("logo-accent-red");
+      } else if (hmi > HMI_NEUTRAL_HIGH) {
+        slashEl.classList.add("logo-accent-green");
+        hiveEl.classList.add("logo-accent-green");
+      } else {
+        slashEl.classList.add("logo-accent-neutral");
+        hiveEl.classList.add("logo-accent-neutral");
+      }
+    }
+
+    function hmiBandLabel(hmi) {
+      if (hmi < 10) return "zombie apocalypse";
+      if (hmi < 25) return "McDonald's applications";
+      if (hmi < 40) return "ngmi";
+      if (hmi < 60) return "stable";
+      if (hmi < 80) return "we're early";
+      return "it's the future of finance";
+    }
+
+    async function fetchHMI() {
+      try {
+        const resp = await fetch("hmi_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("HMI fetch failed");
+        const data = await resp.json();
+
+        const hmiRaw = (typeof data.hmi === "number") ? data.hmi : parseFloat(data.hmi);
+        const hmi = Number.isNaN(hmiRaw) ? null : hmiRaw;
+
+        if (hmi === null) {
+          throw new Error("Invalid HMI in JSON");
+        }
+
+        const hmiEl = document.getElementById("hmi-value");
+        const statusEl = document.getElementById("hmi-status");
+        if (hmiEl) hmiEl.textContent = hmi.toFixed(1);
+        if (statusEl) statusEl.textContent = hmiBandLabel(hmi);
+
+        updateLogoColor(hmi);
+      } catch (err) {
+        console.error("HMI error:", err);
+        const hmiEl = document.getElementById("hmi-value");
+        const statusEl = document.getElementById("hmi-status");
+        if (hmiEl) hmiEl.textContent = "--.-";
+        if (statusEl) statusEl.textContent = "unavailable";
+        updateLogoColor(NaN);
+      }
+    }
+
+    async function fetchPrices() {
+      try {
+        const resp = await fetch("prices_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("prices fetch failed");
+        const data = await resp.json();
+
+        const metaEl = document.getElementById("meta-date");
+        if (metaEl && data && data.timestamp) {
+          metaEl.textContent = formatDateTime(data.timestamp);
+        }
+
+        const tbody = document.getElementById("prices-tbody");
+        tbody.innerHTML = "";
+
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        pricesRowsGlobal = rows;
+
+        rows.forEach(row => {
+          const tr = document.createElement("tr");
+
+          const tdToken = document.createElement("td");
+          tdToken.className = "token-col";
+          tdToken.textContent = row.token || "";
+          tr.appendChild(tdToken);
+
+          const tdPrice = document.createElement("td");
+          tdPrice.className = "center";
+          const priceVal = typeof row.price === "number" ? row.price : parseFloat(row.price || "0");
+          if (!Number.isNaN(priceVal) && priceVal > 0) {
+            if (priceVal >= 1000) {
+              tdPrice.textContent = "$" + Math.round(priceVal).toLocaleString();
+            } else {
+              tdPrice.textContent = "$" + priceVal.toFixed(2);
+            }
+          } else {
+            tdPrice.textContent = "–";
+          }
+          tr.appendChild(tdPrice);
+
+          const tdMC = document.createElement("td");
+          tdMC.className = "center";
+          tdMC.textContent = formatMC(row.mc || 0);
+          tr.appendChild(tdMC);
+
+          const tdChange = document.createElement("td");
+          tdChange.className = "center";
+          const ch = typeof row.change_24h === "number"
+            ? row.change_24h
+            : parseFloat(row.change_24h || "0");
+          if (Number.isNaN(ch)) {
+            tdChange.textContent = "–";
+            tdChange.classList.add("price-neutral");
+          } else {
+            const sign = ch > 0 ? "+" : "";
+            tdChange.textContent = `${sign}${ch.toFixed(1)}%`;
+            if (ch > 0) {
+              tdChange.classList.add("price-positive");
+            } else if (ch < 0) {
+              tdChange.classList.add("price-negative");
+            } else {
+              tdChange.classList.add("price-neutral");
+            }
+          }
+          tr.appendChild(tdChange);
+
+          const tdDom = document.createElement("td");
+          tdDom.className = "center";
+          const dom = typeof row.btc_dom === "number" ? row.btc_dom : null;
+          if (dom === null || Number.isNaN(dom)) {
+            tdDom.textContent = "–";
+          } else {
+            tdDom.textContent = dom.toFixed(1) + "%";
+          }
+          tr.appendChild(tdDom);
+
+          const tdRange = document.createElement("td");
+          tdRange.className = "center";
+          tdRange.textContent = row.range || "–";
+          tr.appendChild(tdRange);
+
+          tbody.appendChild(tr);
+        });
+
+        buildOracleMenus();
+        updateOracle();
+      } catch (err) {
+        console.error("Prices error:", err);
+        const tbody = document.getElementById("prices-tbody");
+        tbody.innerHTML = "";
+      }
+    }
+
+    // -------- Oracle helpers --------
+
+    function formatTokenLabel(token) {
+      if (token === "ALTS") return "Alts";
+      const lower = token.toLowerCase();
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    }
+
+    function formatTokenSetLabel(tokens) {
+      if (tokens.length === 0) return "Select";
+      if (tokens.includes("ALTS")) return "Alts";
+      if (tokens.length === 1) return formatTokenLabel(tokens[0]);
+      return tokens.map(formatTokenLabel).join("");
+    }
+
+    function getLiveMC(token) {
+      const row = pricesRowsGlobal.find(r => r.token === token);
+      if (!row) return 0;
+      const v = row.mc;
+      if (typeof v === "number") return v;
+      const f = parseFloat(v || "0");
+      return Number.isNaN(f) ? 0 : f;
+    }
+
+    function getSupply(token) {
+      if (!suppliesGlobal) return 0;
+      const entry = suppliesGlobal[token];
+      if (!entry) return 0;
+      const val = entry.circulating_supply;
+      if (typeof val === "number") return val;
+      const f = parseFloat(val || "0");
+      return Number.isNaN(f) ? 0 : f;
+    }
+
+    async function fetchSuppliesIfNeeded() {
+      if (suppliesGlobal !== null) return;
+      try {
+        const resp = await fetch("supplies_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("supplies fetch failed");
+        const data = await resp.json();
+        suppliesGlobal = data.supplies || {};
+      } catch (err) {
+        console.error("Supplies error:", err);
+        suppliesGlobal = {};
+      }
+    }
+
+    async function ensurePriceHistory(token) {
+      if (oracleHistories[token]) return;
+      const symbol = BINANCE_SYMBOLS[token];
+      if (!symbol) {
+        oracleHistories[token] = {};
+        return;
+      }
+      const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=730`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Binance klines error for ${token}`);
+      const data = await resp.json();
+      const hist = {};
+      for (const k of data) {
+        const openTimeMs = k[0];
+        const closePrice = parseFloat(k[4]);
+        const d = new Date(openTimeMs).toISOString().slice(0, 10);
+        hist[d] = closePrice;
+      }
+      oracleHistories[token] = hist;
+    }
+
+    function closeAllDropdowns() {
+      document.getElementById("oracle-x-menu").classList.remove("open");
+      document.getElementById("oracle-y-menu").classList.remove("open");
+    }
+
+    function buildOracleMenus() {
+      const xMenu = document.getElementById("oracle-x-menu");
+      const yMenu = document.getElementById("oracle-y-menu");
+      const xLabel = document.getElementById("oracle-x-label");
+      const yLabel = document.getElementById("oracle-y-label");
+      const xPill = document.getElementById("oracle-x-pill");
+      const yPill = document.getElementById("oracle-y-pill");
+
+      if (!xMenu || !yMenu || !xLabel || !yLabel || !xPill || !yPill) return;
+
+      // sort tokens by MC desc
+      const tokensWithMc = ORACLE_TOKENS.map(t => ({ token: t, mc: getLiveMC(t) }));
+      tokensWithMc.sort((a, b) => (b.mc || 0) - (a.mc || 0));
+      const sortedTokens = tokensWithMc.map(x => x.token);
+
+      const othersForX = sortedTokens.filter(t => t !== "BTC");
+      const xOrder = ["BTC", ...othersForX];
+
+      const othersForY = sortedTokens.filter(t => t !== "BTC");
+      const yOrder = ["ALTS", "BTC", ...othersForY];
+
+      xMenu.innerHTML = "";
+      yMenu.innerHTML = "";
+
+      // X menu options
+      xOrder.forEach(tok => {
+        const div = document.createElement("div");
+        div.className = "oracle-option";
+        div.dataset.token = tok;
+
+        const box = document.createElement("div");
+        box.className = "oracle-option-box";
+
+        const tick = document.createElement("span");
+        tick.className = "oracle-option-tick";
+        tick.textContent = "✓";
+
+        const label = document.createElement("span");
+        label.className = "oracle-option-label";
+        label.textContent = formatTokenLabel(tok);
+
+        box.appendChild(tick);
+        div.appendChild(box);
+        div.appendChild(label);
+
+        if (oracleSelectedX.includes(tok)) {
+          div.classList.add("selected");
+        }
+
+        div.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (oracleSelectedX.includes(tok)) {
+            oracleSelectedX = oracleSelectedX.filter(t => t !== tok);
+          } else {
+            oracleSelectedX = [...oracleSelectedX, tok];
+          }
+          if (oracleSelectedX.length === 0) {
+            oracleSelectedX = [];
+          }
+          Array.from(xMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+            const t = opt.dataset.token;
+            opt.classList.toggle("selected", oracleSelectedX.includes(t));
+          });
+          xLabel.textContent = formatTokenSetLabel(oracleSelectedX);
+          updateOracle();
+        });
+
+        xMenu.appendChild(div);
+      });
+
+      // X Clear
+      const xClear = document.createElement("div");
+      xClear.className = "oracle-clear";
+      xClear.textContent = "Clear";
+      xClear.addEventListener("click", (e) => {
+        e.stopPropagation();
+        oracleSelectedX = [];
+        Array.from(xMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+          opt.classList.remove("selected");
+        });
+        xLabel.textContent = "Select";
+        updateOracle();
+      });
+      xMenu.appendChild(xClear);
+
+      // Y menu options
+      yOrder.forEach(tok => {
+        const div = document.createElement("div");
+        div.className = "oracle-option";
+        div.dataset.token = tok;
+
+        const box = document.createElement("div");
+        box.className = "oracle-option-box";
+
+        const tick = document.createElement("span");
+        tick.className = "oracle-option-tick";
+        tick.textContent = "✓";
+
+        const label = document.createElement("span");
+        label.className = "oracle-option-label";
+        label.textContent = formatTokenLabel(tok);
+
+        box.appendChild(tick);
+        div.appendChild(box);
+        div.appendChild(label);
+
+        if (oracleSelectedY.includes(tok)) {
+          div.classList.add("selected");
+        }
+
+        div.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (tok === "ALTS") {
+            oracleSelectedY = ["ALTS"];
+          } else {
+            oracleSelectedY = oracleSelectedY.filter(t => t !== "ALTS");
+            if (oracleSelectedY.includes(tok)) {
+              oracleSelectedY = oracleSelectedY.filter(t => t !== tok);
+            } else {
+              oracleSelectedY = [...oracleSelectedY, tok];
+            }
+            if (oracleSelectedY.length === 0) {
+              oracleSelectedY = [];
+            }
+          }
+          Array.from(yMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+            const t = opt.dataset.token;
+            opt.classList.toggle("selected", oracleSelectedY.includes(t));
+          });
+          yLabel.textContent = formatTokenSetLabel(oracleSelectedY);
+          updateOracle();
+        });
+
+        yMenu.appendChild(div);
+      });
+
+      // Y Clear
+      const yClear = document.createElement("div");
+      yClear.className = "oracle-clear";
+      yClear.textContent = "Clear";
+      yClear.addEventListener("click", (e) => {
+        e.stopPropagation();
+        oracleSelectedY = [];
+        Array.from(yMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+          opt.classList.remove("selected");
+        });
+        yLabel.textContent = "Select";
+        updateOracle();
+      });
+      yMenu.appendChild(yClear);
+
+      xLabel.textContent = formatTokenSetLabel(oracleSelectedX);
+      yLabel.textContent = formatTokenSetLabel(oracleSelectedY);
+
+      xPill.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = xMenu.classList.contains("open");
+        closeAllDropdowns();
+        if (!isOpen) xMenu.classList.add("open");
+      };
+      yPill.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = yMenu.classList.contains("open");
+        closeAllDropdowns();
+        if (!isOpen) yMenu.classList.add("open");
+      };
+
+      xMenu.addEventListener("click", (e) => e.stopPropagation());
+      yMenu.addEventListener("click", (e) => e.stopPropagation());
+
+      document.addEventListener("click", () => {
+        closeAllDropdowns();
+      });
+    }
+
+    async function updateOracle() {
+      const mainEl = document.getElementById("oracle-main-line");
+      const subEl = document.getElementById("oracle-sub-line");
+      const rangeEl = document.getElementById("oracle-range-line");
+      const errEl = document.getElementById("oracle-error");
+
+      if (!mainEl || !subEl || !rangeEl || !errEl) return;
+
+      errEl.textContent = "";
+
+      const setXTokens = oracleSelectedX.filter(t => t !== "ALTS");
+      let setYTokens;
+      if (oracleSelectedY.includes("ALTS")) {
+        setYTokens = ORACLE_TOKENS.filter(t => t !== "BTC");
+      } else {
+        setYTokens = oracleSelectedY.slice();
+      }
+
+      if (setXTokens.length === 0 || setYTokens.length === 0) {
+        mainEl.innerHTML = `<span class="dom-value">--</span><span class="dom-label">Select X and Y</span>`;
+        subEl.innerHTML = `Market caps: <span>–</span>`;
+        rangeEl.innerHTML = `Range: <span>–</span>`;
+        return;
+      }
+
+      const intersect = setXTokens.filter(t => setYTokens.includes(t));
+      if (intersect.length > 0) {
+        errEl.textContent = "X and Y must not share the same token.";
+        mainEl.innerHTML = `<span class="dom-value">--</span><span class="dom-label">Invalid selection</span>`;
+        subEl.innerHTML = `Market caps: <span>–</span>`;
+        rangeEl.innerHTML = `Range: <span>–</span>`;
+        return;
+      }
+
+      await fetchSuppliesIfNeeded();
+      if (!suppliesGlobal || Object.keys(suppliesGlobal).length === 0) {
+        errEl.textContent = "Supplies data unavailable.";
+        return;
+      }
+      if (!pricesRowsGlobal || pricesRowsGlobal.length === 0) {
+        errEl.textContent = "Token prices not loaded yet.";
+        return;
+      }
+
+      let mcX = 0, mcY = 0;
+      for (const t of setXTokens) mcX += getLiveMC(t);
+      for (const t of setYTokens) mcY += getLiveMC(t);
+      const totMC = mcX + mcY;
+      let domNow = null;
+      if (totMC > 0) domNow = 100 * mcX / totMC;
+
+      try {
+        const unionTokens = [...new Set([...setXTokens, ...setYTokens])];
+        for (const t of unionTokens) {
+          await ensurePriceHistory(t);
+        }
+
+        const dateSet = new Set();
+        unionTokens.forEach(t => {
+          const hist = oracleHistories[t] || {};
+          Object.keys(hist).forEach(d => dateSet.add(d));
+        });
+
+        const dates = Array.from(dateSet).sort();
+        const domSeries = [];
+
+        for (const d of dates) {
+          let mcX_d = 0;
+          let mcY_d = 0;
+
+          for (const t of setXTokens) {
+            const price = oracleHistories[t]?.[d];
+            if (!price) { mcX_d = 0; break; }
+            const s = getSupply(t);
+            if (!s) { mcX_d = 0; break; }
+            mcX_d += price * s;
+          }
+
+          for (const t of setYTokens) {
+            const price = oracleHistories[t]?.[d];
+            if (!price) { mcY_d = 0; break; }
+            const s = getSupply(t);
+            if (!s) { mcY_d = 0; break; }
+            mcY_d += price * s;
+          }
+
+          const total = mcX_d + mcY_d;
+          if (mcX_d > 0 && mcY_d > 0 && total > 0) {
+            domSeries.push(100 * mcX_d / total);
+          }
+        }
+
+        let rangeText = "–";
+        if (domSeries.length > 0) {
+          const mn = Math.min(...domSeries);
+          const mx = Math.max(...domSeries);
+          rangeText = `${Math.round(mn)}–${Math.round(mx)}%`;
+        } else {
+          rangeText = "N/A";
+        }
+
+        const labelX = formatTokenSetLabel(oracleSelectedX);
+        const labelY = formatTokenSetLabel(oracleSelectedY);
+        const domFmt = domNow === null ? "--" : domNow.toFixed(1);
+
+        mainEl.innerHTML =
+          `<span class="dom-value">${domFmt}</span>` +
+          `<span class="dom-label">${labelX} vs ${labelY}</span>`;
+        subEl.innerHTML =
+          `Market caps: <span>${formatMC(mcX)} vs ${formatMC(mcY)}</span>`;
+        rangeEl.innerHTML =
+          `Range: <span>${rangeText}</span>`;
+      } catch (err) {
+        console.error("Oracle dominance error:", err);
+        errEl.textContent = "Error computing dominance range.";
+        mainEl.innerHTML =
+          `<span class="dom-value">--</span><span class="dom-label">Error</span>`;
+        subEl.innerHTML = `Market caps: <span>–</span>`;
+        rangeEl.innerHTML = `Range: <span>–</span>`;
+      }
+    }
+
+    (function init() {
+      fetchHMI();
+      fetchPrices();
+      setInterval(fetchHMI, 60 * 1000);
+    })();
   </script>
 </body>
 </html>
