@@ -40,9 +40,9 @@ Important design choices:
 import json
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Any, Dict, List, Tuple
 
 import requests
 
@@ -77,7 +77,7 @@ SNAPSHOT_MAX_ATTEMPTS = 3
 SNAPSHOT_RETRY_DELAY = 10.0  # seconds
 
 # Symbols and their Binance pairs for USD-equivalent pricing
-BINANCE_SYMBOLS: Dict[str, Optional[str]] = {
+BINANCE_SYMBOLS: Dict[str, str] = {
     "BTC":  "BTCUSDT",
     "ETH":  "ETHUSDT",
     "BNB":  "BNBUSDT",
@@ -101,11 +101,13 @@ DISPLAY_ORDER = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TON", "USDTC", "SUI", "UNI
 # Helpers
 # ------------------------------------------------------------------
 
-def bn_spot_get(path: str,
-                params: Optional[Dict[str, Any]] = None,
-                timeout: int = 30,
-                sleep: float = 0.1,
-                max_retries: int = 5) -> Any:
+def bn_spot_get(
+    path: str,
+    params: Dict[str, Any] | None = None,
+    timeout: int = 30,
+    sleep: float = 0.1,
+    max_retries: int = 5,
+) -> Any:
     if params is None:
         params = {}
     url = BINANCE_SPOT + path
@@ -130,7 +132,7 @@ def bn_spot_get(path: str,
     raise RuntimeError(f"Binance error after retries: {last_err}")
 
 
-def load_hmi() -> Tuple[Optional[float], str]:
+def load_hmi() -> Tuple[float | None, str]:
     for p in HMI_FILES:
         if p.exists():
             try:
@@ -146,7 +148,7 @@ def load_supplies() -> Tuple[Dict[str, float], bool, List[str]]:
     Load circulating supplies from supplies_latest.json.
     Returns (supplies_dict, supplies_ok, missing_list).
     supplies_dict: sym -> circulating_supply (float)
-    supplies_ok: True if at least BTC & ETH found.
+    supplies_ok: True if we have at least BTC and all ALTS_FOR_DOM.
     """
     for p in SUPPLIES_FILES:
         if p.exists():
@@ -160,7 +162,9 @@ def load_supplies() -> Tuple[Dict[str, float], bool, List[str]]:
                     except Exception:
                         continue
                 missing = js.get("missing", [])
-                ok = "BTC" in out and "ETH" in out
+
+                required = ["BTC"] + ALTS_FOR_DOM
+                ok = all(sym in out for sym in required)
                 return out, ok, missing
             except Exception as e:
                 print("[supplies] Error parsing", p, ":", e)
@@ -181,10 +185,12 @@ def fmt_mc(v: float) -> str:
     return f"${int(v):,}"
 
 
-def weights_from_dom(dom_pct: float,
-                     dom_min: float,
-                     dom_max: float,
-                     hmi: Optional[float]) -> Tuple[float, float, float]:
+def weights_from_dom(
+    dom_pct: float,
+    dom_min: float,
+    dom_max: float,
+    hmi: float | None,
+) -> Tuple[float, float, float]:
     """
     Map dominance to (w_btc, w_alt, w_stables) with:
     - lower 35% of range: BTC -> ALTs linearly
@@ -239,48 +245,24 @@ def tg_send(text: str) -> None:
         print("[tg] Exception:", e)
 
 
-def fetch_price_history(symbol: str,
-                        days_limit: int = DAYS_HISTORY_TARGET) -> Dict[str, float]:
+def fetch_price_history(symbol: str, days_limit: int = DAYS_HISTORY_TARGET) -> Dict[datetime, float]:
     """
     Fetch up to `days_limit` daily closing prices for a Binance spot symbol,
     using /api/v3/klines with interval=1d and limit=days_limit.
 
-    Returns {iso_date_str -> close_price}.
+    Returns {date -> close_price}.
     """
     data = bn_spot_get(
         "/api/v3/klines",
         params={"symbol": symbol, "interval": "1d", "limit": days_limit},
     )
-    out: Dict[str, float] = {}
+    out: Dict[datetime, float] = {}
     for k in data:
         open_time_ms = k[0]
         close_price = float(k[4])
-        d = datetime.utcfromtimestamp(open_time_ms / 1000.0).date().isoformat()
+        d = datetime.utcfromtimestamp(open_time_ms / 1000.0).date()
         out[d] = close_price
     return out
-
-
-def load_previous_prices_ranges() -> Dict[str, str]:
-    for p in [PRICES_JSON_ROOT, PRICES_JSON_DOCS]:
-        if p.exists():
-            try:
-                js = json.loads(p.read_text())
-                rows = js.get("rows", [])
-                return {row.get("token"): row.get("range", "") for row in rows}
-            except Exception:
-                continue
-    return {}
-
-
-def load_previous_dom_range() -> Tuple[Optional[float], Optional[float], Optional[int]]:
-    for p in [DOM_JSON_ROOT, DOM_JSON_DOCS]:
-        if p.exists():
-            try:
-                js = json.loads(p.read_text())
-                return js.get("min_pct"), js.get("max_pct"), js.get("days")
-            except Exception:
-                continue
-    return None, None, None
 
 
 # ------------------------------------------------------------------
@@ -288,6 +270,16 @@ def load_previous_dom_range() -> Tuple[Optional[float], Optional[float], Optiona
 # ------------------------------------------------------------------
 
 def build_snapshot() -> Dict[str, Any]:
+    """
+    Build a full snapshot of:
+      - HMI
+      - per-token dominance history + ranges
+      - BTC vs ALL alts dominance history + range
+      - prices/MCs
+      - per-token mini-portfolios
+
+    If anything critical fails, this function raises and nothing is written.
+    """
     health: Dict[str, bool] = {
         "hmi_ok": False,
         "binance_ok": True,
@@ -305,13 +297,9 @@ def build_snapshot() -> Dict[str, Any]:
     supplies, supplies_ok, missing_sup = load_supplies()
     health["supplies_ok"] = supplies_ok
     if not supplies_ok:
-        raise RuntimeError("Supplies file missing core symbols (BTC/ETH).")
+        raise RuntimeError(f"Supplies file missing required symbols. missing={missing_sup}")
 
-    # 3) Previous ranges for caching (kept in case we want them later)
-    prev_ranges = load_previous_prices_ranges()
-    prev_min_pct, prev_max_pct, prev_days_all = load_previous_dom_range()
-
-    # 4) Live prices & tickers from Binance
+    # 3) Live prices & tickers from Binance
     try:
         ticker_list = bn_spot_get("/api/v3/ticker/24hr")
         by_symbol = {row["symbol"]: row for row in ticker_list}
@@ -362,9 +350,9 @@ def build_snapshot() -> Dict[str, Any]:
     alt_mc_now_map = {sym: mc_live(sym) for sym in ALTS_FOR_DOM}
     alt_mc_now_total = sum(alt_mc_now_map.values())
 
-    # 5) Historical price series (close prices) for BTC + alts
-    btc_hist: Dict[str, float] = {}
-    alt_histories: Dict[str, Dict[str, float]] = {}
+    # 4) Historical price series (close prices) for BTC + alts
+    btc_hist: Dict[datetime, float] = {}
+    alt_histories: Dict[str, Dict[datetime, float]] = {}
 
     try:
         bsym_btc = BINANCE_SYMBOLS["BTC"]
@@ -379,9 +367,9 @@ def build_snapshot() -> Dict[str, Any]:
         health["binance_ok"] = False
         raise RuntimeError(f"Binance klines error: {e}")
 
-    # 6) Per-token dominance and weights
+    # 5) Per-token dominance and weights
 
-    per_token_dom: Dict[str, Tuple[Optional[float], Optional[float], Optional[float]]] = {}
+    per_token_dom: Dict[str, Tuple[float | None, float | None, float | None]] = {}
     per_token_weights: Dict[str, Tuple[float, float, float]] = {}
     per_token_days: Dict[str, int] = {}
 
@@ -426,11 +414,11 @@ def build_snapshot() -> Dict[str, Any]:
         per_token_weights[sym] = (w_btc, w_alt, w_st)
         per_token_days[sym] = days_count
 
-    # 7) Aggregate BTC vs ALL ALTS dominance range (exclude stables)
+    # 6) Aggregate BTC vs ALL ALTS dominance range (exclude stables)
 
     s_btc = supply("BTC")
     alt_supplies = {sym: supply(sym) for sym in ALTS_FOR_DOM}
-    alt_hist_total: Dict[str, float] = {}
+    alt_hist_total: Dict[datetime, float] = {}
 
     for sym in ALTS_FOR_DOM:
         s_alt = alt_supplies.get(sym, 0.0)
@@ -464,12 +452,7 @@ def build_snapshot() -> Dict[str, Any]:
         dom_all_min = min(dom_all_series)
         dom_all_max = max(dom_all_series)
     else:
-        if prev_min_pct is not None and prev_max_pct is not None:
-            dom_all_min = float(prev_min_pct)
-            dom_all_max = float(prev_max_pct)
-            days_all = prev_days_all or 0
-        else:
-            dom_all_min = dom_all_max = btc_dom_all_now
+        dom_all_min = dom_all_max = btc_dom_all_now
 
     if dom_all_max > dom_all_min:
         w_btc_all, w_alt_all, w_st_all = weights_from_dom(
@@ -485,7 +468,7 @@ def build_snapshot() -> Dict[str, Any]:
     else:
         agg_action = "Buy Alts"
 
-    # 8) Build prices_latest.json rows for website
+    # 7) Build prices_latest.json rows for website
 
     rows: List[Dict[str, Any]] = []
 
@@ -525,7 +508,7 @@ def build_snapshot() -> Dict[str, Any]:
             mn_i = round(dom_min)
             mx_i = round(dom_max)
             dom_now_display = dom_now
-            rng_str = f"{mn_i}–{mx_i}%"  # NOTE: no days in website column
+            rng_str = f"{mn_i}–{mx_i}%"  # website column: no days
 
         rows.append({
             "token": sym,
@@ -548,10 +531,10 @@ def build_snapshot() -> Dict[str, Any]:
         "dom_all_min": dom_all_min,
         "dom_all_max": dom_all_max,
         "days_all": days_all,
-        "agg_action": agg_action,
         "per_token_dom": per_token_dom,
         "per_token_weights": per_token_weights,
         "per_token_days": per_token_days,
+        "agg_action": agg_action,
     }
     return snapshot
 
@@ -608,6 +591,7 @@ def write_outputs(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "alt_mc_fmt": fmt_mc(alt_mc_now_total),
         "action": agg_action,
     }
+
     text_dom = json.dumps(dom_payload, indent=2)
     DOM_JSON_ROOT.write_text(text_dom)
     DOM_JSON_DOCS.write_text(text_dom)
@@ -655,25 +639,21 @@ def write_outputs(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     PW_JSON_ROOT.write_text(text_pw)
     PW_JSON_DOCS.write_text(text_pw)
 
-    return {
-        "dom_payload": dom_payload,
-        "portfolio_rows": portfolio_rows,
-        "health": health,
-    }
+    return dom_payload
 
 
 # ------------------------------------------------------------------
-# Telegram message builder
+# Telegram message
 # ------------------------------------------------------------------
 
-def send_telegram_success(snapshot: Dict[str, Any],
-                          dom_info: Dict[str, Any]) -> None:
+def build_telegram_message(snapshot: Dict[str, Any], dom_payload: Dict[str, Any]) -> str:
     hmi = snapshot["hmi"]
     hmi_band = snapshot["hmi_band"]
+    health = snapshot["health"]
+    days_all = snapshot["days_all"]
+    per_token_dom = snapshot["per_token_dom"]
     per_token_days = snapshot["per_token_days"]
-    health = dom_info["health"]
-    dom_payload = dom_info["dom_payload"]
-    portfolio_rows = dom_info["portfolio_rows"]
+    agg_action = snapshot["agg_action"]
 
     def pct_str(x: float) -> str:
         return f"{x*100:.1f}%"
@@ -687,46 +667,45 @@ def send_telegram_success(snapshot: Dict[str, Any],
     else:
         lines.append("HMI: unavailable")
 
-    days_all = dom_payload["days"]
-    lines.append(
-        f"BTC vs Alts: <b>{dom_payload['btc_pct']:.1f}%</b> "
-        f"(range {int(dom_payload['min_pct'])}–{int(dom_payload['max_pct'])}% over {days_all}d)"
-    )
-    lines.append(f"Action: <b>{dom_payload['action']}</b>")
+    agg_mn_i = dom_payload["min_pct"]
+    agg_mx_i = dom_payload["max_pct"]
+    btc_pct = dom_payload["btc_pct"]
+
+    if days_all > 0:
+        lines.append(
+            f"BTC vs Alts: <b>{btc_pct:.1f}%</b> "
+            f"(range {agg_mn_i}–{agg_mx_i}% over {days_all}d)"
+        )
+    else:
+        lines.append(
+            f"BTC vs Alts: <b>{btc_pct:.1f}%</b> "
+            f"(range {agg_mn_i}–{agg_mx_i}%, 0d)"
+        )
+
+    lines.append(f"Action: <b>{agg_action}</b>")
     lines.append("")
-    lines.append("<b>Portfolio weights</b>:")
 
-    for row in portfolio_rows:
-        lines.append(f"{row['asset']}: {pct_str(row['weight'])}")
-
-    # Only show days by token if less than full 730d
-    short_days = [(sym, d) for sym, d in per_token_days.items() if d < DAYS_HISTORY_TARGET]
-    if short_days:
-        lines.append("")
-        lines.append("<b>Range coverage (&lt;730d)</b>:")
-        for sym, d in short_days:
-            lines.append(f"{sym}: {d}d")
+    # Portfolio weights
+    lines.append("<b>Per-token dominance ranges</b> (days<730 only):")
+    for sym in ALTS_FOR_DOM:
+        dom_info = per_token_dom.get(sym)
+        dcount = per_token_days.get(sym, 0)
+        if not dom_info or dcount >= DAYS_HISTORY_TARGET:
+            continue
+        _, dmin, dmax = dom_info
+        lines.append(
+            f"{sym}: {round(dmin)}–{round(dmax)}% over {dcount}d"
+        )
 
     lines.append("")
     lines.append("<b>Service health</b>:")
-    lines.append(f"HMI: {'yes' if health.get('hmi_ok') else 'no'}")
-    lines.append(f"Binance: {'yes' if health.get('binance_ok') else 'no'}")
-    lines.append(f"Supplies file: {'yes' if health.get('supplies_ok') else 'no'}")
+    lines.append(f"HMI: {'yes' if health['hmi_ok'] else 'no'}")
+    lines.append(f"Binance: {'yes' if health['binance_ok'] else 'no'}")
+    lines.append(f"Supplies file: {'yes' if health['supplies_ok'] else 'no'}")
     lines.append(f"Bands: {'yes' if health.get('bands_ok') else 'no'}")
-    lines.append(f"Prices: {'yes' if health.get('prices_ok') else 'no'}")
+    lines.append(f"Prices: {'yes' if health['prices_ok'] else 'no'}")
 
-    tg_send("\n".join(lines))
-
-
-def send_telegram_failure(error_msg: str) -> None:
-    lines = [
-        "<b>HiveAI Rotation Update FAILED</b>",
-        "",
-        f"Reason: {error_msg}",
-        "",
-        "JSON files were NOT updated; previous values remain in place."
-    ]
-    tg_send("\n".join(lines))
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------------
@@ -734,29 +713,32 @@ def send_telegram_failure(error_msg: str) -> None:
 # ------------------------------------------------------------------
 
 def main() -> None:
-    last_error: Optional[Exception] = None
-    snapshot: Optional[Dict[str, Any]] = None
+    last_error: str | None = None
 
     for attempt in range(1, SNAPSHOT_MAX_ATTEMPTS + 1):
         try:
-            print(f"[dom] Building snapshot (attempt {attempt}/{SNAPSHOT_MAX_ATTEMPTS})...")
+            print(f"[dom] Attempt {attempt}/{SNAPSHOT_MAX_ATTEMPTS} building snapshot…")
             snapshot = build_snapshot()
-            break
+            dom_payload = write_outputs(snapshot)
+            msg = build_telegram_message(snapshot, dom_payload)
+            tg_send(msg)
+            print("[dom] Updated dom_bands_latest.json, prices_latest.json, portfolio_weights.json")
+            return
         except Exception as e:
-            last_error = e
-            print(f"[dom] Snapshot attempt {attempt} failed: {e}")
+            last_error = str(e)
+            print(f"[dom] ERROR on attempt {attempt}: {last_error}")
             if attempt < SNAPSHOT_MAX_ATTEMPTS:
+                print(f"[dom] Retrying in {SNAPSHOT_RETRY_DELAY:.1f}s…")
                 time.sleep(SNAPSHOT_RETRY_DELAY)
 
-    if snapshot is None:
-        msg = str(last_error) if last_error else "Unknown error"
-        print("[dom] FAILED to build snapshot; keeping existing JSONs.")
-        send_telegram_failure(msg)
-        return
-
-    dom_info = write_outputs(snapshot)
-    send_telegram_success(snapshot, dom_info)
-    print("[dom] Updated dom_bands_latest.json, prices_latest.json, portfolio_weights.json")
+    # If we get here, all attempts failed; do NOT overwrite JSONs, just alert.
+    err_text = (
+        "<b>HiveAI Rotation Update FAILED</b>\n\n"
+        f"All {SNAPSHOT_MAX_ATTEMPTS} attempts failed.\n"
+        f"Last error: {last_error}"
+    )
+    tg_send(err_text)
+    print("[dom] All attempts failed; old JSONs left in place.")
 
 
 if __name__ == "__main__":
