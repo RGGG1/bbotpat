@@ -685,7 +685,6 @@ def build_telegram_message(snapshot: Dict[str, Any], dom_payload: Dict[str, Any]
     lines.append(f"Action: <b>{agg_action}</b>")
     lines.append("")
 
-    # Portfolio weights
     lines.append("<b>Per-token dominance ranges</b> (days<730 only):")
     for sym in ALTS_FOR_DOM:
         dom_info = per_token_dom.get(sym)
