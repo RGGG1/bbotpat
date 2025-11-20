@@ -132,9 +132,9 @@
     }
 
     .hmi-status {
-      font-size: 14px;       /* slightly larger, but still smaller than HMI value */
+      font-size: 14px;
       font-weight: 500;
-      color: var(--accent-neutral); /* white */
+      color: var(--accent-neutral);
       text-transform: lowercase;
     }
 
@@ -157,6 +157,10 @@
       align-items: center;
       gap: 10px;
       flex-wrap: wrap;
+    }
+
+    .oracle-pill-wrapper {
+      position: relative;
     }
 
     .oracle-pill {
@@ -195,8 +199,8 @@
 
     .oracle-dropdown {
       position: absolute;
-      right: 12px;
-      top: 46px;
+      top: calc(100% + 4px);
+      left: 0;
       z-index: 20;
       background: #050509;
       border-radius: 10px;
@@ -207,11 +211,6 @@
       max-height: 260px;
       overflow-y: auto;
       display: none;
-    }
-
-    .oracle-dropdown.left {
-      right: auto;
-      left: 12px;
     }
 
     .oracle-dropdown.open {
@@ -264,6 +263,20 @@
 
     .oracle-option-label {
       white-space: nowrap;
+    }
+
+    .oracle-clear {
+      margin-top: 6px;
+      padding: 4px 6px;
+      text-align: right;
+      font-size: 10px;
+      color: var(--text-muted);
+      border-top: 1px solid #222238;
+      cursor: pointer;
+    }
+
+    .oracle-clear:hover {
+      color: var(--accent-neutral);
     }
 
     .oracle-main-line {
@@ -403,8 +416,8 @@
         font-size: 32px;
       }
       .oracle-dropdown {
-        left: 12px !important;
-        right: 12px !important;
+        left: 0;
+        right: 0;
       }
     }
   </style>
@@ -440,21 +453,23 @@
         <div class="oracle-header-row">
           <div class="card-title">Dominance Oracle</div>
           <div class="oracle-header-right">
-            <div class="oracle-pill" id="oracle-x-pill">
-              <span class="oracle-pill-label" id="oracle-x-label">Select X</span>
-              <span class="oracle-pill-arrow">▾</span>
+            <div class="oracle-pill-wrapper">
+              <div class="oracle-pill" id="oracle-x-pill">
+                <span class="oracle-pill-label" id="oracle-x-label">Select</span>
+                <span class="oracle-pill-arrow">▾</span>
+              </div>
+              <div class="oracle-dropdown" id="oracle-x-menu"></div>
             </div>
             <span class="oracle-vs">vs</span>
-            <div class="oracle-pill" id="oracle-y-pill">
-              <span class="oracle-pill-label" id="oracle-y-label">Select Y</span>
-              <span class="oracle-pill-arrow">▾</span>
+            <div class="oracle-pill-wrapper">
+              <div class="oracle-pill" id="oracle-y-pill">
+                <span class="oracle-pill-label" id="oracle-y-label">Select</span>
+                <span class="oracle-pill-arrow">▾</span>
+              </div>
+              <div class="oracle-dropdown" id="oracle-y-menu"></div>
             </div>
           </div>
         </div>
-
-        <!-- Dropdown menus (populated by JS) -->
-        <div class="oracle-dropdown left" id="oracle-x-menu"></div>
-        <div class="oracle-dropdown" id="oracle-y-menu"></div>
 
         <div class="oracle-main-line" id="oracle-main-line">
           <span class="dom-value">--</span>
@@ -489,7 +504,6 @@
             </tr>
           </thead>
           <tbody id="prices-tbody">
-            <!-- rows injected by JS -->
           </tbody>
         </table>
 
@@ -498,9 +512,9 @@
           <div>
             <ul style="margin-top:6px;line-height:1.35;list-style:disc;padding-left:18px;">
               <li>Hive Mind Index (HMI) is our custom fear and greed index, factored for predictive signaling.</li>
-              <li>HMI and Dom values updated every 12 hours, at 07:15 and 19:15 CEST.</li>
-              <li>'Dom' represents BTC dominance against token.</li>
-              <li>'Range' represents up to 2-year BTC Dom range against token.</li>
+              <li>HMI and Dom values update daily at 07:15 and 19:15 CEST.</li>
+              <li>Dom represents BTC dominance against token.</li>
+              <li>Range represents up to 2-year BTC Dom range against token.</li>
               <li>USDTC = USDT and USDC combined.</li>
               <li>Additional token listing available on request.</li>
             </ul>
@@ -514,7 +528,6 @@
     const HMI_NEUTRAL_LOW = 40;
     const HMI_NEUTRAL_HIGH = 60;
 
-    // Tokens available in the Dominance Oracle (no USDTC here)
     const ORACLE_TOKENS = [
       "BTC",
       "ETH",
@@ -539,10 +552,10 @@
 
     let pricesRowsGlobal = [];
     let suppliesGlobal = null;
-    let oracleHistories = {}; // token -> { dateString -> closePrice }
+    let oracleHistories = {};
 
     let oracleSelectedX = ["BTC"];   // default
-    let oracleSelectedY = ["ALTS"];  // default: all alts
+    let oracleSelectedY = ["ALTS"];  // default: all alts (not BTC)
 
     function formatDateTime(ts) {
       if (!ts) return "--/--/-- --:--";
@@ -717,7 +730,6 @@
           tbody.appendChild(tr);
         });
 
-        // Once prices are loaded, build oracle menus and set defaults
         buildOracleMenus();
         updateOracle();
       } catch (err) {
@@ -727,7 +739,7 @@
       }
     }
 
-    // ---------- Oracle helpers ----------
+    // -------- Oracle helpers --------
 
     function formatTokenLabel(token) {
       if (token === "ALTS") return "Alts";
@@ -789,7 +801,7 @@
       for (const k of data) {
         const openTimeMs = k[0];
         const closePrice = parseFloat(k[4]);
-        const d = new Date(openTimeMs).toISOString().slice(0, 10); // YYYY-MM-DD
+        const d = new Date(openTimeMs).toISOString().slice(0, 10);
         hist[d] = closePrice;
       }
       oracleHistories[token] = hist;
@@ -810,22 +822,21 @@
 
       if (!xMenu || !yMenu || !xLabel || !yLabel || !xPill || !yPill) return;
 
-      // Sort tokens by market cap (descending)
+      // sort tokens by MC desc
       const tokensWithMc = ORACLE_TOKENS.map(t => ({ token: t, mc: getLiveMC(t) }));
       tokensWithMc.sort((a, b) => (b.mc || 0) - (a.mc || 0));
-
       const sortedTokens = tokensWithMc.map(x => x.token);
 
-      // X order: BTC first, then others by MC
       const othersForX = sortedTokens.filter(t => t !== "BTC");
       const xOrder = ["BTC", ...othersForX];
 
-      // Y order: ALTS, BTC, then others
       const othersForY = sortedTokens.filter(t => t !== "BTC");
       const yOrder = ["ALTS", "BTC", ...othersForY];
 
-      // Build X menu
       xMenu.innerHTML = "";
+      yMenu.innerHTML = "";
+
+      // X menu options
       xOrder.forEach(tok => {
         const div = document.createElement("div");
         div.className = "oracle-option";
@@ -842,25 +853,24 @@
         label.className = "oracle-option-label";
         label.textContent = formatTokenLabel(tok);
 
-        div.appendChild(box);
         box.appendChild(tick);
+        div.appendChild(box);
         div.appendChild(label);
 
         if (oracleSelectedX.includes(tok)) {
           div.classList.add("selected");
         }
 
-        div.addEventListener("click", () => {
-          // multi-select for X
+        div.addEventListener("click", (e) => {
+          e.stopPropagation();
           if (oracleSelectedX.includes(tok)) {
             oracleSelectedX = oracleSelectedX.filter(t => t !== tok);
           } else {
             oracleSelectedX = [...oracleSelectedX, tok];
           }
           if (oracleSelectedX.length === 0) {
-            oracleSelectedX = [tok];
+            oracleSelectedX = [];
           }
-          // update visual
           Array.from(xMenu.querySelectorAll(".oracle-option")).forEach(opt => {
             const t = opt.dataset.token;
             opt.classList.toggle("selected", oracleSelectedX.includes(t));
@@ -872,8 +882,22 @@
         xMenu.appendChild(div);
       });
 
-      // Build Y menu
-      yMenu.innerHTML = "";
+      // X Clear
+      const xClear = document.createElement("div");
+      xClear.className = "oracle-clear";
+      xClear.textContent = "Clear";
+      xClear.addEventListener("click", (e) => {
+        e.stopPropagation();
+        oracleSelectedX = [];
+        Array.from(xMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+          opt.classList.remove("selected");
+        });
+        xLabel.textContent = "Select";
+        updateOracle();
+      });
+      xMenu.appendChild(xClear);
+
+      // Y menu options
       yOrder.forEach(tok => {
         const div = document.createElement("div");
         div.className = "oracle-option";
@@ -890,33 +914,29 @@
         label.className = "oracle-option-label";
         label.textContent = formatTokenLabel(tok);
 
-        div.appendChild(box);
         box.appendChild(tick);
+        div.appendChild(box);
         div.appendChild(label);
 
         if (oracleSelectedY.includes(tok)) {
           div.classList.add("selected");
         }
 
-        div.addEventListener("click", () => {
+        div.addEventListener("click", (e) => {
+          e.stopPropagation();
           if (tok === "ALTS") {
-            // ALTS behaves like "all alts" and is exclusive
             oracleSelectedY = ["ALTS"];
           } else {
-            // if ALTS was selected, drop it
             oracleSelectedY = oracleSelectedY.filter(t => t !== "ALTS");
-            // toggle this token
             if (oracleSelectedY.includes(tok)) {
               oracleSelectedY = oracleSelectedY.filter(t => t !== tok);
             } else {
               oracleSelectedY = [...oracleSelectedY, tok];
             }
             if (oracleSelectedY.length === 0) {
-              oracleSelectedY = [tok];
+              oracleSelectedY = [];
             }
           }
-
-          // update visuals
           Array.from(yMenu.querySelectorAll(".oracle-option")).forEach(opt => {
             const t = opt.dataset.token;
             opt.classList.toggle("selected", oracleSelectedY.includes(t));
@@ -928,11 +948,24 @@
         yMenu.appendChild(div);
       });
 
-      // Set initial labels
+      // Y Clear
+      const yClear = document.createElement("div");
+      yClear.className = "oracle-clear";
+      yClear.textContent = "Clear";
+      yClear.addEventListener("click", (e) => {
+        e.stopPropagation();
+        oracleSelectedY = [];
+        Array.from(yMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+          opt.classList.remove("selected");
+        });
+        yLabel.textContent = "Select";
+        updateOracle();
+      });
+      yMenu.appendChild(yClear);
+
       xLabel.textContent = formatTokenSetLabel(oracleSelectedX);
       yLabel.textContent = formatTokenSetLabel(oracleSelectedY);
 
-      // Pill click handlers
       xPill.onclick = (e) => {
         e.stopPropagation();
         const isOpen = xMenu.classList.contains("open");
@@ -945,6 +978,9 @@
         closeAllDropdowns();
         if (!isOpen) yMenu.classList.add("open");
       };
+
+      xMenu.addEventListener("click", (e) => e.stopPropagation());
+      yMenu.addEventListener("click", (e) => e.stopPropagation());
 
       document.addEventListener("click", () => {
         closeAllDropdowns();
@@ -961,7 +997,6 @@
 
       errEl.textContent = "";
 
-      // Expand ALTS on Y side: all tokens except BTC
       const setXTokens = oracleSelectedX.filter(t => t !== "ALTS");
       let setYTokens;
       if (oracleSelectedY.includes("ALTS")) {
@@ -996,7 +1031,6 @@
         return;
       }
 
-      // Current MCs
       let mcX = 0, mcY = 0;
       for (const t of setXTokens) mcX += getLiveMC(t);
       for (const t of setYTokens) mcY += getLiveMC(t);
@@ -1004,7 +1038,6 @@
       let domNow = null;
       if (totMC > 0) domNow = 100 * mcX / totMC;
 
-      // Historical dominance
       try {
         const unionTokens = [...new Set([...setXTokens, ...setYTokens])];
         for (const t of unionTokens) {
@@ -1078,8 +1111,8 @@
 
     (function init() {
       fetchHMI();
-      fetchPrices();  // builds oracle & updates meta date
-      setInterval(fetchHMI, 60 * 1000); // keep HMI relatively fresh
+      fetchPrices();
+      setInterval(fetchHMI, 60 * 1000);
     })();
   </script>
 </body>
