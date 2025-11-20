@@ -1,33 +1,67 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-cd /root/bbotpat
+LOG_FILE="/root/bbotpat/log_dom.log"
 
-# Load secrets
-source .env
+{
+  echo "[$(date -u)] --- run_dom.sh START ---"
 
-# Activate Python virtualenv
-source .venv/bin/activate
+  cd /root/bbotpat
 
-git pull
+  # Ensure executable bits
+  chmod +x run_hmi.sh run_dom.sh || true
 
-# Dominance + prices + portfolio
-python send_fg_dom_signal_telegram.py
+  # Activate venv and env vars
+  if [ -f ".venv/bin/activate" ]; then
+    # shellcheck source=/dev/null
+    source .venv/bin/activate
+  else
+    echo "[$(date -u)] ERROR: .venv/bin/activate not found"
+  fi
 
-git add -A
-git commit -m "Update dominance/prices/portfolio (auto)" || true
-git push
-#!/usr/bin/env bash
-set -e
+  if [ -f ".env" ]; then
+    # shellcheck source=/dev/null
+    source .env
+  else
+    echo "[$(date -u)] WARNING: .env not found"
+  fi
 
-cd /root/bbotpat
-source .env
+  echo "[$(date -u)] Running git pull…"
+  git pull --ff-only || echo "[$(date -u)] WARNING: git pull failed (non-fatal)"
 
-git pull
+  echo "[$(date -u)] Running send_fg_dom_signal_telegram.py…"
+  python3 send_fg_dom_signal_telegram.py
 
-# Dominance + prices + portfolio (Binance-based script you have now)
-python3 send_fg_dom_signal_telegram.py
+  # Script already writes root + docs JSON files
+  if [ -f "dom_bands_latest.json" ]; then
+    echo "[$(date -u)] dom_bands_latest.json present"
+  else
+    echo "[$(date -u)] ERROR: dom_bands_latest.json missing"
+  fi
 
-git add -A
-git commit -m "Update dominance/prices/portfolio (auto)" || true
-git push
+  if [ -f "prices_latest.json" ]; then
+    echo "[$(date -u)] prices_latest.json present"
+  else
+    echo "[$(date -u)] ERROR: prices_latest.json missing"
+  fi
+
+  if [ -f "portfolio_weights.json" ]; then
+    echo "[$(date -u)] portfolio_weights.json present"
+  else
+    echo "[$(date -u)] ERROR: portfolio_weights.json missing"
+  fi
+
+  echo "[$(date -u)] Staging DOM/prices/portfolio artefacts…"
+  git add \
+    dom_bands_latest.json docs/dom_bands_latest.json \
+    prices_latest.json docs/prices_latest.json \
+    portfolio_weights.json docs/portfolio_weights.json 2>/dev/null || true
+
+  echo "[$(date -u)] Committing DOM changes if any…"
+  git commit -m "Update dominance/prices/portfolio (auto)" || echo "[$(date -u)] No DOM changes to commit"
+
+  echo "[$(date -u)] Pushing to origin…"
+  git push || echo "[$(date -u)] WARNING: git push failed"
+
+  echo "[$(date -u)] --- run_dom.sh END ---"
+} >> "$LOG_FILE" 2>&1
