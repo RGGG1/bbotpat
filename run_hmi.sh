@@ -1,77 +1,56 @@
 #!/usr/bin/env bash
-#!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-cd /root/bbotpat
+LOG_FILE="/root/bbotpat/log_hmi.log"
 
-# Load secrets
-source .env
+{
+  echo "[$(date -u)] --- run_hmi.sh START ---"
 
-# Activate Python virtualenv
-source .venv/bin/activate
+  cd /root/bbotpat
 
-# Make sure we have the latest code
-git pull
+  # Make sure scripts are executable
+  chmod +x run_hmi.sh run_dom.sh || true
 
-# Compute HMI and export JSON
-python compute_fg2_index.py
-python export_hmi_json.py
+  # Activate venv and env vars
+  if [ -f ".venv/bin/activate" ]; then
+    # shellcheck source=/dev/null
+    source .venv/bin/activate
+  else
+    echo "[$(date -u)] ERROR: .venv/bin/activate not found"
+  fi
 
-# Ensure docs copy exists for GitHub Pages
-if [ -f hmi_latest.json ]; then
-  cp hmi_latest.json docs/hmi_latest.json
-fi
+  if [ -f ".env" ]; then
+    # shellcheck source=/dev/null
+    source .env
+  else
+    echo "[$(date -u)] WARNING: .env not found"
+  fi
 
-# Commit and push any changes
-git add -A
-git commit -m "Update HMI (auto)" || true
-git push
-set -e
+  echo "[$(date -u)] Running git pull…"
+  git pull --ff-only || echo "[$(date -u)] WARNING: git pull failed (non-fatal)"
 
-cd /root/bbotpat
+  echo "[$(date -u)] Running compute_fg2_index.py…"
+  python3 compute_fg2_index.py
 
-# Load secrets
-source .env
+  # compute_fg2_index.py already writes hmi_latest.json and docs/hmi_latest.json
+  if [ -f "hmi_latest.json" ]; then
+    echo "[$(date -u)] HMI file present: hmi_latest.json"
+  else
+    echo "[$(date -u)] ERROR: hmi_latest.json not found after compute_fg2_index.py"
+  fi
 
-# Activate Python virtualenv
-source .venv/bin/activate
+  echo "[$(date -u)] Staging HMI artefacts…"
+  git add \
+    hmi_latest.json \
+    docs/hmi_latest.json \
+    data/hmi_oi_history.csv \
+    output/fg2_daily.csv 2>/dev/null || true
 
-# Make sure we have the latest code
-git pull
+  echo "[$(date -u)] Committing HMI changes if any…"
+  git commit -m "Update HMI (auto)" || echo "[$(date -u)] No HMI changes to commit"
 
-# Compute HMI and export JSON
-python compute_fg2_index.py
-python export_hmi_json.py
+  echo "[$(date -u)] Pushing to origin…"
+  git push || echo "[$(date -u)] WARNING: git push failed"
 
-# Ensure docs copy exists for GitHub Pages
-if [ -f hmi_latest.json ]; then
-  cp hmi_latest.json docs/hmi_latest.json
-fi
-
-# Commit and push any changes
-git add -A
-git commit -m "Update HMI (auto)" || true
-git push
-#!/usr/bin/env bash
-set -e
-
-cd /root/bbotpat
-source .env
-
-# Make sure we have latest code
-git pull
-
-# Compute HMI and export JSON
-python3 compute_fg2_index.py
-python3 export_hmi_json.py
-
-# If export_hmi_json.py only writes hmi_latest.json at root,
-# ensure docs copy exists for GitHub Pages:
-if [ -f hmi_latest.json ]; then
-  cp hmi_latest.json docs/hmi_latest.json
-fi
-
-# Commit and push any changes
-git add -A
-git commit -m "Update HMI (auto)" || true
-git push
+  echo "[$(date -u)] --- run_hmi.sh END ---"
+} >> "$LOG_FILE" 2>&1
