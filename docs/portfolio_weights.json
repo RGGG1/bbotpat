@@ -1,11 +1,11 @@
 {
-  "timestamp": "2025-11-19T18:34:09.797742Z",
-  "hmi": 66.5,
+  "timestamp": "2025-11-20T21:55:17.257678Z",
+  "hmi": 66.7,
   "hmi_band": "We're early",
   "weights": [
     {
       "asset": "BTC",
-      "weight": 0.2486
+      "weight": 0.2836
     },
     {
       "asset": "ETH",
@@ -13,27 +13,27 @@
     },
     {
       "asset": "BNB",
-      "weight": 0.097
+      "weight": 0.0846
     },
     {
       "asset": "SOL",
-      "weight": 0.0985
+      "weight": 0.0825
     },
     {
       "asset": "DOGE",
-      "weight": 0.1203
+      "weight": 0.1109
     },
     {
       "asset": "TON",
-      "weight": 0.1389
+      "weight": 0.1416
     },
     {
       "asset": "SUI",
-      "weight": 0.0749
+      "weight": 0.0722
     },
     {
       "asset": "UNI",
-      "weight": 0.079
+      "weight": 0.0818
     },
     {
       "asset": "STABLES",
