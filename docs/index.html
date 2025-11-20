@@ -561,6 +561,7 @@
     let pricesRowsGlobal = [];
     let suppliesGlobal = null;
     let oracleHistories = {};
+    let domBandsGlobal = null;
 
     let oracleSelectedX = ["BTC"];   // default
     let oracleSelectedY = ["ALTS"];  // default: all alts (not BTC)
@@ -680,6 +681,17 @@
       } catch (err) {
         console.error("Oracle history error:", err);
         oracleHistories = {};
+      }
+    }
+
+    async function fetchDomBands() {
+      try {
+        const resp = await fetch("dom_bands_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("dom bands fetch failed");
+        domBandsGlobal = await resp.json();
+      } catch (err) {
+        console.error("Dom bands error:", err);
+        domBandsGlobal = null;
       }
     }
 
@@ -814,6 +826,18 @@
       return oracleHistories[key] || null;
     }
 
+    function sortTokensByMC(tokens) {
+      const arr = [...tokens];
+      arr.sort((a, b) => {
+        const aMC = getLiveMC(a);
+        const bMC = getLiveMC(b);
+        if (aMC > bMC) return -1;
+        if (aMC < bMC) return 1;
+        return a.localeCompare(b);
+      });
+      return arr;
+    }
+
     function computeOracleDomAndRange(xTokens, yTokens) {
       if (!Array.isArray(xTokens) || !Array.isArray(yTokens)) {
         return { ok: false, reason: "Missing selections" };
@@ -822,30 +846,18 @@
         return { ok: false, reason: "Select both sides" };
       }
 
-      const expandSide = (tokens, isX) => {
+      const expandSide = (tokens) => {
         if (tokens.includes("ALTS")) {
           return ORACLE_TOKENS.filter(t => t !== "BTC");
         }
         return tokens;
       };
 
-      const xSet = expandSide(xTokens, true);
-      const ySet = expandSide(yTokens, false);
-
-      const xHasBTC = xSet.includes("BTC");
-      const yHasBTC = ySet.includes("BTC");
-      if (xHasBTC && yHasBTC) {
-        return { ok: false, reason: "BTC cannot be on both sides" };
-      }
+      const xSet = expandSide(xTokens);
+      const ySet = expandSide(yTokens);
 
       const fullX = new Set(xSet);
       const fullY = new Set(ySet);
-
-      for (const t of Array.from(fullX)) {
-        if (fullY.has(t)) {
-          fullY.delete(t);
-        }
-      }
 
       if (fullX.size === 0 || fullY.size === 0) {
         return { ok: false, reason: "Both X and Y must have at least one token" };
@@ -871,11 +883,43 @@
         days = hist.values.length;
         domMin = Math.min(...hist.values);
         domMax = Math.max(...hist.values);
+      } else {
+        // Fallbacks for main cases:
+        const xIsBTCOnly = (xTokens.length === 1 && xTokens[0] === "BTC");
+        const yIsAltsOnly = (yTokens.length === 1 && yTokens[0] === "ALTS");
+
+        // 1) BTC vs ALTS -> use dom_bands_latest.json
+        if (xIsBTCOnly && yIsAltsOnly && domBandsGlobal) {
+          const mn = parseFloat(domBandsGlobal.min_pct);
+          const mx = parseFloat(domBandsGlobal.max_pct);
+          if (!Number.isNaN(mn) && !Number.isNaN(mx)) {
+            domMin = mn;
+            domMax = mx;
+            days = domBandsGlobal.days || 0;
+          }
+        }
+        // 2) BTC vs single alt -> use that token's precomputed range
+        else if (xIsBTCOnly && yTokens.length === 1 && ORACLE_TOKENS.includes(yTokens[0])) {
+          const token = yTokens[0];
+          const row = pricesRowsGlobal.find(r => r.token === token);
+          if (row && row.range) {
+            const m = String(row.range).match(/(\d+)\D+(\d+)%/);
+            if (m) {
+              const mn = parseFloat(m[1]);
+              const mx = parseFloat(m[2]);
+              if (!Number.isNaN(mn) && !Number.isNaN(mx)) {
+                domMin = mn;
+                domMax = mx;
+              }
+            }
+          }
+        }
       }
 
       const prettyName = (tokens) => {
         if (tokens.includes("ALTS")) return "Alts";
-        return tokens.map(formatTokenLabel).join("");
+        const sorted = sortTokensByMC(tokens);
+        return sorted.map(formatTokenLabel).join("");
       };
 
       return {
@@ -904,13 +948,14 @@
       const xOrder = ["BTC", ...ORACLE_TOKENS.filter(t => t !== "BTC")];
       const yOrder = ["ALTS", "BTC", ...ORACLE_TOKENS.filter(t => t !== "BTC")];
 
+      const xIsPureBTC = (oracleSelectedX.length === 1 && oracleSelectedX[0] === "BTC");
+
       xMenu.innerHTML = "";
       yMenu.innerHTML = "";
 
-      // X menu options
+      // X menu options (no ALTS here)
       xOrder.forEach(tok => {
-        // hide tokens currently selected in Y
-        if (oracleSelectedY.includes(tok)) return;
+        if (tok === "ALTS") return;
 
         const div = document.createElement("div");
         div.className = "oracle-option";
@@ -981,8 +1026,8 @@
 
       // Y menu options
       yOrder.forEach(tok => {
-        // hide tokens currently selected in X (except ALTS)
-        if (tok !== "ALTS" && oracleSelectedX.includes(tok)) return;
+        // ALTS only allowed if X is exactly BTC
+        if (tok === "ALTS" && !xIsPureBTC) return;
 
         const div = document.createElement("div");
         div.className = "oracle-option";
@@ -1122,7 +1167,10 @@
 
     (function init() {
       fetchHMI();
-      fetchSupplies().then(fetchOracleHistory).then(fetchPrices);
+      fetchSupplies()
+        .then(fetchOracleHistory)
+        .then(fetchDomBands)
+        .then(fetchPrices);
     })();
   </script>
 </body>
