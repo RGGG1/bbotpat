@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 set -e
 
-cd /root/bbotpat
+LOG=/root/dom.log
 
-# Load secrets
-source .env
+{
+  echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] --- run_dom.sh START ---"
 
-# Activate Python virtualenv
-source .venv/bin/activate
+  cd /root/bbotpat
 
-# Run dominance / prices / portfolio script
-python3 send_fg_dom_signal_telegram.py
+  # Load secrets
+  if [ -f .env ]; then
+    # shellcheck disable=SC1091
+    source .env
+  fi
 
-# Commit and push any changes (JSONs, etc.)
-git add -A
-git commit -m "Update dominance/prices/portfolio (auto)" || true
-git push origin main || true
+  # Activate Python virtualenv
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+
+  # Run dominance / prices / portfolio script
+  python3 send_fg_dom_signal_telegram.py
+
+  echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] --- run_dom.sh END (OK) ---"
+} >> "$LOG" 2>&1
