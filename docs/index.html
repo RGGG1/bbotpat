@@ -406,23 +406,24 @@
       margin-top: 4px;
     }
 
-    /* Knifecatcher card */
+       /* Knifecatcher card */
     .knifecatcher-card {
       position: relative;
     }
 
-    .kc-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
-      margin-top: 6px;
+    .kc-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 14px;
+      margin-top: 8px;
+      flex-wrap: wrap;
     }
 
-    .kc-stat {
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid var(--border-subtle);
-      background: rgba(255, 255, 255, 0.02);
+    .kc-block {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
     }
 
     .kc-label {
@@ -430,38 +431,44 @@
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--text-muted);
-      margin-bottom: 4px;
     }
 
+    /* Make these match the big HMI-style numbers */
     .kc-main-value {
-      font-size: 18px;
+      font-size: 32px;      /* same feel as HMI score */
       font-weight: 600;
+      line-height: 1.1;
     }
 
     .kc-subline {
       font-size: 11px;
       color: var(--text-muted);
-      margin-top: 2px;
     }
 
-    .kc-value-positive {
-      color: var(--accent-green);
-    }
-
-    .kc-value-negative {
-      color: var(--accent-red);
-    }
-
-    .kc-value-neutral {
-      color: var(--accent-neutral);
+    .kc-divider {
+      width: 1px;
+      align-self: stretch;
+      background: linear-gradient(
+        to bottom,
+        transparent,
+        rgba(255, 255, 255, 0.1),
+        transparent
+      );
     }
 
     @media (max-width: 700px) {
-      .kc-grid {
-        grid-template-columns: 1fr;
+      .kc-row {
+        flex-direction: column;
+        align-items: flex-start;
       }
+
+      .kc-divider {
+        width: 100%;
+        height: 1px;
+      }
+
       .kc-main-value {
-        font-size: 16px;
+        font-size: 26px;
       }
     }
 
@@ -553,26 +560,23 @@
         <div class="oracle-error" id="oracle-error"></div>
       </section>
 
-      <!-- KNIFECATCHER -->
+            <!-- KNIFECATCHER -->
       <section class="card knifecatcher-card">
         <div class="card-header">
           <div class="card-title">Knifecatcher</div>
         </div>
-        <div class="kc-grid">
-          <div class="kc-stat">
+        <div class="kc-row">
+          <div class="kc-block">
             <div class="kc-label">Balance</div>
             <div class="kc-main-value" id="kc-balance">$--.--</div>
-            <div class="kc-subline" id="kc-balance-note">Based on algo holdings</div>
           </div>
-          <div class="kc-stat">
+
+          <div class="kc-divider" aria-hidden="true"></div>
+
+          <div class="kc-block kc-block-right">
             <div class="kc-label">ROI</div>
-            <div class="kc-main-value kc-value-neutral" id="kc-roi">--.--%</div>
-            <div class="kc-subline">Since first rebalance</div>
-          </div>
-          <div class="kc-stat">
-            <div class="kc-label">Vs BTC Buy &amp; Hold</div>
             <div class="kc-main-value" id="kc-compare">--.--% vs --.--%</div>
-            <div class="kc-subline" id="kc-compare-note">Knifecatcher vs BTC baseline</div>
+            <div class="kc-subline">Knifecatcher vs BTC buy and hold</div>
           </div>
         </div>
       </section>
@@ -874,6 +878,57 @@
         tbody.innerHTML = "";
       }
     }
+
+    async function fetchKnifecatcher() {
+      try {
+        const resp = await fetch("knifecatcher_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("knifecatcher fetch failed");
+        const data = await resp.json();
+
+        const balanceEl = document.getElementById("kc-balance");
+        const compareEl = document.getElementById("kc-compare");
+
+        if (!data || !balanceEl || !compareEl) return;
+
+        const base = typeof data.base_balance_usd === "number"
+          ? data.base_balance_usd
+          : parseFloat(data.base_balance_usd || "0");
+
+        const portVal = typeof data.portfolio_value === "number"
+          ? data.portfolio_value
+          : parseFloat(data.portfolio_value || "0");
+
+        const btcVal = typeof data.btc_value === "number"
+          ? data.btc_value
+          : parseFloat(data.btc_value || "0");
+
+        if (!Number.isNaN(portVal) && portVal > 0) {
+          balanceEl.textContent = "$" + portVal.toFixed(2);
+        }
+
+        let algoRoi = null;
+        let btcRoi = null;
+
+        if (base && base > 0) {
+          algoRoi = (portVal / base) - 1;
+          btcRoi = (btcVal / base) - 1;
+        }
+
+        function fmtPct(x) {
+          if (x === null || Number.isNaN(x)) return "--.--%";
+          const pct = x * 100;
+          const sign = pct > 0 ? "+" : "";
+          return sign + pct.toFixed(1) + "%";
+        }
+
+        const algoStr = fmtPct(algoRoi);
+        const btcStr = fmtPct(btcRoi);
+        compareEl.textContent = algoStr + " vs " + btcStr;
+      } catch (err) {
+        console.error("Knifecatcher error:", err);
+      }
+    }
+
 
     // -------- Oracle helpers --------
 
