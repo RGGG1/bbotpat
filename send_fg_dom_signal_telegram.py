@@ -72,6 +72,8 @@ PW_JSON_ROOT = ROOT / "portfolio_weights.json"
 PW_JSON_DOCS = DOCS / "portfolio_weights.json"
 
 PORTFOLIO_TRACKER_JSON = DATA_DIR / "portfolio_tracker.json"
+KNIFECATCHER_JSON_ROOT = ROOT / "knifecatcher_latest.json"
+KNIFECATCHER_JSON_DOCS = DOCS / "knifecatcher_latest.json"
 
 TG_TOKEN = os.getenv("TG_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT = os.getenv("TG_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
@@ -103,17 +105,11 @@ ALTS_FOR_DOM = ["ETH", "BNB", "SOL", "DOGE", "TON", "SUI", "UNI"]
 # Order for website table
 DISPLAY_ORDER = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TON", "USDTC", "SUI", "UNI"]
 
-# Initial portfolio weights for $100, as specified by user
+# Initial portfolio weights for $100 – assume we are currently 100% in stables.
+# On the first run we treat this as our "starting holdings" and immediately
+# rebalance into the recommended weights.
 INITIAL_PORTFOLIO_WEIGHTS: Dict[str, float] = {
-    "BTC": 0.282,
-    "ETH": 0.0,
-    "BNB": 0.086,
-    "SOL": 0.08,
-    "DOGE": 0.111,
-    "TON": 0.143,
-    "SUI": 0.073,
-    "UNI": 0.082,
-    "STABLES": 0.143,
+    "STABLES": 1.0,
 }
 
 INITIAL_PORTFOLIO_USD = 100.0
@@ -521,46 +517,48 @@ def update_portfolio_tracker(
     portfolio_rows: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    Maintain a simple $100 tracking portfolio and a BTC-only $100
-    buy-and-hold baseline.
+    Track a synthetic portfolio that starts fully in STABLES (USDC) and
+    rebalances into the model portfolio at each DOM run.
 
-    - On first run: create initial state using INITIAL_PORTFOLIO_WEIGHTS
-      and current prices. Do NOT rebalance; this is t0.
-    - On subsequent runs: value existing holdings at current prices,
-      then fully rebalance into the target weights from portfolio_rows.
+    Also track a BTC buy-and-hold baseline and export a lightweight summary
+    for the website (knifecatcher_latest.json).
     """
+    INITIAL_PORTFOLIO_USD = 100.0
+
     now = datetime.utcnow().isoformat() + "Z"
 
-    # Build price map
-    price_map: Dict[str, float] = {}
+    # Build latest prices map (symbol -> price)
+    latest_prices: Dict[str, float] = {}
     for row in prices_rows:
-        sym = row.get("token")
-        if not sym:
-            continue
-        price_val = row.get("price", 0.0)
+        sym = row.get("symbol")
         try:
-            p = float(price_val)
+            price = float(row.get("price", 0.0))
         except Exception:
-            p = 0.0
-        price_map[sym] = p
+            price = 0.0
+        if sym and price > 0:
+            latest_prices[sym] = price
 
-    # Helper for current price
-    def price(sym: str) -> float:
-        if sym == "STABLES":
-            return 1.0
-        if sym == "USDTC":
-            return 1.0
-        return float(price_map.get(sym, 0.0))
+    # Build latest portfolio weights map (asset -> weight)
+    latest_weights: Dict[str, float] = {}
+    for row in portfolio_rows:
+        asset = row.get("asset")
+        try:
+            w = float(row.get("weight", 0.0))
+        except Exception:
+            w = 0.0
+        if not asset or w <= 0:
+            continue
+        if asset.upper() == "STABLES":
+            asset = "USDC"
+        asset = asset.upper()
+        latest_weights[asset] = latest_weights.get(asset, 0.0) + w
 
-    # BTC price
-    btc_price_now = price_map.get("BTC", 0.0)
-    if btc_price_now <= 0:
-        return {
-            "ok": False,
-            "reason": "No BTC price",
-        }
+    total_w = sum(latest_weights.values())
+    if total_w > 0:
+        for k in list(latest_weights.keys()):
+            latest_weights[k] = latest_weights[k] / total_w
 
-    # Load or create state
+    # Load existing tracker state if present
     if PORTFOLIO_TRACKER_JSON.exists():
         try:
             state = json.loads(PORTFOLIO_TRACKER_JSON.read_text())
@@ -569,102 +567,143 @@ def update_portfolio_tracker(
     else:
         state = {}
 
+    # Initialise on first run
     if not state:
-        # First run: initialise from user-provided weights
-        holdings: Dict[str, float] = {}
-        for sym, w in INITIAL_PORTFOLIO_WEIGHTS.items():
-            if w <= 0:
-                holdings[sym] = 0.0
-                continue
-            p = price(sym)
-            if p <= 0:
-                holdings[sym] = 0.0
-                continue
-            holdings[sym] = INITIAL_PORTFOLIO_USD * w / p
-
-        btc_base_qty = INITIAL_PORTFOLIO_USD / btc_price_now
-
+        base_timestamp = now
         state = {
-            "base_timestamp": now,
             "base_balance_usd": INITIAL_PORTFOLIO_USD,
-            "btc_base_price": btc_price_now,
-            "btc_base_qty": btc_base_qty,
-            "holdings": holdings,
+            "base_timestamp": base_timestamp,
+            "holdings": {
+                "USDC": INITIAL_PORTFOLIO_USD  # start fully in stable
+            },
+            "btc_holdings": {
+                "BTC": 0.0,
+                "USDC": INITIAL_PORTFOLIO_USD,
+            },
             "last_value_usd": INITIAL_PORTFOLIO_USD,
             "last_timestamp": now,
             "runs": 0,
         }
-        PORTFOLIO_TRACKER_JSON.write_text(json.dumps(state, indent=2))
-        return {
-            "ok": True,
-            "first_run": True,
-            "portfolio_value": INITIAL_PORTFOLIO_USD,
-            "btc_value": INITIAL_PORTFOLIO_USD,
-            "base_timestamp": now,
-            "runs": 0,
-        }
+        first_run = True
+    else:
+        first_run = False
 
-    # Compute current portfolio value
-    holdings = state.get("holdings", {})
-    portfolio_value = 0.0
-    for sym, qty in holdings.items():
-        try:
-            q = float(qty)
-        except Exception:
-            q = 0.0
-        portfolio_value += q * price(sym)
+    # Current synthetic holdings for the algo
+    holdings: Dict[str, float] = state.get("holdings", {})
+    holdings = {k.upper(): float(v) for k, v in holdings.items()}
 
-    # BTC-only baseline
-    btc_base_qty = float(state.get("btc_base_qty", 0.0))
-    btc_value = btc_base_qty * btc_price_now
+    # BTC buy-and-hold baseline holdings
+    btc_holdings: Dict[str, float] = state.get("btc_holdings", {})
+    btc_holdings = {k.upper(): float(v) for k, v in btc_holdings.items()}
 
-    # Build target weights from portfolio_rows
-    target_weights: Dict[str, float] = {}
-    for row in portfolio_rows:
-        asset = row.get("asset")
-        w = row.get("weight", 0.0)
-        if not asset:
-            continue
-        try:
-            wf = float(w)
-        except Exception:
-            wf = 0.0
-        target_weights[asset] = max(0.0, wf)
+    # Compute current portfolio value in USDC
+    def value_in_usdc(h: Dict[str, float]) -> float:
+        total = 0.0
+        for asset, qty in h.items():
+            asset = asset.upper()
+            if asset == "USDC":
+                total += qty
+            else:
+                sym = asset + "USDC"
+                px = latest_prices.get(sym, 0.0)
+                total += qty * px
+        return total
 
-    # Normalise in case of drift
-    total_w = sum(target_weights.values())
-    if total_w <= 0:
-        # If something is off, keep old holdings, but still report value
-        return {
-            "ok": True,
-            "first_run": False,
-            "portfolio_value": portfolio_value,
-            "btc_value": btc_value,
-            "base_timestamp": state.get("base_timestamp", ""),
-            "runs": int(state.get("runs", 0)),
-        }
+    portfolio_value = value_in_usdc(holdings)
 
-    for k in list(target_weights.keys()):
-        target_weights[k] = target_weights[k] / total_w
+    # BTC baseline: if no BTC yet, invest all USDC into BTC at first run
+    if btc_holdings.get("BTC", 0.0) == 0.0:
+        usdc_amt = btc_holdings.get("USDC", 0.0)
+        px_btc = latest_prices.get("BTCUSDC", 0.0)
+        if usdc_amt > 0 and px_btc > 0:
+            qty_btc = usdc_amt / px_btc
+            btc_holdings["BTC"] = qty_btc
+            btc_holdings["USDC"] = 0.0
 
-    # Rebalance: compute new holdings based on target weights
+    btc_value = value_in_usdc(btc_holdings)
+
+    # Rebalance algo synthetic holdings to latest_weights
+    total_val = portfolio_value if portfolio_value > 0 else state.get("base_balance_usd", INITIAL_PORTFOLIO_USD)
     new_holdings: Dict[str, float] = {}
-    for asset, w in target_weights.items():
-        p = price(asset)
-        if p <= 0 or w <= 0:
-            new_holdings[asset] = 0.0
-        else:
-            new_holdings[asset] = portfolio_value * w / p
 
+    for asset, w in latest_weights.items():
+        target_val = total_val * w
+        if asset == "USDC":
+            new_holdings["USDC"] = new_holdings.get("USDC", 0.0) + target_val
+        else:
+            sym = asset + "USDC"
+            px = latest_prices.get(sym, 0.0)
+            if px > 0:
+                qty = target_val / px
+                new_holdings[asset] = new_holdings.get(asset, 0.0) + qty
+
+    # Save updated state
     state["holdings"] = new_holdings
+    state["btc_holdings"] = btc_holdings
     state["last_value_usd"] = portfolio_value
     state["last_timestamp"] = now
     state["runs"] = int(state.get("runs", 0)) + 1
     PORTFOLIO_TRACKER_JSON.write_text(json.dumps(state, indent=2))
 
+    # Build lightweight summary for website
+    try:
+        tracker_state = json.loads(PORTFOLIO_TRACKER_JSON.read_text())
+    except Exception:
+        tracker_state = {}
+
+    try:
+        base_balance = float(tracker_state.get("base_balance_usd", INITIAL_PORTFOLIO_USD))
+    except Exception:
+        base_balance = float(INITIAL_PORTFOLIO_USD)
+
+    try:
+        port_val = float(portfolio_value)
+    except Exception:
+        port_val = 0.0
+
+    try:
+        btc_val = float(btc_value)
+    except Exception:
+        btc_val = 0.0
+
+    try:
+        runs_val = int(tracker_state.get("runs", 0))
+    except Exception:
+        runs_val = 0
+
+    base_ts = tracker_state.get("base_timestamp", "")
+
+    def _safe_roi(value: float, base: float) -> float | None:
+        try:
+            if base <= 0:
+                return None
+            return (value / base) - 1.0
+        except Exception:
+            return None
+
+    algo_roi = _safe_roi(port_val, base_balance)
+    btc_roi = _safe_roi(btc_val, base_balance)
+
+    kc_payload = {
+        "timestamp": now,
+        "base_balance_usd": base_balance,
+        "portfolio_value": port_val,
+        "btc_value": btc_val,
+        "algo_roi": algo_roi,
+        "btc_roi": btc_roi,
+        "runs": runs_val,
+        "base_timestamp": base_ts,
+    }
+    try:
+        text_kc = json.dumps(kc_payload, indent=2)
+        KNIFECATCHER_JSON_ROOT.write_text(text_kc)
+        KNIFECATCHER_JSON_DOCS.write_text(text_kc)
+    except Exception as _e:
+        print(f"[portfolio_tracker] Failed to write knifecatcher JSON: {_e}")
+
     return {
         "ok": True,
-        "first_run": False,
+        "first_run": first_run,
         "portfolio_value": portfolio_value,
         "btc_value": btc_value,
         "base_timestamp": state.get("base_timestamp", ""),
@@ -948,10 +987,8 @@ def main() -> None:
             lines.append(f"Since: {base_ts}")
         lines.append(f"Algo portfolio: <b>{port_val_str}</b>")
         lines.append(f"BTC-only (HODL): <b>{btc_val_str}</b>")
-        if runs == 0:
-            lines.append("(Initialisation run – first rebalance will occur on next cycle.)")
-        else:
-            lines.append(f"Rebalances applied: {runs}")
+        lines.append(f"Rebalances applied: {runs}")
+
 
     # Service health, explicitly flagging JSONs
     lines.append("")
@@ -963,7 +1000,6 @@ def main() -> None:
     lines.append(f"Prices OK: {'yes' if health.get('prices_ok') else 'no'}")
     lines.append(f"Current run wrote JSONs: {'yes' if health.get('json_written') else 'no'}")
 
-    tg_send("\n".join(lines))
     print("[dom] Updated dom_bands_latest.json, prices_latest.json, portfolio_weights.json")
 
 

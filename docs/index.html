@@ -406,6 +406,67 @@
       margin-top: 4px;
     }
 
+    /* Knifecatcher card */
+    .knifecatcher-card {
+      position: relative;
+    }
+
+    .kc-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    .kc-stat {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .kc-label {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .kc-main-value {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .kc-subline {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .kc-value-positive {
+      color: var(--accent-green);
+    }
+
+    .kc-value-negative {
+      color: var(--accent-red);
+    }
+
+    .kc-value-neutral {
+      color: var(--accent-neutral);
+    }
+
+    @media (max-width: 700px) {
+      .kc-grid {
+        grid-template-columns: 1fr;
+      }
+      .kc-main-value {
+        font-size: 16px;
+      }
+    }
+
+
+
     @media (max-width: 700px) {
       .prices-table {
         font-size: 11px;
@@ -491,6 +552,33 @@
         </div>
         <div class="oracle-error" id="oracle-error"></div>
       </section>
+
+      <!-- KNIFECATCHER -->
+      <section class="card knifecatcher-card">
+        <div class="card-header">
+          <div class="card-title">Knifecatcher</div>
+        </div>
+        <div class="kc-grid">
+          <div class="kc-stat">
+            <div class="kc-label">Balance</div>
+            <div class="kc-main-value" id="kc-balance">$--.--</div>
+            <div class="kc-subline" id="kc-balance-note">Based on algo holdings</div>
+          </div>
+          <div class="kc-stat">
+            <div class="kc-label">ROI</div>
+            <div class="kc-main-value kc-value-neutral" id="kc-roi">--.--%</div>
+            <div class="kc-subline">Since first rebalance</div>
+          </div>
+          <div class="kc-stat">
+            <div class="kc-label">Vs BTC Buy &amp; Hold</div>
+            <div class="kc-main-value" id="kc-compare">--.--% vs --.--%</div>
+            <div class="kc-subline" id="kc-compare-note">Knifecatcher vs BTC baseline</div>
+          </div>
+        </div>
+      </section>
+
+
+
 
       <!-- PRICES / TOKENS CARD -->
       <section class="card prices-card">
@@ -1165,12 +1253,13 @@
 
     // -------- INIT --------
 
-    (function init() {
+(function init() {
       fetchHMI();
       fetchSupplies()
         .then(fetchOracleHistory)
         .then(fetchDomBands)
-        .then(fetchPrices);
+        .then(fetchPrices)
+        .then(fetchKnifecatcher);
     })();
   </script>
 </body>
