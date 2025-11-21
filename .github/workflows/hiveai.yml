@@ -3,10 +3,10 @@ name: HiveAI System (12h HMI + Dominance)
 on:
   # HMI twice per day: 05:05 & 17:05 UTC
   schedule:
-    - cron: "5 5,17 * * *"
+   # - cron: "5 5,17 * * *"
 
     # Dominance + prices + TG twice per day: 05:15 & 17:15 UTC
-    - cron: "15 5,17 * * *"
+   # - cron: "15 5,17 * * *"
 
   # allow manual runs
   workflow_dispatch: {}
