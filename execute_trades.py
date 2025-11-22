@@ -45,8 +45,8 @@ PW_JSON_DOCS = DOCS / "portfolio_weights.json"
 STABLE = "USDC"
 BASE_URL = "https://api.binance.com"
 
-MIN_TRADE_USD = 5.0          # ignore diffs smaller than this
-TARGET_TOL = 0.01            # 1% tolerance
+MIN_TRADE_USD = 1.0          # ignore diffs smaller than this
+TARGET_TOL = 0.005            # 1% tolerance
 MAX_ITER = 3
 SLIPPAGE_BUFFER = 0.001      # +0.1% buffer on BUY notional
 
