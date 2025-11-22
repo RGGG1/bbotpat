@@ -9,8 +9,8 @@ Key rules:
 - Only trade the algo tokens (from portfolio_weights.json, mapping STABLES -> USDC).
 - Spot wallet only.
 - All value measured in USDC (1 USDC = 1 USD).
-- Min trade size: $5 notional.
-- Tolerance after rebalancing: 1% max weight error.
+- Min trade size: $1 notional.
+- Tolerance after rebalancing: 0.5% max weight error.
 - Routing:
     * Primary: asset <-> USDC (ASSETUSDC, BTCUSDC).
     * Shortcut: if BTC is underweight and a token is overweight, try ASSETBTC.
@@ -46,7 +46,7 @@ STABLE = "USDC"
 BASE_URL = "https://api.binance.com"
 
 MIN_TRADE_USD = 1.0          # ignore diffs smaller than this
-TARGET_TOL = 0.005            # 1% tolerance
+TARGET_TOL = 0.005           # 0.5% tolerance on weights
 MAX_ITER = 3
 SLIPPAGE_BUFFER = 0.001      # +0.1% buffer on BUY notional
 
