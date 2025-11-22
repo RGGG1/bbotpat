@@ -22,6 +22,7 @@ Key rules:
 import json
 import os
 import time
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -71,6 +72,21 @@ def log(msg: str) -> None:
     print(line)
     with TRADES_LOG.open("a") as f:
         f.write(line + "\n")
+
+
+# ---------------------------------------------------------------------
+# Utility: rounding quote amounts
+# ---------------------------------------------------------------------
+
+def round_quote(q: float, decimals: int = 2) -> float:
+    """
+    Round quote amount DOWN to the given decimals (e.g. 2 for USDC),
+    to avoid Binance 'too much precision' errors and over-spending balance.
+    """
+    if q is None:
+        return None
+    factor = 10 ** decimals
+    return math.floor(q * factor) / factor
 
 
 # ---------------------------------------------------------------------
@@ -473,10 +489,21 @@ def place_order(t: Trade) -> Optional[Dict[str, Any]]:
         "side": t.side,
         "type": "MARKET",
     }
+
     if t.side == "BUY":
-        params["quoteOrderQty"] = t.quote_order_qty
+        if t.quote_order_qty is None:
+            log(f"[LIVE] BUY {t.symbol} missing quote_order_qty, skipping.")
+            return None
+        q = round_quote(float(t.quote_order_qty), 2)  # 2 decimals for USDC
+        if q <= 0:
+            log(f"[LIVE] quoteOrderQty rounded to <= 0 for {t.symbol}, skipping.")
+            return None
+        params["quoteOrderQty"] = q
     else:
-        params["quantity"] = t.quantity
+        if t.quantity is None:
+            log(f"[LIVE] SELL {t.symbol} missing quantity, skipping.")
+            return None
+        params["quantity"] = float(t.quantity)
 
     if not LIVE_TRADING:
         log(f"[DRY-RUN] Would place {t.side} {t.symbol}: {params}")
