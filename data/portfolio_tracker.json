@@ -4,10 +4,10 @@
   "btc_base_price": 83926.49,
   "btc_base_qty": 0.0011915189113711295,
   "holdings": {
-    "USDC": 2.041632653053063
+    "USDC": 0.29169096792769716
   },
-  "last_value_usd": 14.288571142885711,
-  "last_timestamp": "2025-11-21T23:55:14.759654Z",
-  "runs": 3,
+  "last_value_usd": 2.041632653053063,
+  "last_timestamp": "2025-11-22T05:15:07.255085Z",
+  "runs": 4,
   "btc_holdings": {}
 }
