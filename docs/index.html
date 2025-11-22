@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>/ HiveAI – Hive Mind Index & Dominance</title>
+  <title>HiveAI - All signal, no noise</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <style>
     :root {
+
       --bg: #000000;
       --bg-elevated: #050509;
       --border-subtle: #22232f;
@@ -456,6 +458,25 @@
       );
     }
 
+    .card-oracle-link-row {
+      margin-top: 6px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .card-oracle-link {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+      color: var(--text-muted);
+    }
+
+    .card-oracle-link:hover {
+      color: var(--accent-green);
+    }
+
+
     @media (max-width: 700px) {
       .kc-row {
         flex-direction: column;
@@ -510,7 +531,7 @@
     </header>
 
     <main>
-      <!-- HMI CARD -->
+            <!-- HMI CARD -->
       <section class="card">
         <div class="card-header">
           <div class="card-title">Hive Mind Index</div>
@@ -519,7 +540,11 @@
           <div class="hmi-value" id="hmi-value">--.-</div>
           <div class="hmi-status" id="hmi-status">–</div>
         </div>
+        <div class="card-oracle-link-row">
+          <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
+        </div>
       </section>
+
 
       <!-- DOMINANCE -->
       <section class="card oracle-card">
@@ -551,14 +576,15 @@
         <div class="oracle-sub-line" id="oracle-sub-line">
           Market caps: <span>–</span>
         </div>
-        <div class="oracle-range-line" id="oracle-range-line">
+                <div class="oracle-range-line" id="oracle-range-line">
           Range: <span>–</span>
         </div>
-        <div class="oracle-note">
-          Retrieve via HiveAI API
-        </div>
         <div class="oracle-error" id="oracle-error"></div>
+        <div class="card-oracle-link-row">
+          <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
+        </div>
       </section>
+
 
             <!-- KNIFECATCHER -->
       <section class="card knifecatcher-card">
