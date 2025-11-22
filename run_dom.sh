@@ -24,5 +24,26 @@ LOG=/root/dom.log
   # Rebalance real Binance spot using USDC hub + BTC shortcut
   python3 execute_trades.py
 
+  # Auto-commit and push latest DOM / prices / portfolio / Knifecatcher data
+  if ! git diff --quiet \
+      docs/dom_bands_latest.json dom_bands_latest.json \
+      docs/prices_latest.json prices_latest.json \
+      docs/portfolio_weights.json portfolio_weights.json \
+      docs/knifecatcher_latest.json knifecatcher_latest.json \
+      data/portfolio_tracker.json 2>/dev/null; then
+
+    git add \
+      docs/dom_bands_latest.json dom_bands_latest.json \
+      docs/prices_latest.json prices_latest.json \
+      docs/portfolio_weights.json portfolio_weights.json \
+      docs/knifecatcher_latest.json knifecatcher_latest.json \
+      data/portfolio_tracker.json
+
+    git commit -m "Update DOM, prices, portfolio & Knifecatcher (auto)" \
+      || echo "[git] nothing to commit"
+
+    git push || echo "[git] push failed"
+  fi
+
   echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] --- run_dom.sh END (OK) ---"
 } >> "$LOG" 2>&1
