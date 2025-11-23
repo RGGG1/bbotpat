@@ -9,7 +9,8 @@ Key rules:
 - Only trade the algo tokens (from portfolio_weights.json, mapping STABLES -> USDC).
 - Spot wallet only.
 - All value measured in USDC (1 USDC = 1 USD).
-- Min trade size: $1 notional.
+- Planner min trade diff: $1 notional (ignore micro-noise).
+- Exchange min notional: ~ $5 on Binance – we skip BUYs below this to avoid NOTIONAL errors.
 - Tolerance after rebalancing: 0.5% max weight error.
 - Routing:
     * Primary: asset <-> USDC (ASSETUSDC, BTCUSDC).
@@ -45,10 +46,16 @@ PW_JSON_DOCS = DOCS / "portfolio_weights.json"
 STABLE = "USDC"
 BASE_URL = "https://api.binance.com"
 
-MIN_TRADE_USD = 1.0          # ignore diffs smaller than this
+# Only these assets are actually traded by the rebalancer
+ALLOWED_ASSETS = {"BTC", "ETH", "BNB", "SOL", STABLE}
+
+MIN_TRADE_USD = 1.0          # planner threshold: ignore diffs smaller than this
 TARGET_TOL = 0.005           # 0.5% tolerance on weights
 MAX_ITER = 3
 SLIPPAGE_BUFFER = 0.001      # +0.1% buffer on BUY notional
+
+# Rough Binance notional minimum – protects from `Filter failure: NOTIONAL`
+BINANCE_MIN_NOTIONAL_USD = 5.0
 
 TRADES_LOG = Path("/root/trades.log")
 
@@ -75,7 +82,7 @@ def log(msg: str) -> None:
 
 
 # ---------------------------------------------------------------------
-# Utility: rounding quote amounts
+# Utility: rounding & formatting
 # ---------------------------------------------------------------------
 
 def round_quote(q: float, decimals: int = 2) -> float:
@@ -87,6 +94,20 @@ def round_quote(q: float, decimals: int = 2) -> float:
         return None
     factor = 10 ** decimals
     return math.floor(q * factor) / factor
+
+
+def format_quantity(q: float, max_decimals: int = 8) -> Optional[str]:
+    """
+    Format a base-asset quantity as a fixed-point string (no scientific notation),
+    trimming trailing zeros, suitable for Binance quantity filters.
+    """
+    if q is None or q <= 0:
+        return None
+    s = f"{q:.{max_decimals}f}"
+    s = s.rstrip("0").rstrip(".")
+    if not s:
+        return None
+    return s
 
 
 # ---------------------------------------------------------------------
@@ -157,7 +178,8 @@ def binance_request(
 
 def load_portfolio_weights() -> Dict[str, float]:
     """
-    Load target weights from portfolio_weights.json.
+    Load target weights from portfolio_weights.json, then restrict to
+    the ALLOWED_ASSETS universe and renormalise.
 
     Supports your current format:
 
@@ -177,7 +199,7 @@ def load_portfolio_weights() -> Dict[str, float]:
         - [ { "asset": "...", "weight": ... }, ... ]
         - { "BTC": 0.25, "SOL": 0.25, ... }
 
-    Maps STABLES -> USDC and normalises to sum to 1.
+    Maps STABLES -> USDC and normalises to sum to 1 over the allowed set.
     """
     path = PW_JSON_ROOT
     if not path.exists() and PW_JSON_DOCS.exists():
@@ -214,12 +236,19 @@ def load_portfolio_weights() -> Dict[str, float]:
             continue
         weights[asset] = weights.get(asset, 0.0) + w
 
-    total = sum(weights.values())
+    # Restrict to our trading universe
+    filtered: Dict[str, float] = {
+        a: w for a, w in weights.items() if a in ALLOWED_ASSETS
+    }
+    total = sum(filtered.values())
     if total <= 0:
-        raise SystemExit("Invalid portfolio_weights.json: total weight <= 0.")
-    for k in list(weights.keys()):
-        weights[k] = weights[k] / total
-    return weights
+        raise SystemExit(
+            "Invalid portfolio_weights.json: no positive weights for allowed assets "
+            f"{sorted(ALLOWED_ASSETS)}"
+        )
+    for k in list(filtered.keys()):
+        filtered[k] = filtered[k] / total
+    return filtered
 
 
 def fetch_balances(universe: List[str]) -> Dict[str, float]:
@@ -498,12 +527,21 @@ def place_order(t: Trade) -> Optional[Dict[str, Any]]:
         if q <= 0:
             log(f"[LIVE] quoteOrderQty rounded to <= 0 for {t.symbol}, skipping.")
             return None
+        # Enforce Binance min notional to avoid NOTIONAL filter errors
+        if q < BINANCE_MIN_NOTIONAL_USD:
+            log(f"[LIVE] quoteOrderQty {q:.2f} < Binance min notional "
+                f"({BINANCE_MIN_NOTIONAL_USD:.2f}) for {t.symbol}, skipping BUY.")
+            return None
         params["quoteOrderQty"] = q
     else:
         if t.quantity is None:
             log(f"[LIVE] SELL {t.symbol} missing quantity, skipping.")
             return None
-        params["quantity"] = float(t.quantity)
+        qty_str = format_quantity(float(t.quantity), max_decimals=8)
+        if not qty_str:
+            log(f"[LIVE] SELL {t.symbol} quantity formatted to empty/zero, skipping.")
+            return None
+        params["quantity"] = qty_str
 
     if not LIVE_TRADING:
         log(f"[DRY-RUN] Would place {t.side} {t.symbol}: {params}")
