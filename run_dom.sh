@@ -21,6 +21,9 @@ LOG=/root/dom.log
   # Run dominance / prices / portfolio / TG signal
   python3 send_fg_dom_signal_telegram.py
 
+  # Update DOM market-cap history for API (any combo X vs Y)
+  python3 update_dom_mc_history.py
+
   # Rebalance real Binance spot using USDC hub + BTC shortcut
   python3 execute_trades.py
 

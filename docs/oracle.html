@@ -132,6 +132,7 @@
       font-size: 11px;
       color: var(--text-muted);
       margin-top: 4px;
+      margin-bottom: 8px;
     }
 
     .pill-dot {
@@ -144,7 +145,7 @@
     h2 {
       font-size: 15px;
       margin-bottom: 6px;
-      margin-top: 8px;
+      margin-top: 4px;
     }
 
     p {
@@ -195,21 +196,6 @@
       margin-top: 4px;
     }
 
-    .badge-row {
-      margin-top: 6px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .badge {
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--border-subtle);
-      color: var(--text-muted);
-    }
-
     .footer-note {
       font-size: 11px;
       color: var(--text-muted);
@@ -239,45 +225,32 @@
     </header>
 
     <main>
+      <!-- Section 1: HiveAI Oracle -->
       <section class="card">
         <div class="card-title">Oracle</div>
         <div class="hero-title">HiveAI Oracle</div>
-        <div class="hero-subtitle">Programmatic access to the Hive Mind Index and Dominance signals.</div>
+        <div class="hero-subtitle">
+          Hive Mind Index and Dominance signals for programmatic use.
+        </div>
         <div class="pill">
           <span class="pill-dot"></span>
           <span>Updated every 12 hours (07:15 &amp; 19:15 CEST)</span>
         </div>
-      </section>
-
-      <section class="card section">
-        <h2>What this oracle provides</h2>
-        <p>
-          The HiveAI Oracle exposes a small, opinionated set of signals:
-        </p>
         <ul>
-          <li><b>HMI</b> – Hive Mind Index (our custom fear &amp; greed indicator).</li>
-          <li><b>Dominance</b> – BTC dominance versus individual tokens or token baskets,
-              using live market caps.</li>
+          <li><b>HMI</b> – Hive Mind Index (modernised fear &amp; greed indicator).</li>
+          <li><b>Dominance</b> – BTC dominance versus individual tokens or token baskets.</li>
         </ul>
-        <div class="badge-row">
-          <span class="badge">Read-only HTTP oracle</span>
-          <span class="badge">No auth (for now)</span>
-          <span class="badge">Low-frequency friendly</span>
-        </div>
       </section>
 
+      <!-- Section 2: URLs and Endpoints -->
       <section class="card section">
-        <h2>Base URL</h2>
-        <p>
-          Replace <code>&lt;BASE_URL&gt;</code> with your HiveAI node address, for example:
-        </p>
+        <h2>URLs and endpoints</h2>
+
+        <p>Replace <code>&lt;BASE_URL&gt;</code> with your HiveAI node address, for example:</p>
         <pre><code>http://&lt;BASE_URL&gt;:8000</code></pre>
-        <p>
-          All endpoints below are relative to that base URL.
-        </p>
-      </section>
 
-      <section class="card section">
+        <p>All endpoints below are relative to that base URL.</p>
+
         <h2>HMI endpoints</h2>
 
         <p><b>Latest HMI value</b></p>
@@ -296,9 +269,7 @@
         <pre><code>GET /api/hmi/history?days=N</code></pre>
         <p>Example (last 30 days):</p>
         <pre><code>curl "&lt;BASE_URL&gt;:8000/api/hmi/history?days=30"</code></pre>
-      </section>
 
-      <section class="card section">
         <h2>Dominance endpoints</h2>
 
         <p><b>Token universe &amp; macros</b></p>
@@ -323,22 +294,7 @@ GET /api/dom/history?x=BTC&amp;y=ALTS&amp;days=N</code></pre>
           Historical ranges (min / max) for BTC vs single tokens and BTC vs ALTS
           are already available and power the dominance UI on the main page.
         </p>
-      </section>
 
-      <section class="card section">
-        <h2>Update frequency &amp; polling guidance</h2>
-        <p>
-          Signals are recomputed every 12 hours, aligned with the main HiveAI dashboard
-          updates (07:15 and 19:15 CEST).
-        </p>
-        <ul>
-          <li>Polling more often than every few minutes is usually unnecessary.</li>
-          <li>Reasonable polling: once every 5–15 minutes.</li>
-          <li>Historical queries can be cached client-side between runs.</li>
-        </ul>
-      </section>
-
-      <section class="card section">
         <h2>Custom dominance history &amp; pairs</h2>
         <p>
           By default, full historical ranges are maintained for core pairs
@@ -346,8 +302,8 @@ GET /api/dom/history?x=BTC&amp;y=ALTS&amp;days=N</code></pre>
         </p>
         <p>
           If you need long-term dominance history for a specific pair or pair
-          combo (e.g. <code>SOL</code> vs <code>ETH+BNB</code>), it is available
-          on request. We will:
+          combo currently untracked (e.g. <code>SOL</code> vs <code>ETH+BNB</code>),
+          it is available on request. We will:
         </p>
         <ul>
           <li>Begin tracking that pair/basket combination.</li>
@@ -357,9 +313,7 @@ GET /api/dom/history?x=BTC&amp;y=ALTS&amp;days=N</code></pre>
           To request new pairs, reach out via the same channel where you obtained
           this node, or open an issue on the repository.
         </p>
-      </section>
 
-      <section class="card section">
         <h2>Roadmap: keys, tiers &amp; on-chain oracle</h2>
         <ul>
           <li><b>Auth &amp; keys</b> – API keys and per-user rate limits.</li>
