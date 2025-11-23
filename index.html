@@ -2,15 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>HiveAI – Hive Mind Index & Dominance</title>
+  <title>HiveAI - All signal, no noise</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <style>
     :root {
       --bg: #000000;
-      --bg-elevated: transparent;
-      --border-subtle: transparent;
+      --bg-elevated: #050509;
+      --border-subtle: #22232f;
       --text-main: #f5f5f7;
       --text-muted: #888aa0;
       --accent-red: #ff4b5c;
@@ -27,14 +26,14 @@
     }
 
     body {
-      background: #000000;
+      background: var(--bg);
       color: var(--text-main);
       font-family: var(--font-main);
       min-height: 100vh;
       display: flex;
       justify-content: center;
       align-items: flex-start;
-      padding: 32px 16px;
+      padding: 24px 16px;
     }
 
     .app-shell {
@@ -46,22 +45,31 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
 
-    .site-title {
-      font-size: 24px;
+    .title-stack {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      font-size: 22px;
       font-weight: 600;
       letter-spacing: 0.03em;
-      display: flex;
-      align-items: center;
-      gap: 4px;
     }
 
-    #logo-slash {
+    .logo-slash {
       font-size: 24px;
       line-height: 1;
-      transform: translateY(-1px);
+      transition: color 0.28s ease;
+    }
+
+    .logo-hive {
+      transition: color 0.28s ease;
+    }
+
+    .logo-ai {
+      color: var(--text-main);
+      opacity: 0.9;
     }
 
     .logo-accent-red {
@@ -78,165 +86,475 @@
 
     .meta-topline {
       text-align: right;
-      font-size: 13px;
+      font-size: 11px;
       color: var(--text-muted);
     }
 
-    .meta-topline strong {
-      color: var(--text-main);
-      font-weight: 500;
-    }
-
     main {
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.3fr);
-      gap: 18px;
-    }
-
-    @media (max-width: 800px) {
-      main {
-        grid-template-columns: minmax(0, 1fr);
-      }
-      header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 8px;
-      }
-      .meta-topline {
-        text-align: left;
-      }
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
 
     .card {
-      background: transparent;
-      border-radius: 0;
-      border: none;
-      box-shadow: none;
-      padding: 6px 2px 10px;
-    }
-
-    .card:not(:first-of-type) {
-      margin-top: 4px;
+      background: var(--bg-elevated);
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+      padding: 10px 12px 12px;
     }
 
     .card-header {
       display: flex;
-      align-items: center;
+      align-items: baseline;
       justify-content: space-between;
       margin-bottom: 6px;
     }
 
     .card-title {
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 500;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--text-muted);
     }
 
-    .chip {
-      font-size: 11px;
-      padding: 3px 8px;
-      border-radius: 999px;
-      background: #181828;
-      border: 1px solid #262637;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-muted);
-    }
-
+    /* HMI section */
     .hmi-value-row {
       display: flex;
       align-items: baseline;
       gap: 8px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
 
     .hmi-value {
-      font-size: 40px;
+      font-size: 36px;
       font-weight: 600;
     }
 
     .hmi-status {
       font-size: 14px;
-      color: var(--text-muted);
-    }
-
-    .dominance-main {
-      font-size: 24px;
       font-weight: 500;
-      margin-bottom: 6px;
+      color: var(--accent-neutral);
     }
 
-    .dominance-range {
+    .hmi-tracking-wrapper {
+      margin-top: 4px;
+      text-align: center;
+    }
+
+    .hmi-tracking-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      border-bottom: 1px solid #33334a;
+      display: inline-block;
+      padding-bottom: 2px;
+    }
+
+    .hmi-tracking-items {
+      margin-top: 6px;
       font-size: 11px;
       color: var(--text-muted);
-      margin-bottom: 6px;
-    }
-
-    .dominance-sub {
-      font-size: 13px;
-      color: var(--text-muted);
-      margin-bottom: 10px;
-    }
-
-    .dominance-sub span {
-      color: var(--text-main);
-    }
-
-    .prices-list {
-      margin-top: 4px;
       display: flex;
-      flex-direction: column;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .hmi-tracking-item {
+      display: inline-flex;
+      align-items: center;
       gap: 4px;
-      font-size: 13px;
-      color: var(--text-muted);
+      white-space: nowrap;
     }
 
-    .prices-list strong {
+    .hmi-tracking-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--accent-green);
+      flex-shrink: 0;
+    }
+
+    /* Dominance */
+    .oracle-card {
+      margin-top: 2px;
+      position: relative;
+    }
+
+    .oracle-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .oracle-header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: nowrap;
+      margin-left: auto;
+    }
+
+    .oracle-pill-wrapper {
+      position: relative;
+    }
+
+    .oracle-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid #33334a;
+      background: #080814;
+      cursor: pointer;
+      min-width: 96px;
+      font-size: 11px;
       color: var(--text-main);
-      font-weight: 500;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
     }
 
-    .dominance-action {
-      margin-top: 8px;
-      font-size: 13px;
+    .oracle-pill-label {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .oracle-pill-arrow {
+      font-size: 9px;
+      opacity: 0.8;
+    }
+
+    .oracle-vs {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
       color: var(--text-muted);
+    }
+
+    .oracle-dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 20;
+      background: #050509;
+      border-radius: 10px;
+      border: 1px solid #33334a;
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.7);
+      padding: 6px 6px 6px;
+      min-width: 160px;
+      max-height: 260px;
+      overflow-y: auto;
+      display: none;
+    }
+
+    .oracle-dropdown.open {
+      display: block;
+    }
+
+    .oracle-option {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--text-main);
+    }
+
+    .oracle-option:hover {
+      background: #121224;
+    }
+
+    .oracle-option input[type="checkbox"] {
+      display: none;
+    }
+
+    .oracle-option-box {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      border: 1px solid #44445a;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--accent-green);
+    }
+
+    .oracle-option.selected .oracle-option-box {
+      background: #101f16;
+      border-color: #1f9f4a;
+    }
+
+    .oracle-option-tick {
+      display: none;
+    }
+
+    .oracle-option.selected .oracle-option-tick {
+      display: block;
+    }
+
+    .oracle-option-label {
+      white-space: nowrap;
+    }
+
+    .oracle-clear {
+      margin-top: 6px;
+      padding: 4px 6px;
+      text-align: right;
+      font-size: 10px;
+      color: var(--text-muted);
+      border-top: 1px solid #222238;
+      cursor: pointer;
+    }
+
+    .oracle-clear:hover {
+      color: var(--accent-neutral);
+    }
+
+    .oracle-main-line {
+      font-size: 16px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .oracle-main-line .dom-value {
+      font-size: 36px;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+
+    .oracle-main-line .dom-label {
+      font-size: 13px;
+      color: var(--accent-neutral);
+    }
+
+    .oracle-sub-line,
+    .oracle-range-line,
+    .oracle-error {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .oracle-sub-line span,
+    .oracle-range-line span {
+      color: var(--text-main);
+    }
+
+    .oracle-error {
+      color: var(--accent-red);
+      margin-top: 4px;
+    }
+
+    /* Prices table */
+    .prices-card {
+      margin-top: 4px;
+    }
+
+    .prices-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 6px;
+    }
+
+    .prices-table thead {
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .prices-table th,
+    .prices-table td {
+      padding: 6px 4px;
+    }
+
+    .prices-table th {
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .prices-table th.token-col,
+    .prices-table td.token-col {
+      text-align: left;
+    }
+
+    .prices-table th.center,
+    .prices-table td.center {
+      text-align: center;
+    }
+
+    .prices-table tbody tr {
+      border-bottom: 1px solid #11111a;
+    }
+
+    .prices-table tbody tr:last-child {
+      border-bottom: none;
+    }
+
+    .prices-table tbody tr:nth-child(even) {
+      background: #070711;
+    }
+
+    .prices-table tbody tr:nth-child(odd) {
+      background: #050509;
+    }
+
+    .price-positive {
+      color: var(--accent-green);
+    }
+
+    .price-negative {
+      color: var(--accent-red);
+    }
+
+    .price-neutral {
+      color: var(--text-main);
     }
 
     .footer-note {
-      margin-top: 18px;
+      margin-top: 14px;
       font-size: 11px;
       color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .footer-note-title {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 10px;
+      margin-bottom: 2px;
+    }
+
+    .oracle-notes-card {
+      margin-top: 4px;
+    }
+
+    /* Knifecatcher card */
+    .knifecatcher-card {
+      position: relative;
+    }
+
+    .kc-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 14px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+
+    .kc-block {
       display: flex;
       flex-direction: column;
       gap: 4px;
-      justify-content: flex-start;
-      align-items: flex-start;
+      min-width: 0;
     }
 
-    .status-dot {
-      display: inline-block;
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      margin-right: 4px;
+    .kc-label {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
     }
 
-    .status-live {
-      background: var(--accent-green);
+    .kc-main-value {
+      font-size: 32px;
+      font-weight: 600;
+      line-height: 1.1;
+    }
+
+    .kc-subline {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .kc-divider {
+      width: 1px;
+      align-self: stretch;
+      background: linear-gradient(
+        to bottom,
+        transparent,
+        rgba(255, 255, 255, 0.1),
+        transparent
+      );
+    }
+
+    .card-oracle-link-row {
+      margin-top: 6px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .card-oracle-link {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+      color: var(--text-muted);
+    }
+
+    .card-oracle-link:hover {
+      color: var(--accent-green);
+    }
+
+    @media (max-width: 700px) {
+      .kc-row {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .kc-divider {
+        width: 100%;
+        height: 1px;
+      }
+
+      .kc-main-value {
+        font-size: 26px;
+      }
+    }
+
+    @media (max-width: 700px) {
+      .prices-table {
+        font-size: 11px;
+      }
+      .prices-table th,
+      .prices-table td {
+        padding: 5px 3px;
+      }
+      .hmi-value {
+        font-size: 32px;
+      }
+      .oracle-main-line .dom-value {
+        font-size: 32px;
+      }
+      .oracle-dropdown {
+        left: 0;
+        right: 0;
+      }
     }
   </style>
 </head>
 <body>
   <div class="app-shell">
     <header>
-      <h1 class="site-title">
-        <span id="logo-slash" class="logo-accent-neutral">/</span>
-        <span id="logo-hive" class="logo-accent-neutral">HiveAI</span>
-      </h1>
+      <div class="title-stack">
+        <span id="logo-slash" class="logo-slash logo-accent-neutral">/</span>
+        <span class="logo-wordmark">
+          <span id="logo-hive" class="logo-hive logo-accent-neutral">Hive</span><span class="logo-ai">AI</span>
+        </span>
+      </div>
       <div class="meta-topline">
-        <strong id="meta-date">--/--/--</strong>
+        Updated: <span id="meta-date">--/--/-- --:--</span>
       </div>
     </header>
 
@@ -245,80 +563,179 @@
       <section class="card">
         <div class="card-header">
           <div class="card-title">Hive Mind Index</div>
-          <!-- chip removed here -->
         </div>
         <div class="hmi-value-row">
-          <span class="hmi-value" id="hmi-value">--.-</span>
-          <span class="hmi-status" id="hmi-status">unavailable</span>
+          <div class="hmi-value" id="hmi-value">--.-</div>
+          <div class="hmi-status" id="hmi-status">–</div>
+        </div>
+        <div class="hmi-tracking-wrapper">
+          <div class="hmi-tracking-title">Tracking</div>
+          <div class="hmi-tracking-items">
+            <div class="hmi-tracking-item">
+              <span class="hmi-tracking-dot"></span>
+              <span>Open Interest</span>
+            </div>
+            <div class="hmi-tracking-item">
+              <span class="hmi-tracking-dot"></span>
+              <span>Perps vs Spot</span>
+            </div>
+            <div class="hmi-tracking-item">
+              <span class="hmi-tracking-dot"></span>
+              <span>Volatility</span>
+            </div>
+          </div>
+        </div>
+        <div class="card-oracle-link-row">
+          <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
         </div>
       </section>
 
-      <!-- DOMINANCE CARD -->
-      <section class="card">
-        <div class="card-header">
+      <!-- DOMINANCE -->
+      <section class="card oracle-card">
+        <div class="oracle-header-row">
           <div class="card-title">Dominance</div>
-          <div class="chip" id="dom-chip-label">BTC vs EthBnbSol</div>
+          <div class="oracle-header-right">
+            <div class="oracle-pill-wrapper">
+              <div class="oracle-pill" id="oracle-x-pill">
+                <span class="oracle-pill-label" id="oracle-x-label">Select</span>
+                <span class="oracle-pill-arrow">▾</span>
+              </div>
+              <div class="oracle-dropdown" id="oracle-x-menu"></div>
+            </div>
+            <span class="oracle-vs">vs</span>
+            <div class="oracle-pill-wrapper">
+              <div class="oracle-pill" id="oracle-y-pill">
+                <span class="oracle-pill-label" id="oracle-y-label">Select</span>
+                <span class="oracle-pill-arrow">▾</span>
+              </div>
+              <div class="oracle-dropdown" id="oracle-y-menu"></div>
+            </div>
+          </div>
         </div>
-        <div class="dominance-main" id="dom-main-text">
-          BTC vs Alts: --/--
+
+        <div class="oracle-main-line" id="oracle-main-line">
+          <span class="dom-value">--</span>
+          <span class="dom-label">Select X and Y</span>
         </div>
-        <div class="dominance-range" id="dom-range-text">
-          2-yr range: –% - –%
-        </div>
-        <div class="dominance-sub" id="dom-sub-text">
+        <div class="oracle-sub-line" id="oracle-sub-line">
           Market caps: <span>–</span>
         </div>
-        <div class="prices-list">
-          <div id="price-btc">BTC: <strong>–</strong></div>
-          <div id="price-eth">ETH: <strong>–</strong></div>
-          <div id="price-bnb">BNB: <strong>–</strong></div>
-          <div id="price-sol">SOL: <strong>–</strong></div>
+        <div class="oracle-range-line" id="oracle-range-line">
+          Range: <span>–</span>
         </div>
-        <div class="dominance-action" id="dom-action-text">
-          Action: –
+        <div class="oracle-error" id="oracle-error"></div>
+        <div class="card-oracle-link-row">
+          <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
+        </div>
+      </section>
+
+      <!-- KNIFECATCHER -->
+      <section class="card knifecatcher-card">
+        <div class="card-header">
+          <div class="card-title">Knifecatcher</div>
+        </div>
+        <div class="kc-row">
+          <div class="kc-block">
+            <div class="kc-label">Balance</div>
+            <div class="kc-main-value" id="kc-balance">$--.--</div>
+          </div>
+
+          <div class="kc-divider" aria-hidden="true"></div>
+
+          <div class="kc-block kc-block-right">
+            <div class="kc-label">ROI</div>
+            <div class="kc-main-value" id="kc-compare">--.--% vs --.--%</div>
+            <div class="kc-subline">Knifecatcher vs BTC buy and hold</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PRICES / TOKENS CARD -->
+      <section class="card prices-card">
+        <div class="card-header">
+          <div class="card-title">Tokens</div>
+        </div>
+        <table class="prices-table">
+          <thead>
+            <tr>
+              <th class="token-col">Token</th>
+              <th class="center">Price</th>
+              <th class="center">24h</th>
+              <th class="center">Dom</th>
+              <th class="center">Range</th>
+              <th class="center">Action</th>
+            </tr>
+          </thead>
+          <tbody id="prices-tbody">
+          </tbody>
+        </table>
+      </section>
+
+      <!-- HIVEAI ORACLE NOTES CARD -->
+      <section class="card oracle-notes-card">
+        <div class="footer-note">
+          <div class="footer-note-title">HiveAI Oracle Notes</div>
+          <div>
+            <ul style="margin-top:6px;line-height:1.35;list-style:disc;padding-left:18px;">
+              <li>Hive Mind Index (HMI) is our custom fear and greed index, factored for predictive signaling.</li>
+              <li>HMI and Dom values updated every 12 hours, at 07:15 and 19:15 CEST.</li>
+              <li>'Dom' represents BTC dominance against token.</li>
+              <li>'Range' represents up to 2-year BTC Dom range against token.</li>
+              <li>USDTC = USDT and USDC combined.</li>
+              <li>Additional token listing available on request.</li>
+            </ul>
+          </div>
         </div>
       </section>
     </main>
-
-    <div class="footer-note">
-      <div>
-        <span class="status-dot status-live"></span>Refresh rates
-      </div>
-      <div>HMI: every 60s.</div>
-      <div>Dominance: every 6h.</div>
-      <div>Prices: on page load.</div>
-    </div>
   </div>
 
   <script>
-    // ---- CONFIG ----
-    const HMI_SOURCE_URL = "hmi_latest.json";           // generated by export_hmi_json.py at repo root
-    const DOM_BANDS_URL  = "dom_bands_latest.json";     // generated by backtest_dominance_rotation.py
-    const HMI_REFRESH_MS = 60 * 1000;                   // 1 minute
-    const DOM_REFRESH_MS = 6 * 60 * 60 * 1000;          // 6 hours
-
     const HMI_NEUTRAL_LOW = 40;
     const HMI_NEUTRAL_HIGH = 60;
-    const GREED_STABLE_THRESHOLD = 77.0;
 
-    // ---- GLOBAL STATE FOR ACTION ----
-    let latestHmi = null;
-    let domMin = null;
-    let dom35 = null;
-    let dom65 = null;
-    let domMax = null;
-    let latestBtcDom = null;
+    const ORACLE_TOKENS = [
+      "BTC",
+      "ETH",
+      "BNB",
+      "SOL",
+      "DOGE",
+      "TON",
+      "SUI",
+      "UNI"
+    ];
 
-    // ---- UTILITIES ----
-    function formatDate(ts) {
-      const d = ts ? new Date(ts) : new Date();
+    const BINANCE_SYMBOLS = {
+      BTC: "BTCUSDT",
+      ETH: "ETHUSDT",
+      BNB: "BNBUSDT",
+      SOL: "SOLUSDT",
+      DOGE: "DOGEUSDT",
+      TON: "TONUSDT",
+      SUI: "SUIUSDT",
+      UNI: "UNIUSDT"
+    };
+
+    let pricesRowsGlobal = [];
+    let suppliesGlobal = null;
+    let oracleHistories = {};
+    let domBandsGlobal = null;
+    let oracleSelectedX = ["BTC"];
+    let oracleSelectedY = ["ALTS"];
+    let globalHMI = null;
+
+    function formatDateTime(ts) {
+      if (!ts) return "--/--/-- --:--";
+      const d = new Date(ts);
       const dd = String(d.getDate()).padStart(2, "0");
       const mm = String(d.getMonth() + 1).padStart(2, "0");
       const yy = String(d.getFullYear()).slice(-2);
-      return `${dd}/${mm}/${yy}`;
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mi = String(d.getMinutes()).padStart(2, "0");
+      return `${dd}/${mm}/${yy} ${hh}:${mi}`;
     }
 
-    function formatMarketCap(v) {
+    function formatMC(v) {
       if (!v || v <= 0) return "$0";
       if (v >= 1e12) {
         return `$${(v / 1e12).toFixed(1)}T`;
@@ -332,24 +749,20 @@
       return `$${Math.round(v).toLocaleString()}`;
     }
 
-    function hmiBandLabel(hmi) {
-      if (hmi < 10) return "Zombie apocalypse";
-      if (hmi < 25) return "McDonald's applications";
-      if (hmi < 40) return "Ngmi";
-      if (hmi < 60) return "Stable";
-      if (hmi < 80) return "We're early";
-      return "It's the future of finance";
-    }
-
     function updateLogoColor(hmi) {
       const slashEl = document.getElementById("logo-slash");
       const hiveEl = document.getElementById("logo-hive");
+      if (!slashEl || !hiveEl) return;
 
-      // Reset
       slashEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
       hiveEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
 
-      // Decide band: below neutral = red, neutral = white, above = green
+      if (typeof hmi !== "number" || Number.isNaN(hmi)) {
+        slashEl.classList.add("logo-accent-neutral");
+        hiveEl.classList.add("logo-accent-neutral");
+        return;
+      }
+
       if (hmi < HMI_NEUTRAL_LOW) {
         slashEl.classList.add("logo-accent-red");
         hiveEl.classList.add("logo-accent-red");
@@ -362,182 +775,686 @@
       }
     }
 
-    // ---- ACTION CALC ----
-    function updateActionText() {
-      const el = document.getElementById("dom-action-text");
-
-      // Need dominance, bands, and HMI
-      if (
-        latestBtcDom === null ||
-        domMin === null || dom35 === null || dom65 === null || domMax === null
-      ) {
-        el.textContent = "Action: –";
-        return;
-      }
-
-      // HMI greed override
-      if (latestHmi !== null && latestHmi >= GREED_STABLE_THRESHOLD) {
-        el.textContent = "Action: Stable up";
-        return;
-      }
-
-      // Mid-zone stables
-      if (latestBtcDom > dom35 && latestBtcDom < dom65) {
-        el.textContent = "Action: Stable up";
-        return;
-      }
-
-      // Degenerate guard
-      if (domMax <= domMin) {
-        el.textContent = "Action: –";
-        return;
-      }
-
-      // Linear BTC -> ALTs mapping across domMin -> domMax
-      let t = (latestBtcDom - domMin) / (domMax - domMin);
-      t = Math.max(0, Math.min(1, t));
-
-      // t < 0.5 => BTC-heavy, t > 0.5 => ALTs-heavy
-      if (t <= 0.5) {
-        el.textContent = "Action: Buy BTC";
-      } else {
-        el.textContent = "Action: Buy ALTs";
-      }
+    function hmiBandLabelLocal(hmi) {
+      if (hmi < 10) return "Zombie Apocalypse";
+      if (hmi < 25) return "McDonald's Applications in high demand";
+      if (hmi < 45) return "NGMI";
+      if (hmi < 50) return "Leaning bearish";
+      if (hmi < 55) return "Cautiously bullish";
+      if (hmi < 75) return "It's digital gold";
+      if (hmi < 90) return "Frothy";
+      return "It's the future of finance";
     }
 
-    // ---- HMI FETCH ----
     async function fetchHMI() {
       try {
-        const resp = await fetch(HMI_SOURCE_URL, { cache: "no-store" });
+        const resp = await fetch("hmi_latest.json", { cache: "no-store" });
         if (!resp.ok) throw new Error("HMI fetch failed");
         const data = await resp.json();
 
-        const hmi = typeof data.hmi === "number" ? data.hmi : parseFloat(data.hmi);
-        if (Number.isNaN(hmi)) throw new Error("Invalid HMI in JSON");
+        const hmiRaw = (typeof data.hmi === "number") ? data.hmi : parseFloat(data.hmi);
+        const hmi = Number.isNaN(hmiRaw) ? null : hmiRaw;
 
-        latestHmi = hmi;
+        if (hmi === null) {
+          throw new Error("Invalid HMI in JSON");
+        }
 
-        const band = hmiBandLabel(hmi);
+        globalHMI = hmi;
 
-        document.getElementById("hmi-value").textContent = hmi.toFixed(1);
-        document.getElementById("hmi-status").textContent = band.toLowerCase();
-        document.getElementById("meta-date").textContent = formatDate();
+        const band = typeof data.band === "string" && data.band.trim()
+          ? data.band
+          : hmiBandLabelLocal(hmi);
+
+        const hmiEl = document.getElementById("hmi-value");
+        const statusEl = document.getElementById("hmi-status");
+        if (hmiEl) hmiEl.textContent = hmi.toFixed(1);
+        if (statusEl) statusEl.textContent = band;
 
         updateLogoColor(hmi);
-        updateActionText();
       } catch (err) {
         console.error("HMI error:", err);
-        document.getElementById("hmi-value").textContent = "--.-";
-        document.getElementById("hmi-status").textContent = "unavailable";
+        globalHMI = null;
+        const hmiEl = document.getElementById("hmi-value");
+        const statusEl = document.getElementById("hmi-status");
+        if (hmiEl) hmiEl.textContent = "--.-";
+        if (statusEl) statusEl.textContent = "unavailable";
+        updateLogoColor(NaN);
       }
     }
 
-    // ---- DOMINANCE BANDS (dynamic) ----
+    async function fetchSupplies() {
+      try {
+        const resp = await fetch("supplies_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("supplies fetch failed");
+        const data = await resp.json();
+        suppliesGlobal = data && data.supplies ? data.supplies : null;
+      } catch (err) {
+        console.error("Supplies error:", err);
+        suppliesGlobal = null;
+      }
+    }
+
+    async function fetchOracleHistory() {
+      try {
+        const resp = await fetch("dom_history_latest.json", { cache: "no-store" });
+        if (!resp.ok) {
+          console.warn("dom_history_latest.json not found or error");
+          oracleHistories = {};
+          return;
+        }
+        const data = await resp.json();
+        oracleHistories = data && data.series ? data.series : {};
+      } catch (err) {
+        console.error("Oracle history error:", err);
+        oracleHistories = {};
+      }
+    }
+
     async function fetchDomBands() {
       try {
-        const resp = await fetch(DOM_BANDS_URL, { cache: "no-store" });
+        const resp = await fetch("dom_bands_latest.json", { cache: "no-store" });
         if (!resp.ok) throw new Error("dom bands fetch failed");
+        domBandsGlobal = await resp.json();
+      } catch (err) {
+        console.error("Dom bands error:", err);
+        domBandsGlobal = null;
+      }
+    }
+
+    function computeActionForRow(row) {
+      const token = row.token;
+      if (!token) return "–";
+
+      if (token === "BTC") return "BTC only";
+      if (token === "USDTC") return "Stables";
+
+      const domNow = typeof row.btc_dom === "number"
+        ? row.btc_dom
+        : parseFloat(row.btc_dom || "NaN");
+
+      const rangeStr = row.range || "";
+      const m = rangeStr.match(/(\d+)\D+(\d+)%/);
+      if (!m) return "–";
+
+      const domMin = parseFloat(m[1]);
+      const domMax = parseFloat(m[2]);
+      if (
+        Number.isNaN(domNow) ||
+        Number.isNaN(domMin) ||
+        Number.isNaN(domMax) ||
+        domMax <= domMin
+      ) {
+        return "–";
+      }
+
+      // HMI override – match Python algo GREED_STABLE_THRESHOLD (77)
+      if (globalHMI !== null && !Number.isNaN(globalHMI) && globalHMI >= 77) {
+        return "Stables";
+      }
+
+      const span = domMax - domMin;
+      let t = (domNow - domMin) / span;
+      if (t < 0) t = 0;
+      if (t > 1) t = 1;
+
+      let wBtc, wAlt, wSt;
+
+      if (t < 0.35) {
+        const local = t / 0.35;
+        wBtc = 1.0 - local;
+        wAlt = local;
+        wSt = 0.0;
+      } else if (t < 0.65) {
+        wBtc = 0.0;
+        wAlt = 0.0;
+        wSt = 1.0;
+      } else {
+        const local = (t - 0.65) / 0.35;
+        wBtc = 1.0 - local;
+        wAlt = local;
+        wSt = 0.0;
+      }
+
+      const dominant = Math.max(wBtc, wAlt, wSt);
+      if (wSt >= dominant) {
+        return "Stables";
+      }
+
+      const sumBA = wBtc + wAlt;
+      if (sumBA <= 0) return "–";
+
+      let altPct = (wAlt / sumBA) * 100;
+      let btcPct = (wBtc / sumBA) * 100;
+
+      altPct = Math.round(altPct);
+      btcPct = Math.round(btcPct);
+
+      const total = altPct + btcPct;
+      if (total !== 100) {
+        btcPct += 100 - total;
+      }
+
+      return `${altPct}/${btcPct}`;
+    }
+
+    async function fetchPrices() {
+      try {
+        const resp = await fetch("prices_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("prices fetch failed");
         const data = await resp.json();
 
-        domMin = typeof data.dom_min === "number" ? data.dom_min : parseFloat(data.dom_min);
-        dom35  = typeof data.dom_35 === "number" ? data.dom_35 : parseFloat(data.dom_35);
-        dom65  = typeof data.dom_65 === "number" ? data.dom_65 : parseFloat(data.dom_65);
-        domMax = typeof data.dom_max === "number" ? data.dom_max : parseFloat(data.dom_max);
-
-        if (
-          Number.isNaN(domMin) || Number.isNaN(dom35) ||
-          Number.isNaN(dom65) || Number.isNaN(domMax)
-        ) {
-          throw new Error("Invalid dom bands in JSON");
+        const metaEl = document.getElementById("meta-date");
+        if (metaEl && data && data.timestamp) {
+          metaEl.textContent = formatDateTime(data.timestamp);
         }
 
-        const minPct = Math.round(domMin * 100);
-        const maxPct = Math.round(domMax * 100);
+        const tbody = document.getElementById("prices-tbody");
+        tbody.innerHTML = "";
 
-        const text = `2-yr range: ${minPct}% - ${maxPct}%`;
-        document.getElementById("dom-range-text").textContent = text;
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        pricesRowsGlobal = rows;
 
-        updateActionText();
+        rows.forEach(row => {
+          const tr = document.createElement("tr");
+
+          const tdToken = document.createElement("td");
+          tdToken.className = "token-col";
+          tdToken.textContent = row.token || "";
+          tr.appendChild(tdToken);
+
+          const tdPrice = document.createElement("td");
+          tdPrice.className = "center";
+          const priceVal = typeof row.price === "number" ? row.price : parseFloat(row.price || "0");
+          if (!Number.isNaN(priceVal) && priceVal > 0) {
+            if (priceVal >= 1000) {
+              tdPrice.textContent = "$" + Math.round(priceVal).toLocaleString();
+            } else {
+              tdPrice.textContent = "$" + priceVal.toFixed(2);
+            }
+          } else {
+            tdPrice.textContent = "–";
+          }
+          tr.appendChild(tdPrice);
+
+          const tdChange = document.createElement("td");
+          tdChange.className = "center";
+          const ch = typeof row.change_24h === "number"
+            ? row.change_24h
+            : parseFloat(row.change_24h || "0");
+          if (Number.isNaN(ch)) {
+            tdChange.textContent = "–";
+            tdChange.classList.add("price-neutral");
+          } else {
+            const sign = ch > 0 ? "+" : "";
+            tdChange.textContent = `${sign}${ch.toFixed(1)}%`;
+            if (ch > 0) {
+              tdChange.classList.add("price-positive");
+            } else if (ch < 0) {
+              tdChange.classList.add("price-negative");
+            } else {
+              tdChange.classList.add("price-neutral");
+            }
+          }
+          tr.appendChild(tdChange);
+
+          const tdDom = document.createElement("td");
+          tdDom.className = "center";
+          const dom = typeof row.btc_dom === "number" ? row.btc_dom : null;
+          if (dom === null || Number.isNaN(dom)) {
+            tdDom.textContent = "–";
+          } else {
+            tdDom.textContent = dom.toFixed(1) + "%";
+          }
+          tr.appendChild(tdDom);
+
+          const tdRange = document.createElement("td");
+          tdRange.className = "center";
+          tdRange.textContent = row.range || "–";
+          tr.appendChild(tdRange);
+
+          const tdAction = document.createElement("td");
+          tdAction.className = "center";
+          tdAction.textContent = computeActionForRow(row);
+          tr.appendChild(tdAction);
+
+          tbody.appendChild(tr);
+        });
+
+        buildOracleMenus();
+        updateOracle();
       } catch (err) {
-        console.error("Dominance bands error:", err);
-        document.getElementById("dom-range-text").textContent =
-          "2-yr range: unavailable";
+        console.error("Prices error:", err);
+        const tbody = document.getElementById("prices-tbody");
+        tbody.innerHTML = "";
       }
     }
 
-    // ---- DOMINANCE & PRICES ----
-    async function fetchDominanceAndPrices() {
+    async function fetchKnifecatcher() {
       try {
-        const url = "https://api.coingecko.com/api/v3/coins/markets" +
-          "?vs_currency=usd&ids=bitcoin,ethereum,binancecoin,solana" +
-          "&per_page=4&page=1";
+        const resp = await fetch("knifecatcher_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("knifecatcher fetch failed");
+        const data = await resp.json();
 
-        const resp = await fetch(url, { cache: "no-store" });
-        if (!resp.ok) throw new Error("Dominance fetch failed");
-        const rows = await resp.json();
+        const balanceEl = document.getElementById("kc-balance");
+        const compareEl = document.getElementById("kc-compare");
 
-        const byId = {};
-        rows.forEach(r => { byId[r.id] = r; });
+        if (!data || !balanceEl || !compareEl) return;
 
-        const btc = byId["bitcoin"];
-        const eth = byId["ethereum"];
-        const bnb = byId["binancecoin"];
-        const sol = byId["solana"];
+        const base = typeof data.base_balance_usd === "number"
+          ? data.base_balance_usd
+          : parseFloat(data.base_balance_usd || "0");
 
-        const btcMc = btc?.market_cap || 0;
-        const altMc = (eth?.market_cap || 0) + (bnb?.market_cap || 0) + (sol?.market_cap || 0);
+        const portVal = typeof data.portfolio_value === "number"
+          ? data.portfolio_value
+          : parseFloat(data.portfolio_value || "0");
 
-        let btcDom = 0.5;
-        if (btcMc + altMc > 0) {
-          btcDom = btcMc / (btcMc + altMc);
+        const btcVal = typeof data.btc_value === "number"
+          ? data.btc_value
+          : parseFloat(data.btc_value || "0");
+
+        if (!Number.isNaN(portVal) && portVal > 0) {
+          balanceEl.textContent = "$" + portVal.toFixed(2);
         }
-        latestBtcDom = btcDom;
 
-        const btcPct = Math.round(btcDom * 100);
-        const altPct = 100 - btcPct;
+        let algoRoi = null;
+        let btcRoi = null;
 
-        document.getElementById("dom-main-text").textContent =
-          `BTC vs EthBnbSol: ${btcPct}/${altPct}`;
+        if (base && base > 0) {
+          algoRoi = (portVal / base) - 1;
+          btcRoi = (btcVal / base) - 1;
+        }
 
-        const capsText = `${formatMarketCap(btcMc)} vs ${formatMarketCap(altMc)}`;
-        document.getElementById("dom-sub-text").innerHTML =
-          `Market caps: <span>${capsText}</span>`;
+        function fmtPct(x) {
+          if (x === null || Number.isNaN(x)) return "--.--%";
+          const pct = x * 100;
+          const sign = pct > 0 ? "+" : "";
+          return sign + pct.toFixed(1) + "%";
+        }
 
-        // Prices (vertical)
-        document.getElementById("price-btc").innerHTML =
-          `BTC: <strong>$${Math.round(btc?.current_price || 0).toLocaleString()}</strong>`;
-        document.getElementById("price-eth").innerHTML =
-          `ETH: <strong>$${Math.round(eth?.current_price || 0).toLocaleString()}</strong>`;
-        document.getElementById("price-bnb").innerHTML =
-          `BNB: <strong>$${Math.round(bnb?.current_price || 0).toLocaleString()}</strong>`;
-        document.getElementById("price-sol").innerHTML =
-          `SOL: <strong>$${(sol?.current_price || 0).toFixed(2)}</strong>`;
-
-        updateActionText();
+        const algoStr = fmtPct(algoRoi);
+        const btcStr = fmtPct(btcRoi);
+        compareEl.textContent = algoStr + " vs " + btcStr;
       } catch (err) {
-        console.error("Dominance error:", err);
-        document.getElementById("dom-main-text").textContent =
-          "BTC vs EthBnbSol: --/--";
-        document.getElementById("dom-sub-text").innerHTML =
-          "Market caps: <span>unavailable</span>";
+        console.error("Knifecatcher error:", err);
       }
     }
 
-    // ---- INIT ----
+    // -------- Oracle helpers --------
+
+    function formatTokenLabel(token) {
+      if (token === "ALTS") return "Alts";
+      const lower = token.toLowerCase();
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    }
+
+    function formatTokenSetLabel(tokens) {
+      if (tokens.length === 0) return "Select";
+      if (tokens.includes("ALTS")) return "Alts";
+      if (tokens.length === 1) return formatTokenLabel(tokens[0]);
+      return tokens.map(formatTokenLabel).join("");
+    }
+
+    function getLiveMC(token) {
+      const row = pricesRowsGlobal.find(r => r.token === token);
+      if (!row) return 0;
+      const v = row.mc;
+      if (typeof v === "number") return v;
+      const f = parseFloat(v || "0");
+      return Number.isNaN(f) ? 0 : f;
+    }
+
+    function getSupply(token) {
+      if (!suppliesGlobal) return 0;
+      const entry = suppliesGlobal[token];
+      if (!entry) return 0;
+      const val = entry.circulating_supply;
+      if (typeof val === "number") return val;
+      const f = parseFloat(val || "0");
+      return Number.isNaN(f) ? 0 : f;
+    }
+
+    function getHistorySeries(key) {
+      if (!oracleHistories) return null;
+      return oracleHistories[key] || null;
+    }
+
+    function sortTokensByMC(tokens) {
+      const arr = [...tokens];
+      arr.sort((a, b) => {
+        const aMC = getLiveMC(a);
+        const bMC = getLiveMC(b);
+        if (aMC > bMC) return -1;
+        if (aMC < bMC) return 1;
+        return a.localeCompare(b);
+      });
+      return arr;
+    }
+
+    function computeOracleDomAndRange(xTokens, yTokens) {
+      if (!Array.isArray(xTokens) || !Array.isArray(yTokens)) {
+        return { ok: false, reason: "Missing selections" };
+      }
+      if (xTokens.length === 0 || yTokens.length === 0) {
+        return { ok: false, reason: "Select both sides" };
+      }
+
+      const expandSide = (tokens) => {
+        if (tokens.includes("ALTS")) {
+          return ORACLE_TOKENS.filter(t => t !== "BTC");
+        }
+        return tokens;
+      };
+
+      const xSet = expandSide(xTokens);
+      const ySet = expandSide(yTokens);
+
+      const fullX = new Set(xSet);
+      const fullY = new Set(ySet);
+
+      if (fullX.size === 0 || fullY.size === 0) {
+        return { ok: false, reason: "Both X and Y must have at least one token" };
+      }
+
+      const mcX = Array.from(fullX).reduce((acc, t) => acc + getLiveMC(t), 0);
+      const mcY = Array.from(fullY).reduce((acc, t) => acc + getLiveMC(t), 0);
+
+      const totalNow = mcX + mcY;
+      if (totalNow <= 0) {
+        return { ok: false, reason: "No market cap data" };
+      }
+
+      const domNow = (mcX / totalNow) * 100;
+
+      const key = `${Array.from(fullX).sort().join("+")}__${Array.from(fullY).sort().join("+")}`;
+      const hist = getHistorySeries(key);
+      let domMin = null;
+      let domMax = null;
+      let days = 0;
+
+      if (hist && Array.isArray(hist.values) && hist.values.length > 0) {
+        days = hist.values.length;
+        domMin = Math.min(...hist.values);
+        domMax = Math.max(...hist.values);
+      } else {
+        const xIsBTCOnly = (xTokens.length === 1 && xTokens[0] === "BTC");
+        const yIsAltsOnly = (yTokens.length === 1 && yTokens[0] === "ALTS");
+
+        if (xIsBTCOnly && yIsAltsOnly && domBandsGlobal) {
+          const mn = parseFloat(domBandsGlobal.min_pct);
+          const mx = parseFloat(domBandsGlobal.max_pct);
+          if (!Number.isNaN(mn) && !Number.isNaN(mx)) {
+            domMin = mn;
+            domMax = mx;
+            days = domBandsGlobal.days || 0;
+          }
+        } else if (xIsBTCOnly && yTokens.length === 1 && ORACLE_TOKENS.includes(yTokens[0])) {
+          const token = yTokens[0];
+          const row = pricesRowsGlobal.find(r => r.token === token);
+          if (row && row.range) {
+            const m = String(row.range).match(/(\d+)\D+(\d+)%/);
+            if (m) {
+              const mn = parseFloat(m[1]);
+              const mx = parseFloat(m[2]);
+              if (!Number.isNaN(mn) && !Number.isNaN(mx)) {
+                domMin = mn;
+                domMax = mx;
+              }
+            }
+          }
+        }
+      }
+
+      const prettyName = (tokens) => {
+        if (tokens.includes("ALTS")) return "Alts";
+        const sorted = sortTokensByMC(tokens);
+        return sorted.map(formatTokenLabel).join("");
+      };
+
+      return {
+        ok: true,
+        domNow,
+        domMin,
+        domMax,
+        days,
+        mcX,
+        mcY,
+        labelX: prettyName(xTokens),
+        labelY: prettyName(yTokens),
+      };
+    }
+
+    function buildOracleMenus() {
+      const xMenu = document.getElementById("oracle-x-menu");
+      const yMenu = document.getElementById("oracle-y-menu");
+      const xLabel = document.getElementById("oracle-x-label");
+      const yLabel = document.getElementById("oracle-y-label");
+      const xPill = document.getElementById("oracle-x-pill");
+      const yPill = document.getElementById("oracle-y-pill");
+
+      if (!xMenu || !yMenu || !xLabel || !yLabel || !xPill || !yPill) return;
+
+      const xOrder = ["BTC", ...ORACLE_TOKENS.filter(t => t !== "BTC")];
+      const yOrder = ["ALTS", "BTC", ...ORACLE_TOKENS.filter(t => t !== "BTC")];
+
+      const xIsPureBTC = (oracleSelectedX.length === 1 && oracleSelectedX[0] === "BTC");
+
+      xMenu.innerHTML = "";
+      yMenu.innerHTML = "";
+
+      // X menu options (no ALTS here)
+      xOrder.forEach(tok => {
+        if (tok === "ALTS") return;
+
+        const div = document.createElement("div");
+        div.className = "oracle-option";
+        div.dataset.token = tok;
+
+        const box = document.createElement("div");
+        box.className = "oracle-option-box";
+
+        const tick = document.createElement("span");
+        tick.className = "oracle-option-tick";
+        tick.textContent = "✓";
+
+        const label = document.createElement("span");
+        label.className = "oracle-option-label";
+        label.textContent = formatTokenLabel(tok);
+
+        box.appendChild(tick);
+        div.appendChild(box);
+        div.appendChild(label);
+
+        if (oracleSelectedX.includes(tok)) {
+          div.classList.add("selected");
+        }
+
+        div.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (tok === "BTC") {
+            if (oracleSelectedX.includes("BTC")) {
+              oracleSelectedX = oracleSelectedX.filter(t => t !== "BTC");
+            } else {
+              oracleSelectedX = ["BTC"];
+            }
+          } else {
+            oracleSelectedX = oracleSelectedX.filter(t => t !== "BTC");
+            if (oracleSelectedX.includes(tok)) {
+              oracleSelectedX = oracleSelectedX.filter(t => t !== tok);
+            } else {
+              oracleSelectedX = [...oracleSelectedX, tok];
+            }
+          }
+          Array.from(xMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+            const t = opt.dataset.token;
+            opt.classList.toggle("selected", oracleSelectedX.includes(t));
+          });
+          xLabel.textContent = formatTokenSetLabel(oracleSelectedX);
+          buildOracleMenus();
+          updateOracle();
+        });
+
+        xMenu.appendChild(div);
+      });
+
+      const xClear = document.createElement("div");
+      xClear.className = "oracle-clear";
+      xClear.textContent = "Clear";
+      xClear.addEventListener("click", (e) => {
+        e.stopPropagation();
+        oracleSelectedX = [];
+        Array.from(xMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+          opt.classList.remove("selected");
+        });
+        xLabel.textContent = "Select";
+        buildOracleMenus();
+        updateOracle();
+      });
+      xMenu.appendChild(xClear);
+
+      // Y menu options
+      yOrder.forEach(tok => {
+        if (tok === "ALTS" && !xIsPureBTC) return;
+
+        const div = document.createElement("div");
+        div.className = "oracle-option";
+        div.dataset.token = tok;
+
+        const box = document.createElement("div");
+        box.className = "oracle-option-box";
+
+        const tick = document.createElement("span");
+        tick.className = "oracle-option-tick";
+        tick.textContent = "✓";
+
+        const label = document.createElement("span");
+        label.className = "oracle-option-label";
+        label.textContent = formatTokenLabel(tok);
+
+        box.appendChild(tick);
+        div.appendChild(box);
+        div.appendChild(label);
+
+        if (oracleSelectedY.includes(tok)) {
+          div.classList.add("selected");
+        }
+
+        div.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (tok === "ALTS") {
+            oracleSelectedY = ["ALTS"];
+          } else {
+            oracleSelectedY = oracleSelectedY.filter(t => t !== "ALTS");
+            if (oracleSelectedY.includes(tok)) {
+              oracleSelectedY = oracleSelectedY.filter(t => t !== tok);
+            } else {
+              oracleSelectedY = [...oracleSelectedY, tok];
+            }
+            if (oracleSelectedY.length === 0) {
+              oracleSelectedY = [];
+            }
+          }
+          Array.from(yMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+            const t = opt.dataset.token;
+            opt.classList.toggle("selected", oracleSelectedY.includes(t));
+          });
+          yLabel.textContent = formatTokenSetLabel(oracleSelectedY);
+          buildOracleMenus();
+          updateOracle();
+        });
+
+        yMenu.appendChild(div);
+      });
+
+      const yClear = document.createElement("div");
+      yClear.className = "oracle-clear";
+      yClear.textContent = "Clear";
+      yClear.addEventListener("click", (e) => {
+        e.stopPropagation();
+        oracleSelectedY = [];
+        Array.from(yMenu.querySelectorAll(".oracle-option")).forEach(opt => {
+          opt.classList.remove("selected");
+        });
+        yLabel.textContent = "Select";
+        buildOracleMenus();
+        updateOracle();
+      });
+      yMenu.appendChild(yClear);
+
+      xLabel.textContent = formatTokenSetLabel(oracleSelectedX);
+      yLabel.textContent = formatTokenSetLabel(oracleSelectedY);
+
+      function closeAllDropdowns() {
+        xMenu.classList.remove("open");
+        yMenu.classList.remove("open");
+      }
+
+      xPill.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = xMenu.classList.contains("open");
+        closeAllDropdowns();
+        if (!isOpen) xMenu.classList.add("open");
+      };
+      yPill.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = yMenu.classList.contains("open");
+        closeAllDropdowns();
+        if (!isOpen) yMenu.classList.add("open");
+      };
+
+      xMenu.addEventListener("click", (e) => e.stopPropagation());
+      yMenu.addEventListener("click", (e) => e.stopPropagation());
+
+      document.addEventListener("click", () => {
+        closeAllDropdowns();
+      });
+    }
+
+    async function updateOracle() {
+      const mainEl = document.getElementById("oracle-main-line");
+      const subEl = document.getElementById("oracle-sub-line");
+      const rangeEl = document.getElementById("oracle-range-line");
+      const errEl = document.getElementById("oracle-error");
+
+      if (!mainEl || !subEl || !rangeEl || !errEl) return;
+
+      const res = computeOracleDomAndRange(oracleSelectedX, oracleSelectedY);
+
+      if (!res.ok) {
+        mainEl.innerHTML = '<span class="dom-value">--</span><span class="dom-label">Select X and Y</span>';
+        subEl.innerHTML = 'Market caps: <span>–</span>';
+        rangeEl.innerHTML = 'Range: <span>–</span>';
+        errEl.textContent = res.reason || "";
+        return;
+      }
+
+      errEl.textContent = "";
+
+      const domVal = res.domNow;
+      const domStr = domVal != null && !Number.isNaN(domVal) ? domVal.toFixed(1) : "--";
+
+      const label = `${res.labelX} vs ${res.labelY}`;
+      mainEl.innerHTML = `<span class="dom-value">${domStr}</span><span class="dom-label">${label}</span>`;
+
+      const mcXfmt = formatMC(res.mcX || 0);
+      const mcYfmt = formatMC(res.mcY || 0);
+      subEl.innerHTML = `Market caps: <span>${mcXfmt} vs ${mcYfmt}</span>`;
+
+      let rangeSpan = "–";
+      if (res.domMin != null && res.domMax != null && res.domMax > res.domMin) {
+        const mn = Math.round(res.domMin);
+        const mx = Math.round(res.domMax);
+        rangeSpan = `${mn}%–${mx}%`;
+      }
+      rangeEl.innerHTML = `Range: <span>${rangeSpan}</span>`;
+    }
+
     (function init() {
-      document.getElementById("meta-date").textContent = formatDate();
-
-      // HMI refresh: now + every 60s
       fetchHMI();
-      setInterval(fetchHMI, HMI_REFRESH_MS);
-
-      // Dominance bands: fetch now + every 6h
-      fetchDomBands();
-      setInterval(fetchDomBands, DOM_REFRESH_MS);
-
-      // Prices + dominance: fetch immediately, then every 6h
-      fetchDominanceAndPrices();
-      setInterval(fetchDominanceAndPrices, DOM_REFRESH_MS);
+      fetchSupplies()
+        .then(fetchOracleHistory)
+        .then(fetchDomBands)
+        .then(fetchPrices)
+        .then(fetchKnifecatcher);
     })();
   </script>
 </body>

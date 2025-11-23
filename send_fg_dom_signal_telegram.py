@@ -527,16 +527,23 @@ def update_portfolio_tracker(
 
     now = datetime.utcnow().isoformat() + "Z"
 
-    # Build latest prices map (symbol -> price)
+    # Build latest prices map (assetUSDC -> price)
     latest_prices: Dict[str, float] = {}
     for row in prices_rows:
-        sym = row.get("symbol")
+        token = row.get("token")
         try:
             price = float(row.get("price", 0.0))
         except Exception:
             price = 0.0
-        if sym and price > 0:
-            latest_prices[sym] = price
+        if not token or price <= 0:
+            continue
+
+        token = str(token).upper()
+        if token in ("USDT", "USDC", "USDTC"):
+            # Treat combined stables as 1 USDC
+            latest_prices["USDCUSDC"] = 1.0
+        else:
+            latest_prices[f"{token}USDC"] = price
 
     # Build latest portfolio weights map (asset -> weight)
     latest_weights: Dict[str, float] = {}
@@ -584,9 +591,6 @@ def update_portfolio_tracker(
             "last_timestamp": now,
             "runs": 0,
         }
-        first_run = True
-    else:
-        first_run = False
 
     # Current synthetic holdings for the algo
     holdings: Dict[str, float] = state.get("holdings", {})
@@ -596,7 +600,7 @@ def update_portfolio_tracker(
     btc_holdings: Dict[str, float] = state.get("btc_holdings", {})
     btc_holdings = {k.upper(): float(v) for k, v in btc_holdings.items()}
 
-    # Compute current portfolio value in USDC
+    # Helper: compute value in USDC
     def value_in_usdc(h: Dict[str, float]) -> float:
         total = 0.0
         for asset, qty in h.items():
@@ -609,7 +613,10 @@ def update_portfolio_tracker(
                 total += qty * px
         return total
 
-    portfolio_value = value_in_usdc(holdings)
+    # Current portfolio value (pre-rebalance) to know our starting size
+    pre_value = value_in_usdc(holdings)
+    base_balance = float(state.get("base_balance_usd", INITIAL_PORTFOLIO_USD))
+    total_val = pre_value if pre_value > 0 else base_balance
 
     # BTC baseline: if no BTC yet, invest all USDC into BTC at first run
     if btc_holdings.get("BTC", 0.0) == 0.0:
@@ -623,7 +630,6 @@ def update_portfolio_tracker(
     btc_value = value_in_usdc(btc_holdings)
 
     # Rebalance algo synthetic holdings to latest_weights
-    total_val = portfolio_value if portfolio_value > 0 else state.get("base_balance_usd", INITIAL_PORTFOLIO_USD)
     new_holdings: Dict[str, float] = {}
 
     for asset, w in latest_weights.items():
@@ -636,6 +642,9 @@ def update_portfolio_tracker(
             if px > 0:
                 qty = target_val / px
                 new_holdings[asset] = new_holdings.get(asset, 0.0) + qty
+
+    # New portfolio value after rebalance (should be ~total_val, barring rounding)
+    portfolio_value = value_in_usdc(new_holdings)
 
     # Save updated state
     state["holdings"] = new_holdings
@@ -703,12 +712,13 @@ def update_portfolio_tracker(
 
     return {
         "ok": True,
-        "first_run": first_run,
+        "first_run": False,
         "portfolio_value": portfolio_value,
         "btc_value": btc_value,
         "base_timestamp": state.get("base_timestamp", ""),
         "runs": int(state.get("runs", 0)),
     }
+
 
 
 # ------------------------------------------------------------------

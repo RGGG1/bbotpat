@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Compute Hive Mind Index (HMI) — Binance-only, using backfilled history.
 
@@ -128,11 +127,6 @@ def compute_fg_lite(df: pd.DataFrame):
         spot_close, spot_volume, perp_volume, oi_usd
 
     Returns a copy of df with FG_lite, FG_vol, FG_oi, FG_spotperp.
-
-    NOTE: FG_lite is our current HMI:
-        - 50% open interest (FG_oi)
-        - 30% perps vs spot volume (FG_spotperp)
-        - 20% volatility term structure (FG_vol)
     """
     df = df.sort_values("date").reset_index(drop=True).copy()
     eps = 1e-9
@@ -172,27 +166,22 @@ def compute_fg_lite(df: pd.DataFrame):
 
 def hmi_band_label(hmi: float) -> str:
     """
-    Map HMI value (0–100) to a human-readable band label.
-
-    Bands (per product spec):
-
-        <15        -> "Zombie Apocalypse"
-        15–30      -> "McDonald's Applications in high demand"
-        30–40      -> "NGMI"
-        40–60      -> "Stabled"
-        60–80      -> "We're early"
-        >=80       -> "It's the future of finance"
+    Map HMI numeric value to human-readable band.
     """
-    if hmi < 15:
+    if hmi < 10:
         return "Zombie Apocalypse"
-    if hmi < 30:
+    if hmi < 25:
         return "McDonald's Applications in high demand"
-    if hmi < 40:
+    if hmi < 45:
         return "NGMI"
-    if hmi < 60:
-        return "Stabled"
-    if hmi < 80:
-        return "We're early"
+    if hmi < 50:
+        return "Leaning bearish"
+    if hmi < 55:
+        return "Cautiously bullish"
+    if hmi < 75:
+        return "It's digital gold"
+    if hmi < 90:
+        return "Frothy"
     return "It's the future of finance"
 
 
