@@ -2,18 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>HiveAI - Oracles</title>
+  <title>HiveAI Oracle – All signal, no noise</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <style>
     :root {
       --bg: #000000;
       --bg-elevated: #050509;
+      --bg-subtle: #090914;
       --border-subtle: #22232f;
+      --border-strong: #3c3f57;
       --text-main: #f5f5f7;
       --text-muted: #888aa0;
-      --accent-red: #ff4b5c;
       --accent-green: #4dff88;
+      --accent-blue: #4fb4ff;
       --accent-neutral: #ffffff;
       --font-main: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
                    "Inter", "Segoe UI", sans-serif;
@@ -26,7 +28,7 @@
     }
 
     body {
-      background: var(--bg);
+      background: radial-gradient(circle at top, #151524 0, #000 48%);
       color: var(--text-main);
       font-family: var(--font-main);
       min-height: 100vh;
@@ -45,7 +47,7 @@
       display: flex;
       justify-content: space-between;
       align-items: baseline;
-      margin-bottom: 20px;
+      margin-bottom: 18px;
     }
 
     .title-stack {
@@ -93,21 +95,52 @@
       gap: 14px;
     }
 
+    .grid-2 {
+      display: grid;
+      grid-template-columns: minmax(0, 2.1fr) minmax(0, 1.4fr);
+      gap: 14px;
+    }
+
+    @media (max-width: 780px) {
+      .grid-2 {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
     .card {
       background: var(--bg-elevated);
       border-radius: 10px;
       border: 1px solid var(--border-subtle);
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-      padding: 16px 18px 18px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+      padding: 14px 16px 16px;
+    }
+
+    .card-hero {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-hero::before {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      background: radial-gradient(circle at 0 0, rgba(77, 255, 136, 0.18), transparent 55%);
+      opacity: 0.8;
+      pointer-events: none;
+    }
+
+    .card-hero-inner {
+      position: relative;
+      z-index: 1;
     }
 
     .card-title {
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 600;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--text-muted);
-      margin-bottom: 6px;
+      margin-bottom: 8px;
     }
 
     .hero-title {
@@ -119,7 +152,7 @@
     .hero-subtitle {
       font-size: 13px;
       color: var(--text-muted);
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
 
     .pill-row {
@@ -133,11 +166,13 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 3px 9px;
+      padding: 3px 10px;
       border-radius: 999px;
       border: 1px solid var(--border-subtle);
       font-size: 11px;
       color: var(--text-muted);
+      background: rgba(8, 12, 24, 0.9);
+      backdrop-filter: blur(6px);
     }
 
     .pill-dot {
@@ -145,19 +180,20 @@
       height: 6px;
       border-radius: 999px;
       background: var(--accent-green);
+      box-shadow: 0 0 8px rgba(77, 255, 136, 0.7);
     }
 
     h2 {
       font-size: 15px;
       margin-bottom: 6px;
-      margin-top: 4px;
+      margin-top: 2px;
     }
 
     p {
       font-size: 13px;
       color: var(--text-main);
       margin-bottom: 6px;
-      line-height: 1.6;
+      line-height: 1.5;
     }
 
     ul {
@@ -203,7 +239,7 @@
     }
 
     .badge-row {
-      margin-top: 8px;
+      margin-top: 6px;
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
@@ -215,6 +251,16 @@
       border-radius: 999px;
       border: 1px solid var(--border-subtle);
       color: var(--text-muted);
+      background: var(--bg-subtle);
+    }
+
+    .inline-heading {
+      font-weight: 600;
+      color: var(--accent-blue);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
     }
 
     .footer-note {
@@ -224,60 +270,53 @@
       line-height: 1.4;
     }
 
-    .grid-two {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin-top: 4px;
-    }
-
-    .grid-col {
-      border-radius: 8px;
-      border: 1px solid #14141f;
-      background: #05050c;
-      padding: 10px 12px;
-    }
-
-    .grid-col h3 {
-      font-size: 13px;
-      margin-bottom: 4px;
-    }
-
-    .endpoint-group {
-      margin-top: 4px;
-      margin-bottom: 6px;
-    }
-
-    .endpoint-label {
-      font-size: 12px;
-      font-weight: 500;
-      margin-bottom: 3px;
-    }
-
-    .hint {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-bottom: 4px;
-    }
-
     a {
       color: var(--accent-green);
+      text-decoration: none;
     }
 
     a:hover {
       text-decoration: underline;
     }
 
-    @media (min-width: 720px) {
-      main {
-        gap: 16px;
-      }
+    .endpoint-block {
+      margin-top: 6px;
+      padding-top: 4px;
+      border-top: 1px dashed var(--border-subtle);
+    }
 
-      .grid-two {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 12px;
-      }
+    .endpoint-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .endpoint-method {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 1px 6px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      display: inline-block;
+      margin-bottom: 4px;
+    }
+
+    .endpoint-method-get {
+      border-color: var(--accent-blue);
+    }
+
+    .endpoint-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                   "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+    }
+
+    .stacked {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
   </style>
 </head>
@@ -294,154 +333,165 @@
     </header>
 
     <main>
-      <!-- Section 1: Overview -->
-      <section class="card">
-        <div class="card-title">Oracle</div>
-        <div class="hero-title">HiveAI Oracle</div>
-        <div class="hero-subtitle">
-          Programmatic access to the Hive Mind Index (HMI) and BTC dominance signals.
+      <!-- Hero -->
+      <section class="card card-hero">
+        <div class="card-hero-inner">
+          <div class="card-title">Oracle</div>
+          <div class="hero-title">HiveAI Oracle</div>
+          <div class="hero-subtitle">
+            Programmatic access to the Hive Mind Index (HMI) and BTC dominance (DOM) signals.
+          </div>
+          <div class="pill-row">
+            <div class="pill">
+              <span class="pill-dot"></span>
+              <span>Updated every 12 hours (07:15 &amp; 19:15 CEST)</span>
+            </div>
+            <div class="pill">
+              <span>Read-only HTTP API</span>
+            </div>
+            <div class="pill">
+              <span>No auth (for now)</span>
+            </div>
+          </div>
         </div>
-        <div class="pill-row">
-          <div class="pill">
-            <span class="pill-dot"></span>
-            <span>Updated every 12 hours (07:15 &amp; 19:15 CEST)</span>
-          </div>
-          <div class="pill">
-            <span>Read-only HTTP</span>
-          </div>
-          <div class="pill">
-            <span>Low-frequency friendly</span>
-          </div>
-        </div>
-
-        <ul style="margin-top:10px;">
-          <li><b>HMI</b> – Hive Mind Index (modernised fear &amp; greed indicator).</li>
-          <li><b>Dominance</b> – BTC dominance versus individual tokens or token baskets.</li>
-        </ul>
       </section>
 
-      <!-- Section 2: Base URL -->
-      <section class="card section">
-        <h2>Base URL</h2>
-        <p>
-          Replace <code>&lt;BASE_URL&gt;</code> with your HiveAI node address, for example:
-        </p>
-        <pre><code>http://&lt;BASE_URL&gt;:8000</code></pre>
-        <p>
-          All endpoints below are relative to that base URL.
-        </p>
+      <!-- Overview + Base URL -->
+      <section class="grid-2">
+        <section class="card section">
+          <h2>1. Overview</h2>
+          <p>The HiveAI Oracle exposes a small, opinionated set of on-chain &amp; market signals:</p>
+          <ul>
+            <li><b>HMI</b> – Hive Mind Index (modernised fear &amp; greed indicator).</li>
+            <li><b>Dominance</b> – BTC dominance versus individual tokens or token baskets.</li>
+          </ul>
+          <div class="badge-row">
+            <span class="badge">Spot + derivatives aware</span>
+            <span class="badge">Low-frequency friendly (12h cadence)</span>
+            <span class="badge">Designed for dashboards &amp; bots</span>
+          </div>
+        </section>
+
+        <section class="card section">
+          <h2>2. Base URL</h2>
+          <p>
+            Replace <code>&lt;BASE_URL&gt;</code> with your HiveAI node address, for example:
+          </p>
+          <pre><code>http://&lt;BASE_URL&gt;:8000</code></pre>
+          <p>All endpoints below are relative to that base URL.</p>
+          <p class="footer-note">
+            If you run behind a reverse proxy (e.g. Nginx on <code>https://hiveai.yourdomain.com</code>),
+            you can call the API directly on that host instead of <code>:8000</code>.
+          </p>
+        </section>
       </section>
 
-      <!-- Section 3: HMI & Dominance endpoints -->
+      <!-- HMI endpoints -->
       <section class="card section">
-        <h2>HMI &amp; Dominance endpoints</h2>
-        <p class="hint">
-          Use these endpoints to fetch the latest index values and dominance signals,
-          plus lightweight history for charting.
-        </p>
+        <h2>3. HMI endpoints</h2>
 
-        <div class="grid-two">
-          <!-- HMI -->
-          <div class="grid-col">
-            <h3>HMI endpoints</h3>
-
-            <div class="endpoint-group">
-              <div class="endpoint-label">Latest HMI value</div>
-              <pre><code>GET /api/hmi/latest</code></pre>
-              <div class="hint">Example:</div>
-              <pre><code>curl "&lt;BASE_URL&gt;:8000/api/hmi/latest"</code></pre>
-
-              <div class="hint">Example response:</div>
-              <pre><code>{
+        <div class="endpoint-block">
+          <div class="endpoint-title">Latest HMI value</div>
+          <div class="endpoint-method endpoint-method-get">GET</div>
+          <div class="endpoint-path">/api/hmi/latest</div>
+          <p>Example:</p>
+          <pre><code>curl "&lt;BASE_URL&gt;:8000/api/hmi/latest"</code></pre>
+          <p>Response:</p>
+          <pre><code>{
   "timestamp": "2025-11-22T05:15:07Z",
   "hmi": 59.8,
   "band": "stable"
 }</code></pre>
-            </div>
+        </div>
 
-            <div class="endpoint-group">
-              <div class="endpoint-label">HMI history</div>
-              <pre><code>GET /api/hmi/history?days=N</code></pre>
-              <div class="hint">Example (last 30 days):</div>
-              <pre><code>curl "&lt;BASE_URL&gt;:8000/api/hmi/history?days=30"</code></pre>
-            </div>
-          </div>
-
-          <!-- Dominance -->
-          <div class="grid-col">
-            <h3>Dominance endpoints</h3>
-
-            <div class="endpoint-group">
-              <div class="endpoint-label">Token universe &amp; macros</div>
-              <pre><code>GET /api/dom/options</code></pre>
-              <div class="hint">Example:</div>
-              <pre><code>curl "&lt;BASE_URL&gt;:8000/api/dom/options"</code></pre>
-            </div>
-
-            <div class="endpoint-group">
-              <div class="endpoint-label">Latest dominance: BTC vs single token</div>
-              <pre><code>GET /api/dom/latest?pair=BTC_SOL</code></pre>
-              <div class="hint">Example:</div>
-              <pre><code>curl "&lt;BASE_URL&gt;:8000/api/dom/latest?pair=BTC_SOL"</code></pre>
-            </div>
-
-            <div class="endpoint-group">
-              <div class="endpoint-label">Latest dominance: custom baskets</div>
-              <pre><code>GET /api/dom/latest?x=BTC&amp;y=ALTS
-GET /api/dom/latest?x=BTC&amp;y=SOL,UNI</code></pre>
-            </div>
-
-            <div class="endpoint-group">
-              <div class="endpoint-label">Dominance history</div>
-              <pre><code>GET /api/dom/history?pair=BTC_SOL&amp;days=N
-GET /api/dom/history?x=BTC&amp;y=ALTS&amp;days=N</code></pre>
-            </div>
-
-            <p class="footer-note">
-              Historical ranges (min / max) for BTC vs single tokens and BTC vs ALTS
-              are already available and power the dominance UI on the main page.
-            </p>
-          </div>
+        <div class="endpoint-block">
+          <div class="endpoint-title">HMI history</div>
+          <div class="endpoint-method endpoint-method-get">GET</div>
+          <div class="endpoint-path">/api/hmi/history?days=N</div>
+          <p>Example (last 30 days):</p>
+          <pre><code>curl "&lt;BASE_URL&gt;:8000/api/hmi/history?days=30"</code></pre>
         </div>
       </section>
 
-      <!-- Section 4: Polling guidance -->
+      <!-- Dominance endpoints -->
       <section class="card section">
-        <h2>Update frequency &amp; polling guidance</h2>
-        <p>
-          Signals are recomputed every 12 hours, aligned with the main HiveAI dashboard
-          updates (07:15 and 19:15 CEST).
+        <h2>4. Dominance (DOM) endpoints</h2>
+
+        <div class="stacked">
+          <div class="endpoint-block">
+            <div class="endpoint-title">Token universe &amp; macros</div>
+            <div class="endpoint-method endpoint-method-get">GET</div>
+            <div class="endpoint-path">/api/dom/options</div>
+            <p>Example:</p>
+            <pre><code>curl "&lt;BASE_URL&gt;:8000/api/dom/options"</code></pre>
+          </div>
+
+          <div class="endpoint-block">
+            <div class="endpoint-title">Latest dominance for BTC vs single token</div>
+            <div class="endpoint-method endpoint-method-get">GET</div>
+            <div class="endpoint-path">/api/dom/latest?pair=BTC_SOL</div>
+            <p>Example:</p>
+            <pre><code>curl "&lt;BASE_URL&gt;:8000/api/dom/latest?pair=BTC_SOL"</code></pre>
+          </div>
+
+          <div class="endpoint-block">
+            <div class="endpoint-title">Latest dominance for custom baskets</div>
+            <div class="endpoint-method endpoint-method-get">GET</div>
+            <div class="endpoint-path">/api/dom/latest?x=BTC&amp;y=ALTS</div>
+            <div class="endpoint-path">/api/dom/latest?x=BTC&amp;y=SOL,UNI</div>
+          </div>
+
+          <div class="endpoint-block">
+            <div class="endpoint-title">Dominance history</div>
+            <div class="endpoint-method endpoint-method-get">GET</div>
+            <div class="endpoint-path">/api/dom/history?pair=BTC_SOL&amp;days=N</div>
+            <div class="endpoint-path">/api/dom/history?x=BTC&amp;y=ALTS&amp;days=N</div>
+          </div>
+        </div>
+
+        <p class="footer-note">
+          Historical ranges (min / max) for BTC vs single tokens and BTC vs ALTS
+          are already available and power the dominance UI on the main page.
         </p>
-        <ul>
-          <li>Polling more often than every few minutes is usually unnecessary.</li>
-          <li>Reasonable polling: once every 5–15 minutes.</li>
-          <li>Historical queries can be cached client-side between runs.</li>
-        </ul>
       </section>
 
-      <!-- Section 5: Custom dominance pairs -->
-      <section class="card section">
-        <h2>Custom dominance history &amp; pairs</h2>
-        <p>
-          By default, full historical ranges are maintained for core pairs
-          (BTC vs individual tokens, BTC vs ALTS).
-        </p>
-        <p>
-          If you need long-term dominance history for a specific pair or pair
-          combo (e.g. <code>SOL</code> vs <code>ETH+BNB</code>), it is available
-          on request. We will:
-        </p>
-        <ul>
-          <li>Begin tracking that pair/basket combination.</li>
-          <li>Expose a dedicated oracle endpoint for it.</li>
-        </ul>
-        <p class="footer-note">
-          To request new pairs, reach out via the same channel where you obtained
-          this node, or open an issue on the repository.
-        </p>
+      <!-- Polling guidance + custom pairs -->
+      <section class="grid-2">
+        <section class="card section">
+          <h2>5. Update frequency &amp; polling</h2>
+          <p>
+            Signals are recomputed every 12 hours, aligned with the main HiveAI dashboard
+            updates (07:15 and 19:15 CEST).
+          </p>
+          <ul>
+            <li>Polling more often than every few minutes is usually unnecessary.</li>
+            <li>Reasonable polling: once every 5–15 minutes.</li>
+            <li>Historical queries can be cached client-side between runs.</li>
+          </ul>
+        </section>
+
+        <section class="card section">
+          <h2>6. Custom dominance pairs</h2>
+          <p>
+            By default, full historical ranges are maintained for core pairs
+            (BTC vs individual tokens, BTC vs ALTS).
+          </p>
+          <p>
+            If you need long-term dominance history for a specific pair or pair combo
+            (e.g. <code>SOL</code> vs <code>ETH+BNB</code>), it is available on request.
+            We will:
+          </p>
+          <ul>
+            <li>Begin tracking that pair/basket combination.</li>
+            <li>Expose a dedicated oracle endpoint for it.</li>
+          </ul>
+          <p class="footer-note">
+            To request new pairs, reach out via the same channel where you obtained
+            this node, or open an issue on the repository.
+          </p>
+        </section>
       </section>
     </main>
   </div>
 </body>
 </html>
-
