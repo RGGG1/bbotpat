@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>HiveAI - All signal, no noise</title>
+  <title>HiveAI - Oracles</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <style>
@@ -38,14 +38,14 @@
 
     .shell {
       width: 100%;
-      max-width: 900px;
+      max-width: 960px;
     }
 
     header {
       display: flex;
       justify-content: space-between;
       align-items: baseline;
-      margin-bottom: 18px;
+      margin-bottom: 20px;
     }
 
     .title-stack {
@@ -90,24 +90,24 @@
     main {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
     }
 
     .card {
       background: var(--bg-elevated);
-      border-radius: 8px;
+      border-radius: 10px;
       border: 1px solid var(--border-subtle);
-      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
-      padding: 14px 16px 16px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+      padding: 16px 18px 18px;
     }
 
     .card-title {
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--text-muted);
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
     .hero-title {
@@ -122,17 +122,22 @@
       margin-bottom: 8px;
     }
 
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
     .pill {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 3px 8px;
+      padding: 3px 9px;
       border-radius: 999px;
       border: 1px solid var(--border-subtle);
       font-size: 11px;
       color: var(--text-muted);
-      margin-top: 4px;
-      margin-bottom: 8px;
     }
 
     .pill-dot {
@@ -152,7 +157,7 @@
       font-size: 13px;
       color: var(--text-main);
       margin-bottom: 6px;
-      line-height: 1.5;
+      line-height: 1.6;
     }
 
     ul {
@@ -168,7 +173,8 @@
     }
 
     code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                   "Liberation Mono", "Courier New", monospace;
       font-size: 12px;
       background: #11111a;
       padding: 2px 4px;
@@ -193,7 +199,22 @@
     }
 
     .section {
-      margin-top: 4px;
+      margin-top: 2px;
+    }
+
+    .badge-row {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
     }
 
     .footer-note {
@@ -203,12 +224,60 @@
       line-height: 1.4;
     }
 
+    .grid-two {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 4px;
+    }
+
+    .grid-col {
+      border-radius: 8px;
+      border: 1px solid #14141f;
+      background: #05050c;
+      padding: 10px 12px;
+    }
+
+    .grid-col h3 {
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .endpoint-group {
+      margin-top: 4px;
+      margin-bottom: 6px;
+    }
+
+    .endpoint-label {
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 3px;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
     a {
       color: var(--accent-green);
     }
 
     a:hover {
       text-decoration: underline;
+    }
+
+    @media (min-width: 720px) {
+      main {
+        gap: 16px;
+      }
+
+      .grid-two {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 12px;
+      }
     }
   </style>
 </head>
@@ -225,76 +294,133 @@
     </header>
 
     <main>
-      <!-- Section 1: HiveAI Oracle -->
+      <!-- Section 1: Overview -->
       <section class="card">
         <div class="card-title">Oracle</div>
         <div class="hero-title">HiveAI Oracle</div>
         <div class="hero-subtitle">
-          Hive Mind Index and Dominance signals for programmatic use.
+          Programmatic access to the Hive Mind Index (HMI) and BTC dominance signals.
         </div>
-        <div class="pill">
-          <span class="pill-dot"></span>
-          <span>Updated every 12 hours (07:15 &amp; 19:15 CEST)</span>
+        <div class="pill-row">
+          <div class="pill">
+            <span class="pill-dot"></span>
+            <span>Updated every 12 hours (07:15 &amp; 19:15 CEST)</span>
+          </div>
+          <div class="pill">
+            <span>Read-only HTTP</span>
+          </div>
+          <div class="pill">
+            <span>Low-frequency friendly</span>
+          </div>
         </div>
-        <ul>
+
+        <ul style="margin-top:10px;">
           <li><b>HMI</b> – Hive Mind Index (modernised fear &amp; greed indicator).</li>
           <li><b>Dominance</b> – BTC dominance versus individual tokens or token baskets.</li>
         </ul>
       </section>
 
-      <!-- Section 2: URLs and Endpoints -->
+      <!-- Section 2: Base URL -->
       <section class="card section">
-        <h2>URLs and endpoints</h2>
-
-        <p>Replace <code>&lt;BASE_URL&gt;</code> with your HiveAI node address, for example:</p>
+        <h2>Base URL</h2>
+        <p>
+          Replace <code>&lt;BASE_URL&gt;</code> with your HiveAI node address, for example:
+        </p>
         <pre><code>http://&lt;BASE_URL&gt;:8000</code></pre>
+        <p>
+          All endpoints below are relative to that base URL.
+        </p>
+      </section>
 
-        <p>All endpoints below are relative to that base URL.</p>
+      <!-- Section 3: HMI & Dominance endpoints -->
+      <section class="card section">
+        <h2>HMI &amp; Dominance endpoints</h2>
+        <p class="hint">
+          Use these endpoints to fetch the latest index values and dominance signals,
+          plus lightweight history for charting.
+        </p>
 
-        <h2>HMI endpoints</h2>
+        <div class="grid-two">
+          <!-- HMI -->
+          <div class="grid-col">
+            <h3>HMI endpoints</h3>
 
-        <p><b>Latest HMI value</b></p>
-        <pre><code>GET /api/hmi/latest</code></pre>
-        <p>Example:</p>
-        <pre><code>curl "&lt;BASE_URL&gt;:8000/api/hmi/latest"</code></pre>
+            <div class="endpoint-group">
+              <div class="endpoint-label">Latest HMI value</div>
+              <pre><code>GET /api/hmi/latest</code></pre>
+              <div class="hint">Example:</div>
+              <pre><code>curl "&lt;BASE_URL&gt;:8000/api/hmi/latest"</code></pre>
 
-        <p>Response:</p>
-        <pre><code>{
+              <div class="hint">Example response:</div>
+              <pre><code>{
   "timestamp": "2025-11-22T05:15:07Z",
   "hmi": 59.8,
   "band": "stable"
 }</code></pre>
+            </div>
 
-        <p><b>HMI history</b></p>
-        <pre><code>GET /api/hmi/history?days=N</code></pre>
-        <p>Example (last 30 days):</p>
-        <pre><code>curl "&lt;BASE_URL&gt;:8000/api/hmi/history?days=30"</code></pre>
+            <div class="endpoint-group">
+              <div class="endpoint-label">HMI history</div>
+              <pre><code>GET /api/hmi/history?days=N</code></pre>
+              <div class="hint">Example (last 30 days):</div>
+              <pre><code>curl "&lt;BASE_URL&gt;:8000/api/hmi/history?days=30"</code></pre>
+            </div>
+          </div>
 
-        <h2>Dominance endpoints</h2>
+          <!-- Dominance -->
+          <div class="grid-col">
+            <h3>Dominance endpoints</h3>
 
-        <p><b>Token universe &amp; macros</b></p>
-        <pre><code>GET /api/dom/options</code></pre>
-        <p>Example:</p>
-        <pre><code>curl "&lt;BASE_URL&gt;:8000/api/dom/options"</code></pre>
+            <div class="endpoint-group">
+              <div class="endpoint-label">Token universe &amp; macros</div>
+              <pre><code>GET /api/dom/options</code></pre>
+              <div class="hint">Example:</div>
+              <pre><code>curl "&lt;BASE_URL&gt;:8000/api/dom/options"</code></pre>
+            </div>
 
-        <p><b>Latest dominance for BTC vs single token</b></p>
-        <pre><code>GET /api/dom/latest?pair=BTC_SOL</code></pre>
-        <p>Example:</p>
-        <pre><code>curl "&lt;BASE_URL&gt;:8000/api/dom/latest?pair=BTC_SOL"</code></pre>
+            <div class="endpoint-group">
+              <div class="endpoint-label">Latest dominance: BTC vs single token</div>
+              <pre><code>GET /api/dom/latest?pair=BTC_SOL</code></pre>
+              <div class="hint">Example:</div>
+              <pre><code>curl "&lt;BASE_URL&gt;:8000/api/dom/latest?pair=BTC_SOL"</code></pre>
+            </div>
 
-        <p><b>Latest dominance for custom baskets</b></p>
-        <pre><code>GET /api/dom/latest?x=BTC&amp;y=ALTS
+            <div class="endpoint-group">
+              <div class="endpoint-label">Latest dominance: custom baskets</div>
+              <pre><code>GET /api/dom/latest?x=BTC&amp;y=ALTS
 GET /api/dom/latest?x=BTC&amp;y=SOL,UNI</code></pre>
+            </div>
 
-        <p><b>Dominance history</b></p>
-        <pre><code>GET /api/dom/history?pair=BTC_SOL&amp;days=N
+            <div class="endpoint-group">
+              <div class="endpoint-label">Dominance history</div>
+              <pre><code>GET /api/dom/history?pair=BTC_SOL&amp;days=N
 GET /api/dom/history?x=BTC&amp;y=ALTS&amp;days=N</code></pre>
+            </div>
 
-        <p class="footer-note">
-          Historical ranges (min / max) for BTC vs single tokens and BTC vs ALTS
-          are already available and power the dominance UI on the main page.
+            <p class="footer-note">
+              Historical ranges (min / max) for BTC vs single tokens and BTC vs ALTS
+              are already available and power the dominance UI on the main page.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 4: Polling guidance -->
+      <section class="card section">
+        <h2>Update frequency &amp; polling guidance</h2>
+        <p>
+          Signals are recomputed every 12 hours, aligned with the main HiveAI dashboard
+          updates (07:15 and 19:15 CEST).
         </p>
+        <ul>
+          <li>Polling more often than every few minutes is usually unnecessary.</li>
+          <li>Reasonable polling: once every 5–15 minutes.</li>
+          <li>Historical queries can be cached client-side between runs.</li>
+        </ul>
+      </section>
 
+      <!-- Section 5: Custom dominance pairs -->
+      <section class="card section">
         <h2>Custom dominance history &amp; pairs</h2>
         <p>
           By default, full historical ranges are maintained for core pairs
@@ -302,8 +428,8 @@ GET /api/dom/history?x=BTC&amp;y=ALTS&amp;days=N</code></pre>
         </p>
         <p>
           If you need long-term dominance history for a specific pair or pair
-          combo currently untracked (e.g. <code>SOL</code> vs <code>ETH+BNB</code>),
-          it is available on request. We will:
+          combo (e.g. <code>SOL</code> vs <code>ETH+BNB</code>), it is available
+          on request. We will:
         </p>
         <ul>
           <li>Begin tracking that pair/basket combination.</li>
@@ -313,17 +439,9 @@ GET /api/dom/history?x=BTC&amp;y=ALTS&amp;days=N</code></pre>
           To request new pairs, reach out via the same channel where you obtained
           this node, or open an issue on the repository.
         </p>
-
-        <h2>Roadmap: keys, tiers &amp; on-chain oracle</h2>
-        <ul>
-          <li><b>Auth &amp; keys</b> – API keys and per-user rate limits.</li>
-          <li><b>Usage tiers</b> – free tier for low traffic, paid tiers for heavier use.</li>
-          <li><b>Crypto payments</b> – USDC / SOL / future SPL token support.</li>
-          <li><b>On-chain oracle</b> – pushing HMI &amp; DOM values on-chain
-              for direct consumption by smart contracts.</li>
-        </ul>
       </section>
     </main>
   </div>
 </body>
 </html>
+
