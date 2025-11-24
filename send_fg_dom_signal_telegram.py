@@ -205,9 +205,9 @@ def weights_from_dom(dom_pct: float,
                      hmi: float | None) -> Tuple[float, float, float]:
     """
     Map dominance to (w_btc, w_alt, w_stables) with:
-    - lower 35% of range: BTC -> ALTs linearly
-    - middle 30%: 100% stables
-    - upper 35%: BTC -> ALTs linearly
+    - lower 40% of range: BTC -> ALTs linearly
+    - middle 20%: 100% stables
+    - upper 40%: BTC -> ALTs linearly
     HMI override: if hmi >= GREED_STABLE_THRESHOLD => 100% stables.
     """
     if hmi is not None and hmi >= GREED_STABLE_THRESHOLD:
@@ -220,19 +220,23 @@ def weights_from_dom(dom_pct: float,
     t = (dom_pct - dom_min) / span
     t = max(0.0, min(1.0, t))
 
-    if t < 0.35:
-        local = t / 0.35
+    # 0.0–0.4 : BTC-heavy → ALTs
+    if t < 0.4:
+        local = t / 0.4
         w_btc = 1.0 - local
         w_alt = local
         return w_btc, w_alt, 0.0
 
-    if t < 0.65:
+    # 0.4–0.6 : flat stables
+    if t < 0.6:
         return 0.0, 0.0, 1.0
 
-    local = (t - 0.65) / 0.35
+    # 0.6–1.0 : BTC → ALTs (but favouring ALTs as dominance falls)
+    local = (t - 0.6) / 0.4
     w_btc = 1.0 - local
     w_alt = local
     return w_btc, w_alt, 0.0
+
 
 
 def tg_send(text: str) -> None:
