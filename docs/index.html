@@ -906,13 +906,14 @@
         btcPct = 100 - altPct;             // 50->0
       }
 
-      // Round to nearest 5% and ensure they sum to 100
-      altPct = Math.round(altPct / 5) * 5;
-      if (altPct < 0) altPct = 0;
-      if (altPct > 100) altPct = 100;
-      btcPct = 100 - altPct;
+  // Round to nearest 1% and ensure they sum to 100
+  altPct = Math.round(altPct);
+  if (altPct < 0) altPct = 0;
+  if (altPct > 100) altPct = 100;
+  btcPct = 100 - altPct;
 
-      return `${altPct}/${btcPct}`;
+  return `${altPct}/${btcPct}`;
+
     }
 
     async function fetchPrices() {
