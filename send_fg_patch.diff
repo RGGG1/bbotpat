@@ -1,0 +1,89 @@
+*** ORIGINAL/send_fg_dom_signal_telegram.py
+--- FIXED/send_fg_dom_signal_telegram.py
+***************
+*** 1450,1700 ****
+- # ------------------------------------------------------------------
+- # Portfolio tracker
+- # ------------------------------------------------------------------
+- def update_portfolio_tracker(
+-     prices_rows: List[Dict[str, Any]],
+-     portfolio_rows: List[Dict[str, Any]],
+- ) -> Dict[str, Any]:
+-     """
+-     LONG BROKEN SECTION REMOVED
+-     Synthetic holdings
+-     Synthetic BTC baseline
+-     Real Binance account fetch (403 error)
+-     Writes incorrect knifecatcher JSON
+-     And creates chaos
+-     """
+-     # REMOVE EVERYTHING IN THIS BLOCK
+-     pass
+-
++ # ------------------------------------------------------------------
++ # SIMPLE, CORRECT KNIFE-CATCHER TRACKER
++ # ------------------------------------------------------------------
++ def update_portfolio_tracker_simple(latest_prices: Dict[str, float]) -> Dict[str, Any]:
++     """
++     Minimal tracker:
++     - Read real_value.json written by execute_trades.py
++     - Algo ROI = (real_value / 100) - 1
++     - BTC ROI  = (BTC_price / 88800) - 1
++     - Writes knifecatcher_latest.json (root + docs)
++     """
++     now = datetime.utcnow().isoformat() + "Z"
++
++     # Load real algo value
++     real_path = ROOT / "data" / "real_value.json"
++     algo_value = 0.0
++     algo_ts = now
++     if real_path.exists():
++         try:
++             js = json.loads(real_path.read_text())
++             algo_value = float(js.get("total_value_usdc", 0.0))
++             algo_ts = js.get("timestamp", now)
++         except Exception:
++             algo_value = 0.0
++
++     # BTC baseline (fixed)
++     px_btc = latest_prices.get("BTCUSDC", 0.0)
++     if px_btc > 0:
++         btc_value = 100.0 * (px_btc / 88800.0)
++     else:
++         btc_value = 0.0
++
++     def _roi(v):
++         if v <= 0:
++             return None
++         return (v / 100.0) - 1.0
++
++     algo_roi = _roi(algo_value)
++     btc_roi = _roi(btc_value)
++
++     payload = {
++         "timestamp": now,
++         "base_balance_usd": 100.0,
++         "account_value_usd": algo_value,
++         "portfolio_value": algo_value,
++         "btc_value": btc_value,
++         "algo_roi": algo_roi,
++         "btc_roi": btc_roi,
++         "base_timestamp": algo_ts,
++     }
++
++     txt = json.dumps(payload, indent=2)
++     KNIFECATCHER_JSON_ROOT.write_text(txt)
++     KNIFECATCHER_JSON_DOCS.write_text(txt)
++
++     return payload
+***************
+*** 1750,1765 ****
+-     tracker_info = update_portfolio_tracker(rows, portfolio_rows)
++     latest_prices = {}
++     for row in rows:
++         sym = row["token"]
++         price = float(row.get("price", 0.0))
++         if price > 0:
++             latest_prices[f"{sym}USDC"] = price
++
++     tracker_info = update_portfolio_tracker_simple(latest_prices)
