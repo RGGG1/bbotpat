@@ -17,13 +17,20 @@ Binance + supplies version with "all-or-nothing" writes:
 - Compute BTC vs ALL ALTS dominance (excluding stables) + range + days
 - For each alt:
     - Map dominance position within its range to
-      BTC / ALT / STABLE weights (35% / 30% / 35% bands), respecting HMI
+      BTC / ALT / STABLE weights (40% / 20% / 40% bands), respecting HMI
 - Combine all per-token weights into one global allocation
     (BTC + each ALT + stables)
 - Write:
     - dom_bands_latest.json
     - prices_latest.json
     - portfolio_weights.json
+  in both root and docs/
+- Update a portfolio tracker:
+    - Simulated $100 model portfolio (rebalanced each run)
+    - Real Binance account value
+    - BTC-only $100 buy-and-hold baseline
+- Write:
+    - knifecatcher_latest.json
   in both root and docs/
 - Send a Telegram message with summary + service health.
 
@@ -33,15 +40,13 @@ Important design choices:
   new JSONs. Old JSONs remain in place; Telegram gets a clear FAILURE
   message.
 - Website "Range" column: always simple "min–max%" (no days).
-- Portfolio tracker: we simulate a $100 portfolio starting from a fixed
-  user-specified allocation, and fully rebalance each successful run
-  into the newly suggested weights. We also track a BTC-only $100
-  buy-and-hold baseline.
 """
 
 import json
 import os
 import time
+import hmac
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Tuple, List
@@ -77,6 +82,22 @@ KNIFECATCHER_JSON_DOCS = DOCS / "knifecatcher_latest.json"
 
 TG_TOKEN = os.getenv("TG_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT = os.getenv("TG_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+
+# Binance API credentials (for real account value)
+API_KEY = (
+    os.getenv("BINANCE_API_KEY")
+    or os.getenv("BINANCE_KEY")
+    or ""
+)
+API_SECRET = (
+    os.getenv("BINANCE_API_SECRET")
+    or os.getenv("BINANCE_SECRET")
+    or ""
+)
+
+SESSION = requests.Session()
+if API_KEY:
+    SESSION.headers.update({"X-MBX-APIKEY": API_KEY})
 
 GREED_STABLE_THRESHOLD = 77.0
 DAYS_HISTORY_TARGET = 730
@@ -118,6 +139,83 @@ INITIAL_PORTFOLIO_USD = 100.0
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+def _sign_query(params: Dict[str, Any]) -> str:
+    if not API_SECRET:
+        raise RuntimeError("BINANCE_API_SECRET not set")
+    query = "&".join(f"{k}={params[k]}" for k in sorted(params.keys()))
+    signature = hmac.new(
+        API_SECRET.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{query}&signature={signature}"
+
+
+def binance_request(
+    method: str,
+    path: str,
+    params: Dict[str, Any] | None = None,
+    signed: bool = False,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    if params is None:
+        params = {}
+    url = BINANCE_SPOT + path
+
+    if signed:
+        if not API_KEY or not API_SECRET:
+            raise RuntimeError("BINANCE_API_KEY / BINANCE_API_SECRET not set")
+        params = dict(params)
+        params["timestamp"] = int(time.time() * 1000)
+        query = _sign_query(params)
+        resp = SESSION.request(method, url, params=None, data=query, timeout=timeout)
+    else:
+        resp = SESSION.request(method, url, params=params, timeout=timeout)
+
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"binance_request {path} failed: {resp.status_code} {resp.text[:200]}"
+        )
+    return resp.json()
+
+
+def fetch_account_value_usdc(latest_prices: Dict[str, float]) -> Tuple[float, Dict[str, float]]:
+    """
+    Fetch real spot balances and compute total value in USDC.
+    We only value assets that we have a USDC price for (plus USDC itself).
+    Returns (total_value_usdc, balances_map).
+    """
+    if not API_KEY or not API_SECRET:
+        return 0.0, {}
+
+    acct = binance_request("GET", "/api/v3/account", signed=True)
+
+    balances: Dict[str, float] = {}
+    for bal in acct.get("balances", []):
+        asset = bal.get("asset")
+        try:
+            free = float(bal.get("free", 0.0))
+        except Exception:
+            free = 0.0
+        if not asset or free <= 0:
+            continue
+        balances[asset.upper()] = free
+
+    total = 0.0
+    for asset, qty in balances.items():
+        asset = asset.upper()
+        if asset == "USDC":
+            total += qty
+        else:
+            sym = asset + "USDC"
+            px = latest_prices.get(sym, 0.0)
+            if px <= 0:
+                continue
+            total += qty * px
+
+    return total, balances
+
 
 def bn_spot_get(path: str,
                 params: Dict[str, Any] | None = None,
@@ -236,7 +334,6 @@ def weights_from_dom(dom_pct: float,
     w_btc = 1.0 - local
     w_alt = local
     return w_btc, w_alt, 0.0
-
 
 
 def tg_send(text: str) -> None:
@@ -521,14 +618,17 @@ def update_portfolio_tracker(
     portfolio_rows: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    Track a synthetic portfolio that starts fully in STABLES (USDC) and
-    rebalances into the model portfolio at each DOM run.
+    Track:
+      - a synthetic $100 model portfolio (rebalanced into latest weights)
+      - a BTC buy-and-hold $100 baseline
+      - real Binance account value in USDC
 
-    Also track a BTC buy-and-hold baseline and export a lightweight summary
-    for the website (knifecatcher_latest.json).
+    Export a lightweight summary for the website (knifecatcher_latest.json)
+    with:
+      - account_value_usd (real)
+      - normalized $100 values for algo vs BTC
+      - algo_roi / btc_roi
     """
-    INITIAL_PORTFOLIO_USD = 100.0
-
     now = datetime.utcnow().isoformat() + "Z"
 
     # Build latest prices map (assetUSDC -> price)
@@ -585,7 +685,7 @@ def update_portfolio_tracker(
             "base_balance_usd": INITIAL_PORTFOLIO_USD,
             "base_timestamp": base_timestamp,
             "holdings": {
-                "USDC": INITIAL_PORTFOLIO_USD  # start fully in stable
+                "USDC": INITIAL_PORTFOLIO_USD,  # start fully in stable
             },
             "btc_holdings": {
                 "BTC": 0.0,
@@ -595,6 +695,24 @@ def update_portfolio_tracker(
             "last_timestamp": now,
             "runs": 0,
         }
+
+    # ----- Real account snapshot -----
+    try:
+        account_value_usd, real_holdings = fetch_account_value_usdc(latest_prices)
+    except Exception as e:
+        print(f"[portfolio_tracker] Failed to fetch real account value: {e}")
+        account_value_usd, real_holdings = 0.0, {}
+
+    base_real_value = float(state.get("base_real_value_usd", 0.0))
+    if account_value_usd > 0 and base_real_value <= 0:
+        # First time we see a valid real account value – fix the baseline here
+        base_real_value = account_value_usd
+        state["base_real_value_usd"] = base_real_value
+
+    state["last_real_value_usd"] = account_value_usd
+    state["last_real_timestamp"] = now
+
+    # ----- Synthetic model portfolio + BTC baseline -----
 
     # Current synthetic holdings for the algo
     holdings: Dict[str, float] = state.get("holdings", {})
@@ -635,7 +753,6 @@ def update_portfolio_tracker(
 
     # Rebalance algo synthetic holdings to latest_weights
     new_holdings: Dict[str, float] = {}
-
     for asset, w in latest_weights.items():
         target_val = total_val * w
         if asset == "USDC":
@@ -670,6 +787,11 @@ def update_portfolio_tracker(
         base_balance = float(INITIAL_PORTFOLIO_USD)
 
     try:
+        base_real_value = float(tracker_state.get("base_real_value_usd", 0.0))
+    except Exception:
+        base_real_value = 0.0
+
+    try:
         port_val = float(portfolio_value)
     except Exception:
         port_val = 0.0
@@ -678,6 +800,11 @@ def update_portfolio_tracker(
         btc_val = float(btc_value)
     except Exception:
         btc_val = 0.0
+
+    try:
+        account_value_usd_state = float(tracker_state.get("last_real_value_usd", 0.0))
+    except Exception:
+        account_value_usd_state = 0.0
 
     try:
         runs_val = int(tracker_state.get("runs", 0))
@@ -694,14 +821,33 @@ def update_portfolio_tracker(
         except Exception:
             return None
 
-    algo_roi = _safe_roi(port_val, base_balance)
+    # Algo ROI: prefer real account value vs fixed real baseline
+    if base_real_value > 0 and account_value_usd_state > 0:
+        algo_roi = _safe_roi(account_value_usd_state, base_real_value)
+    else:
+        # Fallback: synthetic portfolio vs $100 baseline
+        algo_roi = _safe_roi(port_val, base_balance)
+
+    # BTC ROI: use the existing synthetic BTC baseline (normalized)
     btc_roi = _safe_roi(btc_val, base_balance)
+
+    # Normalized $100 views for display
+    norm_port_val = None
+    norm_btc_val = None
+    if algo_roi is not None:
+        norm_port_val = base_balance * (1.0 + algo_roi)
+    if btc_roi is not None:
+        norm_btc_val = base_balance * (1.0 + btc_roi)
 
     kc_payload = {
         "timestamp": now,
+        # fixed "$100" normalization anchor
         "base_balance_usd": base_balance,
-        "portfolio_value": port_val,
-        "btc_value": btc_val,
+        # real account balance in USDC (if keys present)
+        "account_value_usd": account_value_usd_state,
+        # normalized values if possible, otherwise raw synthetic values
+        "portfolio_value": norm_port_val if norm_port_val is not None else port_val,
+        "btc_value": norm_btc_val if norm_btc_val is not None else btc_val,
         "algo_roi": algo_roi,
         "btc_roi": btc_roi,
         "runs": runs_val,
@@ -722,7 +868,6 @@ def update_portfolio_tracker(
         "base_timestamp": state.get("base_timestamp", ""),
         "runs": int(state.get("runs", 0)),
     }
-
 
 
 # ------------------------------------------------------------------
@@ -1003,7 +1148,6 @@ def main() -> None:
         lines.append(f"BTC-only (HODL): <b>{btc_val_str}</b>")
         lines.append(f"Rebalances applied: {runs}")
 
-
     # Service health, explicitly flagging JSONs
     lines.append("")
     lines.append("<b>Service health</b>:")
@@ -1015,6 +1159,7 @@ def main() -> None:
     lines.append(f"Current run wrote JSONs: {'yes' if health.get('json_written') else 'no'}")
 
     print("[dom] Updated dom_bands_latest.json, prices_latest.json, portfolio_weights.json")
+    tg_send("\n".join(lines))
 
 
 if __name__ == "__main__":
