@@ -119,28 +119,57 @@
       color: var(--text-muted);
     }
 
+    .card-oracle-link {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .card-oracle-link:hover {
+      color: var(--accent-green);
+    }
+
     /* HMI section */
+    .hmi-card {
+      padding-top: 12px;
+      padding-bottom: 14px;
+    }
+
+    .hmi-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
     .hmi-value-row {
       display: flex;
       align-items: baseline;
-      gap: 8px;
-      margin-bottom: 8px;
+      gap: 10px;
+      justify-content: flex-start;
+      margin-bottom: 10px;
     }
 
     .hmi-value {
       font-size: 36px;
       font-weight: 600;
+      line-height: 1;
     }
 
     .hmi-status {
       font-size: 14px;
       font-weight: 500;
       color: var(--accent-neutral);
+      text-transform: none;
+      opacity: 0.95;
     }
 
-    .hmi-tracking-wrapper {
-      margin-top: 4px;
+    .hmi-tracking {
       text-align: center;
+      margin-top: 4px;
     }
 
     .hmi-tracking-title {
@@ -148,37 +177,30 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--text-muted);
-      border-bottom: 1px solid #33334a;
-      display: inline-block;
-      padding-bottom: 2px;
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      margin-bottom: 4px;
     }
 
     .hmi-tracking-items {
-      margin-top: 6px;
       font-size: 11px;
       color: var(--text-muted);
-      display: flex;
-      justify-content: center;
+      display: inline-flex;
       gap: 10px;
+      align-items: center;
       flex-wrap: wrap;
     }
 
-    .hmi-tracking-item {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      white-space: nowrap;
-    }
-
-    .hmi-tracking-dot {
+    .hmi-dot {
       width: 6px;
       height: 6px;
       border-radius: 999px;
       background: var(--accent-green);
-      flex-shrink: 0;
+      box-shadow: 0 0 6px rgba(77, 255, 136, 0.7);
     }
 
-    /* Dominance */
+    /* Dominance / Oracle */
     .oracle-card {
       margin-top: 2px;
       position: relative;
@@ -339,6 +361,7 @@
 
     .oracle-sub-line,
     .oracle-range-line,
+    .oracle-note,
     .oracle-error {
       font-size: 11px;
       color: var(--text-muted);
@@ -348,6 +371,11 @@
     .oracle-sub-line span,
     .oracle-range-line span {
       color: var(--text-main);
+    }
+
+    .oracle-note {
+      margin-top: 4px;
+      font-style: italic;
     }
 
     .oracle-error {
@@ -489,24 +517,6 @@
       );
     }
 
-    .card-oracle-link-row {
-      margin-top: 6px;
-      display: flex;
-      justify-content: flex-end;
-    }
-
-    .card-oracle-link {
-      font-size: 10px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      text-decoration: none;
-      color: var(--text-muted);
-    }
-
-    .card-oracle-link:hover {
-      color: var(--accent-green);
-    }
-
     @media (max-width: 700px) {
       .kc-row {
         flex-direction: column;
@@ -560,33 +570,22 @@
 
     <main>
       <!-- HMI CARD -->
-      <section class="card">
-        <div class="card-header">
+      <section class="card hmi-card">
+        <div class="hmi-header-row">
           <div class="card-title">Hive Mind Index</div>
+          <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
         </div>
         <div class="hmi-value-row">
           <div class="hmi-value" id="hmi-value">--.-</div>
           <div class="hmi-status" id="hmi-status">–</div>
         </div>
-        <div class="hmi-tracking-wrapper">
+        <div class="hmi-tracking">
           <div class="hmi-tracking-title">Tracking</div>
           <div class="hmi-tracking-items">
-            <div class="hmi-tracking-item">
-              <span class="hmi-tracking-dot"></span>
-              <span>Open Interest</span>
-            </div>
-            <div class="hmi-tracking-item">
-              <span class="hmi-tracking-dot"></span>
-              <span>Perps vs Spot</span>
-            </div>
-            <div class="hmi-tracking-item">
-              <span class="hmi-tracking-dot"></span>
-              <span>Volatility</span>
-            </div>
+            <span class="hmi-dot" aria-hidden="true"></span><span>Open interest</span>
+            <span class="hmi-dot" aria-hidden="true"></span><span>Perps vs spot</span>
+            <span class="hmi-dot" aria-hidden="true"></span><span>Volatility</span>
           </div>
-        </div>
-        <div class="card-oracle-link-row">
-          <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
         </div>
       </section>
 
@@ -624,7 +623,7 @@
           Range: <span>–</span>
         </div>
         <div class="oracle-error" id="oracle-error"></div>
-        <div class="card-oracle-link-row">
+        <div style="margin-top:6px;display:flex;justify-content:flex-end;">
           <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
         </div>
       </section>
@@ -720,9 +719,9 @@
     let suppliesGlobal = null;
     let oracleHistories = {};
     let domBandsGlobal = null;
-    let oracleSelectedX = ["BTC"];
-    let oracleSelectedY = ["ALTS"];
-    let globalHMI = null;
+
+    let oracleSelectedX = ["BTC"];   // default
+    let oracleSelectedY = ["ALTS"];  // default: all alts (not BTC)
 
     function formatDateTime(ts) {
       if (!ts) return "--/--/-- --:--";
@@ -752,6 +751,7 @@
     function updateLogoColor(hmi) {
       const slashEl = document.getElementById("logo-slash");
       const hiveEl = document.getElementById("logo-hive");
+
       if (!slashEl || !hiveEl) return;
 
       slashEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
@@ -775,7 +775,8 @@
       }
     }
 
-    function hmiBandLabelLocal(hmi) {
+    // UPDATED BANDS FOR FRONTEND
+    function hmiBandLabel(hmi) {
       if (hmi < 10) return "Zombie Apocalypse";
       if (hmi < 25) return "McDonald's Applications in high demand";
       if (hmi < 45) return "NGMI";
@@ -799,21 +800,14 @@
           throw new Error("Invalid HMI in JSON");
         }
 
-        globalHMI = hmi;
-
-        const band = typeof data.band === "string" && data.band.trim()
-          ? data.band
-          : hmiBandLabelLocal(hmi);
-
         const hmiEl = document.getElementById("hmi-value");
         const statusEl = document.getElementById("hmi-status");
         if (hmiEl) hmiEl.textContent = hmi.toFixed(1);
-        if (statusEl) statusEl.textContent = band;
+        if (statusEl) statusEl.textContent = hmiBandLabel(hmi);
 
         updateLogoColor(hmi);
       } catch (err) {
         console.error("HMI error:", err);
-        globalHMI = null;
         const hmiEl = document.getElementById("hmi-value");
         const statusEl = document.getElementById("hmi-status");
         if (hmiEl) hmiEl.textContent = "--.-";
@@ -865,74 +859,58 @@
       const token = row.token;
       if (!token) return "–";
 
-      if (token === "BTC") return "BTC only";
-      if (token === "USDTC") return "Stables";
+      const upToken = String(token).toUpperCase();
 
-      const domNow = typeof row.btc_dom === "number"
-        ? row.btc_dom
-        : parseFloat(row.btc_dom || "NaN");
-
-      const rangeStr = row.range || "";
-      const m = rangeStr.match(/(\d+)\D+(\d+)%/);
-      if (!m) return "–";
-
-      const domMin = parseFloat(m[1]);
-      const domMax = parseFloat(m[2]);
-      if (
-        Number.isNaN(domNow) ||
-        Number.isNaN(domMin) ||
-        Number.isNaN(domMax) ||
-        domMax <= domMin
-      ) {
+      // No action for BTC or stables
+      if (upToken === "BTC" || upToken.includes("USD")) {
         return "–";
       }
 
-      // HMI override – match Python algo GREED_STABLE_THRESHOLD (77)
-      if (globalHMI !== null && !Number.isNaN(globalHMI) && globalHMI >= 77) {
+      const domRaw = (typeof row.btc_dom === "number") ? row.btc_dom : parseFloat(row.btc_dom || "NaN");
+      if (!domRaw || Number.isNaN(domRaw)) return "–";
+
+      const rangeStr = row.range || "";
+      const m = String(rangeStr).match(/(\d+)\D+(\d+)%/);
+      if (!m) return "–";
+
+      const minPct = parseFloat(m[1]);
+      const maxPct = parseFloat(m[2]);
+      if (!(maxPct > minPct)) return "–";
+
+      let pos = (domRaw - minPct) / (maxPct - minPct);
+      if (!Number.isFinite(pos)) return "–";
+      pos = Math.max(0, Math.min(1, pos));  // clamp [0,1]
+
+      // 40/20/40 style bands:
+      // 0.0–0.4  : BTC-heavy zone
+      // 0.4–0.6  : Stables (flat)
+      // 0.6–1.0  : ALT-heavy zone
+      if (pos >= 0.4 && pos <= 0.6) {
         return "Stables";
       }
 
-      const span = domMax - domMin;
-      let t = (domNow - domMin) / span;
-      if (t < 0) t = 0;
-      if (t > 1) t = 1;
+      let altPct;
+      let btcPct;
 
-      let wBtc, wAlt, wSt;
-
-      if (t < 0.35) {
-        const local = t / 0.35;
-        wBtc = 1.0 - local;
-        wAlt = local;
-        wSt = 0.0;
-      } else if (t < 0.65) {
-        wBtc = 0.0;
-        wAlt = 0.0;
-        wSt = 1.0;
+      if (pos < 0.4) {
+        // BTC zone: go from 100% BTC / 0% ALT at pos=0
+        // to 50% BTC / 50% ALT at pos=0.4 (contrarian lean)
+        const t = pos / 0.4; // 0..1
+        btcPct = 100 - Math.round(t * 50); // 100->50
+        altPct = 100 - btcPct;             // 0->50
       } else {
-        const local = (t - 0.65) / 0.35;
-        wBtc = 1.0 - local;
-        wAlt = local;
-        wSt = 0.0;
+        // ALT zone: go from 50% ALT / 50% BTC at pos=0.6
+        // to 100% ALT / 0% BTC at pos=1.0
+        const t = (pos - 0.6) / 0.4; // 0..1
+        altPct = 50 + Math.round(t * 50);  // 50->100
+        btcPct = 100 - altPct;             // 50->0
       }
 
-      const dominant = Math.max(wBtc, wAlt, wSt);
-      if (wSt >= dominant) {
-        return "Stables";
-      }
-
-      const sumBA = wBtc + wAlt;
-      if (sumBA <= 0) return "–";
-
-      let altPct = (wAlt / sumBA) * 100;
-      let btcPct = (wBtc / sumBA) * 100;
-
-      altPct = Math.round(altPct);
-      btcPct = Math.round(btcPct);
-
-      const total = altPct + btcPct;
-      if (total !== 100) {
-        btcPct += 100 - total;
-      }
+      // Round to nearest 5% and ensure they sum to 100
+      altPct = Math.round(altPct / 5) * 5;
+      if (altPct < 0) altPct = 0;
+      if (altPct > 100) altPct = 100;
+      btcPct = 100 - altPct;
 
       return `${altPct}/${btcPct}`;
     }
@@ -1012,6 +990,7 @@
           tdRange.textContent = row.range || "–";
           tr.appendChild(tdRange);
 
+          // NEW: Action column
           const tdAction = document.createElement("td");
           tdAction.className = "center";
           tdAction.textContent = computeActionForRow(row);
@@ -1052,7 +1031,7 @@
           ? data.btc_value
           : parseFloat(data.btc_value || "0");
 
-        if (!Number.isNaN(portVal) && portVal > 0) {
+        if (!Number.isNaN(portVal) && portVal >= 0) {
           balanceEl.textContent = "$" + portVal.toFixed(2);
         }
 
@@ -1241,7 +1220,6 @@
       xMenu.innerHTML = "";
       yMenu.innerHTML = "";
 
-      // X menu options (no ALTS here)
       xOrder.forEach(tok => {
         if (tok === "ALTS") return;
 
@@ -1311,7 +1289,6 @@
       });
       xMenu.appendChild(xClear);
 
-      // Y menu options
       yOrder.forEach(tok => {
         if (tok === "ALTS" && !xIsPureBTC) return;
 

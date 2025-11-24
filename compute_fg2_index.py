@@ -13,7 +13,10 @@ Pipeline:
    - Fetch latest BTCUSDT perps daily kline + open interest from Binance
    - Update/append today's row
    - Trim history to last 730 days
-   - Compute HMI (FG_lite) using 365d rolling quantiles
+   - Compute HMI using 365d rolling quantiles on:
+       * Open interest (oi_usd)
+       * Perps vs spot dominance
+       * Volatility (RV_90 vs RV_30)
    - Write:
        output/fg2_daily.csv
        hmi_latest.json
@@ -122,11 +125,11 @@ def rolling_minmax(series: pd.Series, window: int = 365, lower_q: float = 0.05, 
 
 def compute_fg_lite(df: pd.DataFrame):
     """
-    Compute FG_lite and its components from:
+    Compute HMI and its components from:
 
         spot_close, spot_volume, perp_volume, oi_usd
 
-    Returns a copy of df with FG_lite, FG_vol, FG_oi, FG_spotperp.
+    Returns a copy of df with FG_lite (HMI), FG_vol, FG_oi, FG_spotperp.
     """
     df = df.sort_values("date").reset_index(drop=True).copy()
     eps = 1e-9
@@ -166,7 +169,7 @@ def compute_fg_lite(df: pd.DataFrame):
 
 def hmi_band_label(hmi: float) -> str:
     """
-    Map HMI numeric value to human-readable band.
+    Map numeric HMI to status band.
     """
     if hmi < 10:
         return "Zombie Apocalypse"
@@ -278,7 +281,7 @@ def main():
 
     write_history(df)
 
-    print("Computing HMI (FG_lite)…")
+    print("Computing HMI…")
     fg_df = compute_fg_lite(df)
     fg_df["date"] = fg_df["date"].astype("datetime64[ns]").dt.date
 
