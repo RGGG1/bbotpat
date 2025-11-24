@@ -119,102 +119,88 @@
       color: var(--text-muted);
     }
 
-    /* ---------------- HMI CARD ---------------- */
+    .card-oracle-link {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      text-decoration: none;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
 
+    .card-oracle-link:hover {
+      color: var(--accent-green);
+    }
+
+    /* HMI section */
     .hmi-card {
-      position: relative;
+      padding-top: 12px;
+      padding-bottom: 14px;
     }
 
-    .hmi-main {
+    .hmi-header-row {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
-      gap: 16px;
-      margin-top: 4px;
+      margin-bottom: 8px;
     }
 
-    .hmi-left {
+    .hmi-value-row {
       display: flex;
-      flex-direction: column;
-      gap: 6px;
-      min-width: 0;
+      align-items: baseline;
+      gap: 10px;
+      justify-content: flex-start;
+      margin-bottom: 10px;
     }
 
     .hmi-value {
-      font-size: 40px;
+      font-size: 36px;
       font-weight: 600;
       line-height: 1;
     }
 
-    .hmi-status-carousel {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      margin-top: 4px;
-    }
-
-    .hmi-status-line {
-      font-size: 11px;
-      color: var(--text-muted);
-      opacity: 0.4;
-      transition: all 0.2s ease;
-      white-space: nowrap;
-    }
-
-    .hmi-status-line.active {
-      font-size: 13px;
+    .hmi-status {
+      font-size: 14px;
       font-weight: 500;
       color: var(--accent-neutral);
-      opacity: 1;
+      text-transform: none;
+      opacity: 0.95;
     }
 
-    .hmi-status-line.above,
-    .hmi-status-line.below {
-      opacity: 0.7;
-    }
-
-    .hmi-right {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 4px;
+    .hmi-tracking {
+      text-align: center;
+      margin-top: 4px;
     }
 
     .hmi-tracking-title {
       font-size: 11px;
-      letter-spacing: 0.08em;
       text-transform: uppercase;
+      letter-spacing: 0.08em;
       color: var(--text-muted);
       text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      margin-bottom: 4px;
     }
 
-    .hmi-tracking-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
+    .hmi-tracking-items {
       font-size: 11px;
-      color: var(--text-main);
-      align-items: flex-end;
-    }
-
-    .hmi-tracking-item {
-      display: flex;
+      color: var(--text-muted);
+      display: inline-flex;
+      gap: 10px;
       align-items: center;
-      gap: 6px;
-      white-space: nowrap;
+      flex-wrap: wrap;
     }
 
     .hmi-dot {
-      width: 7px;
-      height: 7px;
+      width: 6px;
+      height: 6px;
       border-radius: 999px;
       background: var(--accent-green);
-      box-shadow: 0 0 8px rgba(77, 255, 136, 0.6);
+      box-shadow: 0 0 6px rgba(77, 255, 136, 0.7);
     }
 
     /* Dominance / Oracle */
-
     .oracle-card {
       margin-top: 2px;
       position: relative;
@@ -363,7 +349,7 @@
     }
 
     .oracle-main-line .dom-value {
-      font-size: 36px; /* same as HMI score style */
+      font-size: 36px;
       font-weight: 600;
       margin-right: 6px;
     }
@@ -397,8 +383,7 @@
       margin-top: 4px;
     }
 
-    /* Prices / Tokens */
-
+    /* Prices table */
     .prices-card {
       margin-top: 4px;
     }
@@ -483,8 +468,7 @@
       margin-top: 4px;
     }
 
-    /* Knifecatcher */
-
+    /* Knifecatcher card */
     .knifecatcher-card {
       position: relative;
     }
@@ -533,45 +517,7 @@
       );
     }
 
-    .card-oracle-link-row {
-      margin-top: 6px;
-      display: flex;
-      justify-content: flex-end;
-    }
-
-    .card-oracle-link {
-      font-size: 10px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      text-decoration: none;
-      color: var(--text-muted);
-    }
-
-    .card-oracle-link:hover {
-      color: var(--accent-green);
-    }
-
-    /* Responsive tweaks */
-
     @media (max-width: 700px) {
-      .hmi-main {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-      }
-
-      .hmi-right {
-        align-items: flex-start;
-      }
-
-      .hmi-value {
-        font-size: 34px;
-      }
-
-      .oracle-main-line .dom-value {
-        font-size: 32px;
-      }
-
       .kc-row {
         flex-direction: column;
         align-items: flex-start;
@@ -585,16 +531,22 @@
       .kc-main-value {
         font-size: 26px;
       }
+    }
 
+    @media (max-width: 700px) {
       .prices-table {
         font-size: 11px;
       }
-
       .prices-table th,
       .prices-table td {
         padding: 5px 3px;
       }
-
+      .hmi-value {
+        font-size: 32px;
+      }
+      .oracle-main-line .dom-value {
+        font-size: 32px;
+      }
       .oracle-dropdown {
         left: 0;
         right: 0;
@@ -619,39 +571,21 @@
     <main>
       <!-- HMI CARD -->
       <section class="card hmi-card">
-        <div class="card-header">
+        <div class="hmi-header-row">
           <div class="card-title">Hive Mind Index</div>
-        </div>
-
-        <div class="hmi-main">
-          <div class="hmi-left">
-            <div class="hmi-value" id="hmi-value">--.-</div>
-            <div class="hmi-status-carousel" id="hmi-status-carousel">
-              <!-- populated by JS -->
-            </div>
-          </div>
-
-          <div class="hmi-right">
-            <div class="hmi-tracking-title">Tracking</div>
-            <ul class="hmi-tracking-list">
-              <li class="hmi-tracking-item">
-                <span class="hmi-dot"></span>
-                <span>Open Interest</span>
-              </li>
-              <li class="hmi-tracking-item">
-                <span class="hmi-dot"></span>
-                <span>Perps vs Spot</span>
-              </li>
-              <li class="hmi-tracking-item">
-                <span class="hmi-dot"></span>
-                <span>Volatility</span>
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="card-oracle-link-row">
           <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
+        </div>
+        <div class="hmi-value-row">
+          <div class="hmi-value" id="hmi-value">--.-</div>
+          <div class="hmi-status" id="hmi-status">–</div>
+        </div>
+        <div class="hmi-tracking">
+          <div class="hmi-tracking-title">Tracking</div>
+          <div class="hmi-tracking-items">
+            <span class="hmi-dot" aria-hidden="true"></span><span>Open interest</span>
+            <span class="hmi-dot" aria-hidden="true"></span><span>Perps vs spot</span>
+            <span class="hmi-dot" aria-hidden="true"></span><span>Volatility</span>
+          </div>
         </div>
       </section>
 
@@ -689,7 +623,7 @@
           Range: <span>–</span>
         </div>
         <div class="oracle-error" id="oracle-error"></div>
-        <div class="card-oracle-link-row">
+        <div style="margin-top:6px;display:flex;justify-content:flex-end;">
           <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
         </div>
       </section>
@@ -744,8 +678,8 @@
             <ul style="margin-top:6px;line-height:1.35;list-style:disc;padding-left:18px;">
               <li>Hive Mind Index (HMI) is our custom fear and greed index, factored for predictive signaling.</li>
               <li>HMI and Dom values updated every 12 hours, at 07:15 and 19:15 CEST.</li>
-              <li>'Dom' represents BTC dominance against the token.</li>
-              <li>'Range' represents up to 2-year BTC Dom range against the token.</li>
+              <li>'Dom' represents BTC dominance against token.</li>
+              <li>'Range' represents up to 2-year BTC Dom range against token.</li>
               <li>USDTC = USDT and USDC combined.</li>
               <li>Additional token listing available on request.</li>
             </ul>
@@ -758,20 +692,6 @@
   <script>
     const HMI_NEUTRAL_LOW = 40;
     const HMI_NEUTRAL_HIGH = 60;
-    const GREED_STABLE_THRESHOLD = 77; // when HMI >= this, Action => Stables
-
-    // Keep HMI & band globally so Action column can use them
-    let HMI_VALUE = null;
-    let HMI_BAND = null;
-
-    const HMI_STATUS_DEFS = [
-      { label: "Zombie Apocalypse",                        min:   0, max: 15 },
-      { label: "McDonald's Applications in high demand",   min:  15, max: 30 },
-      { label: "NGMI",                                     min:  30, max: 40 },
-      { label: "Stabled",                                  min:  40, max: 60 },
-      { label: "We're early",                              min:  60, max: 80 },
-      { label: "It's the future of finance",               min:  80, max: 101 }
-    ];
 
     const ORACLE_TOKENS = [
       "BTC",
@@ -855,35 +775,16 @@
       }
     }
 
-    function hmiBandLabelFromScore(hmi) {
-      if (hmi < 15) return "Zombie Apocalypse";
-      if (hmi < 30) return "McDonald's Applications in high demand";
-      if (hmi < 40) return "NGMI";
-      if (hmi < 60) return "Stabled";
-      if (hmi < 80) return "We're early";
+    // UPDATED BANDS FOR FRONTEND
+    function hmiBandLabel(hmi) {
+      if (hmi < 10) return "Zombie Apocalypse";
+      if (hmi < 25) return "McDonald's Applications in high demand";
+      if (hmi < 45) return "NGMI";
+      if (hmi < 50) return "Leaning bearish";
+      if (hmi < 55) return "Cautiously bullish";
+      if (hmi < 75) return "It's digital gold";
+      if (hmi < 90) return "Frothy";
       return "It's the future of finance";
-    }
-
-    function renderHmiStatuses(activeLabel) {
-      const container = document.getElementById("hmi-status-carousel");
-      if (!container) return;
-
-      container.innerHTML = "";
-
-      const activeIndex = HMI_STATUS_DEFS.findIndex(s => s.label === activeLabel);
-      HMI_STATUS_DEFS.forEach((status, idx) => {
-        const div = document.createElement("div");
-        div.className = "hmi-status-line";
-        if (idx === activeIndex) {
-          div.classList.add("active");
-        } else if (idx === activeIndex - 1) {
-          div.classList.add("above");
-        } else if (idx === activeIndex + 1) {
-          div.classList.add("below");
-        }
-        div.textContent = status.label;
-        container.appendChild(div);
-      });
     }
 
     async function fetchHMI() {
@@ -899,23 +800,19 @@
           throw new Error("Invalid HMI in JSON");
         }
 
-        HMI_VALUE = hmi;
-        // Prefer band from JSON if present, else compute
-        HMI_BAND = typeof data.band === "string" && data.band.trim()
-          ? data.band
-          : hmiBandLabelFromScore(hmi);
-
         const hmiEl = document.getElementById("hmi-value");
+        const statusEl = document.getElementById("hmi-status");
         if (hmiEl) hmiEl.textContent = hmi.toFixed(1);
+        if (statusEl) statusEl.textContent = hmiBandLabel(hmi);
 
         updateLogoColor(hmi);
-        renderHmiStatuses(HMI_BAND);
       } catch (err) {
         console.error("HMI error:", err);
         const hmiEl = document.getElementById("hmi-value");
+        const statusEl = document.getElementById("hmi-status");
         if (hmiEl) hmiEl.textContent = "--.-";
+        if (statusEl) statusEl.textContent = "unavailable";
         updateLogoColor(NaN);
-        renderHmiStatuses("Stabled");
       }
     }
 
@@ -958,67 +855,62 @@
       }
     }
 
-    function computeActionForToken(row) {
+    function computeActionForRow(row) {
       const token = row.token;
-      if (!HMI_VALUE && HMI_VALUE !== 0) return "–";
+      if (!token) return "–";
 
-      if (token === "BTC") {
-        return "BTC";
-      }
-      if (token === "USDTC") {
-        return "Stables";
+      const upToken = String(token).toUpperCase();
+
+      // No action for BTC or stables
+      if (upToken === "BTC" || upToken.includes("USD")) {
+        return "–";
       }
 
-      const domVal = (typeof row.btc_dom === "number") ? row.btc_dom : null;
-      if (domVal === null || Number.isNaN(domVal)) return "–";
+      const domRaw = (typeof row.btc_dom === "number") ? row.btc_dom : parseFloat(row.btc_dom || "NaN");
+      if (!domRaw || Number.isNaN(domRaw)) return "–";
 
       const rangeStr = row.range || "";
       const m = String(rangeStr).match(/(\d+)\D+(\d+)%/);
       if (!m) return "–";
-      const domMin = parseFloat(m[1]);
-      const domMax = parseFloat(m[2]);
-      if (Number.isNaN(domMin) || Number.isNaN(domMax) || domMax <= domMin) return "–";
 
-      const hmi = HMI_VALUE;
+      const minPct = parseFloat(m[1]);
+      const maxPct = parseFloat(m[2]);
+      if (!(maxPct > minPct)) return "–";
 
-      // If HMI is very high, we prefer stables regardless of dom position
-      if (hmi >= GREED_STABLE_THRESHOLD) {
+      let pos = (domRaw - minPct) / (maxPct - minPct);
+      if (!Number.isFinite(pos)) return "–";
+      pos = Math.max(0, Math.min(1, pos));  // clamp [0,1]
+
+      // 40/20/40 style bands:
+      // 0.0–0.4  : BTC-heavy zone
+      // 0.4–0.6  : Stables (flat)
+      // 0.6–1.0  : ALT-heavy zone
+      if (pos >= 0.4 && pos <= 0.6) {
         return "Stables";
       }
 
-      // Mirror weights_from_dom logic on the frontend
-      const span = domMax - domMin;
-      let t = (domVal - domMin) / span;
-      t = Math.max(0, Math.min(1, t));
+      let altPct;
+      let btcPct;
 
-      let w_btc, w_alt, w_st;
-      if (t < 0.35) {
-        const local = t / 0.35;
-        w_btc = 1.0 - local;
-        w_alt = local;
-        w_st  = 0.0;
-      } else if (t < 0.65) {
-        w_btc = 0.0;
-        w_alt = 0.0;
-        w_st  = 1.0;
+      if (pos < 0.4) {
+        // BTC zone: go from 100% BTC / 0% ALT at pos=0
+        // to 50% BTC / 50% ALT at pos=0.4 (contrarian lean)
+        const t = pos / 0.4; // 0..1
+        btcPct = 100 - Math.round(t * 50); // 100->50
+        altPct = 100 - btcPct;             // 0->50
       } else {
-        const local = (t - 0.65) / 0.35;
-        w_btc = 1.0 - local;
-        w_alt = local;
-        w_st  = 0.0;
+        // ALT zone: go from 50% ALT / 50% BTC at pos=0.6
+        // to 100% ALT / 0% BTC at pos=1.0
+        const t = (pos - 0.6) / 0.4; // 0..1
+        altPct = 50 + Math.round(t * 50);  // 50->100
+        btcPct = 100 - altPct;             // 50->0
       }
 
-      if (w_st > Math.max(w_btc, w_alt)) {
-        return "Stables";
-      }
-
-      const sumBA = w_btc + w_alt;
-      if (sumBA <= 0) return "–";
-
-      const altShare = w_alt / sumBA;
-      let altPct = Math.round(altShare * 20) * 5; // round to nearest 5%
-      altPct = Math.max(0, Math.min(100, altPct));
-      const btcPct = 100 - altPct;
+      // Round to nearest 5% and ensure they sum to 100
+      altPct = Math.round(altPct / 5) * 5;
+      if (altPct < 0) altPct = 0;
+      if (altPct > 100) altPct = 100;
+      btcPct = 100 - altPct;
 
       return `${altPct}/${btcPct}`;
     }
@@ -1098,9 +990,10 @@
           tdRange.textContent = row.range || "–";
           tr.appendChild(tdRange);
 
+          // NEW: Action column
           const tdAction = document.createElement("td");
           tdAction.className = "center";
-          tdAction.textContent = computeActionForToken(row);
+          tdAction.textContent = computeActionForRow(row);
           tr.appendChild(tdAction);
 
           tbody.appendChild(tr);
@@ -1138,7 +1031,7 @@
           ? data.btc_value
           : parseFloat(data.btc_value || "0");
 
-        if (!Number.isNaN(portVal) && portVal > 0) {
+        if (!Number.isNaN(portVal) && portVal >= 0) {
           balanceEl.textContent = "$" + portVal.toFixed(2);
         }
 
@@ -1327,7 +1220,6 @@
       xMenu.innerHTML = "";
       yMenu.innerHTML = "";
 
-      // X menu options
       xOrder.forEach(tok => {
         if (tok === "ALTS") return;
 
@@ -1397,7 +1289,6 @@
       });
       xMenu.appendChild(xClear);
 
-      // Y menu options
       yOrder.forEach(tok => {
         if (tok === "ALTS" && !xIsPureBTC) return;
 
@@ -1534,15 +1425,13 @@
       rangeEl.innerHTML = `Range: <span>${rangeSpan}</span>`;
     }
 
-    // -------- INIT --------
-
-    (async function init() {
-      await fetchHMI();               // make sure HMI is ready for Action column
-      await fetchSupplies();
-      await fetchOracleHistory();
-      await fetchDomBands();
-      await fetchPrices();
-      await fetchKnifecatcher();
+    (function init() {
+      fetchHMI();
+      fetchSupplies()
+        .then(fetchOracleHistory)
+        .then(fetchDomBands)
+        .then(fetchPrices)
+        .then(fetchKnifecatcher);
     })();
   </script>
 </body>
