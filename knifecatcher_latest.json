@@ -1,11 +1,11 @@
 {
-  "timestamp": "2025-11-24T22:09:58.511880Z",
+  "timestamp": "2025-11-25T05:15:07.199024Z",
   "base_balance_usd": 100.0,
   "account_value_usd": 0.0,
-  "portfolio_value": 100.0,
-  "btc_value": 100.0,
-  "algo_roi": 0.0,
-  "btc_roi": 0.0,
-  "runs": 1,
+  "portfolio_value": 99.07458180097264,
+  "btc_value": 99.13339806233431,
+  "algo_roi": -0.009254181990273613,
+  "btc_roi": -0.008666019376656897,
+  "runs": 2,
   "base_timestamp": "2025-11-24T22:09:58.511880Z"
 }
