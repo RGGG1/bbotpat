@@ -480,6 +480,13 @@
       flex-wrap: wrap;
     }
 
+    .kc-row-secondary {
+      margin-top: 12px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+
     .kc-block {
       display: flex;
       flex-direction: column;
@@ -504,6 +511,14 @@
       font-size: 11px;
       color: var(--text-muted);
     }
+
+    .kc-secondary-value {
+      font-size: 12px;
+      line-height: 1.4;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
 
     .kc-divider {
       width: 1px;
@@ -626,25 +641,45 @@
         </section>
 
       <!-- KNIFECATCHER -->
-      <section class="card knifecatcher-card">
+                  <section class="card knifecatcher-card">
         <div class="card-header">
           <div class="card-title">Knifecatcher</div>
         </div>
+
+        <!-- Knifecatcher #1: existing rebalancer -->
         <div class="kc-row">
           <div class="kc-block">
-            <div class="kc-label">Balance</div>
+            <div class="kc-label">Knifecatcher #1 Balance</div>
             <div class="kc-main-value" id="kc-balance">$--.--</div>
           </div>
 
           <div class="kc-divider" aria-hidden="true"></div>
 
           <div class="kc-block kc-block-right">
-            <div class="kc-label">ROI</div>
+            <div class="kc-label">Knifecatcher #1 ROI</div>
             <div class="kc-main-value" id="kc-compare">--.--% vs --.--%</div>
-            <div class="kc-subline">Knifecatcher vs BTC buy and hold</div>
+            <div class="kc-subline">Rebalancer vs BTC buy and hold</div>
+          </div>
+        </div>
+
+        <!-- Knifecatcher #2: DOM hourly model (sim) -->
+        <div class="kc-row kc-row-secondary">
+          <div class="kc-block">
+            <div class="kc-label">Knifecatcher #2 Balance</div>
+            <div class="kc-main-value" id="kc2-balance">$--.--</div>
+          </div>
+
+          <div class="kc-divider" aria-hidden="true"></div>
+
+          <div class="kc-block kc-block-right">
+            <div class="kc-label">Knifecatcher #2 ROI</div>
+            <div class="kc-main-value" id="kc2-roi">--.--%</div>
+            <div class="kc-subline" id="kc2-subline">DOM hourly model (sim)</div>
           </div>
         </div>
       </section>
+
+
 
       <!-- PRICES / TOKENS CARD -->
       <section class="card prices-card">
@@ -674,7 +709,7 @@
           <div>
             <ul style="margin-top:6px;line-height:1.35;list-style:disc;padding-left:18px;">
               <li>Hive Mind Index (HMI) is our custom fear and greed index, factored for predictive signaling.</li>
-              <li>HMI and Dom values updated every 12 hours, at 07:15 and 19:15 CEST.</li>
+              <li>HMI and Dom values updated hourly.</li>
               <li>'Dom' represents BTC dominance against token.</li>
               <li>'Range' represents up to 2-year BTC Dom range against token.</li>
               <li>USDTC = USDT and USDC combined.</li>
@@ -1006,8 +1041,9 @@
       }
     }
 
-    async function fetchKnifecatcher() {
+            async function fetchKnifecatcher() {
       try {
+        // --- Knifecatcher #1: existing rebalancer ---
         const resp = await fetch("knifecatcher_latest.json", { cache: "no-store" });
         if (!resp.ok) throw new Error("knifecatcher fetch failed");
         const data = await resp.json();
@@ -1015,46 +1051,129 @@
         const balanceEl = document.getElementById("kc-balance");
         const compareEl = document.getElementById("kc-compare");
 
-        if (!data || !balanceEl || !compareEl) return;
+        if (data && balanceEl && compareEl) {
+          const base = typeof data.base_balance_usd === "number"
+            ? data.base_balance_usd
+            : parseFloat(data.base_balance_usd || "0");
 
-        const base = typeof data.base_balance_usd === "number"
-          ? data.base_balance_usd
-          : parseFloat(data.base_balance_usd || "0");
+          const portVal = typeof data.portfolio_value === "number"
+            ? data.portfolio_value
+            : parseFloat(data.portfolio_value || "0");
 
-        const portVal = typeof data.portfolio_value === "number"
-          ? data.portfolio_value
-          : parseFloat(data.portfolio_value || "0");
+          const btcVal = typeof data.btc_value === "number"
+            ? data.btc_value
+            : parseFloat(data.btc_value || "0");
 
-        const btcVal = typeof data.btc_value === "number"
-          ? data.btc_value
-          : parseFloat(data.btc_value || "0");
+          if (!Number.isNaN(portVal) && portVal >= 0) {
+            balanceEl.textContent = "$" + portVal.toFixed(2);
+          }
 
-        if (!Number.isNaN(portVal) && portVal >= 0) {
-          balanceEl.textContent = "$" + portVal.toFixed(2);
+          let algoRoi = null;
+          let btcRoi = null;
+
+          if (base && base > 0) {
+            algoRoi = (portVal / base) - 1;
+            btcRoi = (btcVal / base) - 1;
+          }
+
+          function fmtPct(x) {
+            if (x === null || Number.isNaN(x)) return "--.--%";
+            const pct = x * 100;
+            const sign = pct > 0 ? "+" : "";
+            return sign + pct.toFixed(1) + "%";
+          }
+
+          const algoStr = fmtPct(algoRoi);
+          const btcStr = fmtPct(btcRoi);
+          compareEl.textContent = algoStr + " vs " + btcStr;
         }
 
-        let algoRoi = null;
-        let btcRoi = null;
+        // --- Knifecatcher #2: DOM hourly model (sim) ---
+        const domBalanceEl = document.getElementById("kc2-balance");
+        const domRoiEl = document.getElementById("kc2-roi");
+        const domSubEl = document.getElementById("kc2-subline");
 
-        if (base && base > 0) {
-          algoRoi = (portVal / base) - 1;
-          btcRoi = (btcVal / base) - 1;
+        if (domBalanceEl && domRoiEl && domSubEl) {
+          try {
+            const resp2 = await fetch("dom_signals_hourly.json", { cache: "no-store" });
+            if (!resp2.ok) throw new Error("dom signals fetch failed");
+            const sig = await resp2.json();
+
+            if (sig && sig.position) {
+              const pos = sig.position;
+
+              const equityUsd = (typeof sig.equity_usd === "number")
+                ? sig.equity_usd
+                : parseFloat(sig.equity_usd || "NaN");
+
+              const roiFrac = (typeof sig.roi_frac === "number")
+                ? sig.roi_frac
+                : parseFloat(sig.roi_frac || "NaN");
+
+              const token = (pos.token || "NONE").toString().toUpperCase();
+              const type = (pos.type || "").toString().toUpperCase();
+              const hmiOverride = !!pos.hmi_override;
+
+              const entryPrice = (typeof pos.entry_price === "number")
+                ? pos.entry_price
+                : parseFloat(pos.entry_price || "NaN");
+
+              const targetPrice = (typeof pos.target_price === "number")
+                ? pos.target_price
+                : parseFloat(pos.target_price || "NaN");
+
+              function fmtUsd(x) {
+                if (x === null || Number.isNaN(x)) return "--";
+                return x.toFixed(2);
+              }
+
+              function fmtPct(x) {
+                if (x === null || Number.isNaN(x)) return "--.--%";
+                const pct = x * 100;
+                const sign = pct > 0 ? "+" : "";
+                return sign + pct.toFixed(1) + "%";
+              }
+
+              if (!Number.isNaN(equityUsd)) {
+                domBalanceEl.textContent = "$" + fmtUsd(equityUsd);
+              } else {
+                domBalanceEl.textContent = "$--.--";
+              }
+
+              if (roiFrac !== null && !Number.isNaN(roiFrac)) {
+                domRoiEl.textContent = fmtPct(roiFrac);
+              } else {
+                domRoiEl.textContent = "--.--%";
+              }
+
+              // Build subline: token | Entry | Target OR Stables
+              let subText = "Stables";
+              if (!hmiOverride && type !== "STABLES" && token !== "NONE") {
+                subText = token + " | Entry: $" + fmtUsd(entryPrice);
+                if (!Number.isNaN(targetPrice)) {
+                  subText += " | Target: $" + fmtUsd(targetPrice);
+                }
+              } else {
+                // Stables (either real, or due to HMI override)
+                if (roiFrac !== null && !Number.isNaN(roiFrac)) {
+                  subText = "Stables | ROI: " + fmtPct(roiFrac);
+                } else {
+                  subText = "Stables";
+                }
+              }
+
+              domSubEl.textContent = subText;
+            }
+          } catch (err2) {
+            console.error("DOM signals error:", err2);
+          }
         }
-
-        function fmtPct(x) {
-          if (x === null || Number.isNaN(x)) return "--.--%";
-          const pct = x * 100;
-          const sign = pct > 0 ? "+" : "";
-          return sign + pct.toFixed(1) + "%";
-        }
-
-        const algoStr = fmtPct(algoRoi);
-        const btcStr = fmtPct(btcRoi);
-        compareEl.textContent = algoStr + " vs " + btcStr;
       } catch (err) {
         console.error("Knifecatcher error:", err);
       }
     }
+
+
 
     // -------- Oracle helpers --------
 
