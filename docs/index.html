@@ -90,6 +90,10 @@
       color: var(--text-muted);
     }
 
+	.meta-oracle-link {
+    	margin-top: 4px;
+	}
+
     main {
       display: flex;
       flex-direction: column;
@@ -170,17 +174,6 @@
     .hmi-tracking {
       text-align: center;
       margin-top: 4px;
-    }
-
-    .hmi-tracking-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-muted);
-      text-decoration: underline;
-      text-decoration-thickness: 1px;
-      text-underline-offset: 3px;
-      margin-bottom: 4px;
     }
 
     .hmi-tracking-items {
@@ -360,13 +353,19 @@
     }
 
     .oracle-sub-line,
-    .oracle-range-line,
-    .oracle-note,
-    .oracle-error {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 2px;
-    }
+.oracle-range-line {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.oracle-note,
+.oracle-error {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
 
     .oracle-sub-line span,
     .oracle-range-line span {
@@ -565,6 +564,9 @@
       </div>
       <div class="meta-topline">
         Updated: <span id="meta-date">--/--/-- --:--</span>
+	<div class="meta-oracle-link">
+        	<a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
+    	</div>
       </div>
     </header>
 
@@ -573,14 +575,12 @@
       <section class="card hmi-card">
         <div class="hmi-header-row">
           <div class="card-title">Hive Mind Index</div>
-          <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
         </div>
         <div class="hmi-value-row">
           <div class="hmi-value" id="hmi-value">--.-</div>
           <div class="hmi-status" id="hmi-status">–</div>
         </div>
         <div class="hmi-tracking">
-          <div class="hmi-tracking-title">Tracking</div>
           <div class="hmi-tracking-items">
             <span class="hmi-dot" aria-hidden="true"></span><span>Open interest</span>
             <span class="hmi-dot" aria-hidden="true"></span><span>Perps vs spot</span>
@@ -623,10 +623,7 @@
           Range: <span>–</span>
         </div>
         <div class="oracle-error" id="oracle-error"></div>
-        <div style="margin-top:6px;display:flex;justify-content:flex-end;">
-          <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
-        </div>
-      </section>
+        </section>
 
       <!-- KNIFECATCHER -->
       <section class="card knifecatcher-card">
