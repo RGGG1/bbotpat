@@ -1,78 +1,78 @@
 {
-  "timestamp": "2025-11-26T01:44:37.712972Z",
+  "timestamp": "2025-11-26T17:29:12.460356Z",
   "health": {
     "coingecko_ok": true
   },
   "rows": [
     {
       "token": "BTC",
-      "price": 88092.0,
-      "mc": 1755432134046.0,
-      "change_24h": 0.18336,
+      "price": 88483.0,
+      "mc": 1755117144442.0,
+      "change_24h": 1.18409,
       "btc_dom": null,
       "range": ""
     },
     {
       "token": "ETH",
-      "price": 2977.94,
-      "mc": 358652700601.0,
-      "change_24h": 1.4439,
-      "btc_dom": 83.0,
+      "price": 2968.8,
+      "mc": 355538420476.0,
+      "change_24h": 1.13746,
+      "btc_dom": 83.2,
       "range": ""
     },
     {
       "token": "BNB",
-      "price": 867.57,
-      "mc": 119366904191.0,
-      "change_24h": 0.48899,
-      "btc_dom": 93.6,
+      "price": 884.24,
+      "mc": 121760425986.0,
+      "change_24h": 3.2342,
+      "btc_dom": 93.5,
       "range": ""
     },
     {
       "token": "SOL",
-      "price": 140.06,
-      "mc": 78260143822.0,
-      "change_24h": 1.1963,
-      "btc_dom": 95.7,
+      "price": 137.94,
+      "mc": 76659956318.0,
+      "change_24h": 0.88634,
+      "btc_dom": 95.8,
       "range": ""
     },
     {
       "token": "DOGE",
-      "price": 0.153448,
-      "mc": 23266529467.0,
-      "change_24h": 1.08755,
+      "price": 0.153098,
+      "mc": 23178441553.0,
+      "change_24h": 1.83149,
       "btc_dom": 98.7,
       "range": ""
     },
     {
       "token": "TON",
       "price": 1.56,
-      "mc": 3886250715.0,
-      "change_24h": 2.57894,
+      "mc": 3885861853.0,
+      "change_24h": 2.16123,
       "btc_dom": 99.8,
       "range": ""
     },
     {
       "token": "USDTC",
       "price": 1.0,
-      "mc": 259647447087.0,
+      "mc": 259801055813.0,
       "change_24h": 0.0,
       "btc_dom": null,
       "range": ""
     },
     {
       "token": "SUI",
-      "price": 1.55,
-      "mc": 5706002764.0,
-      "change_24h": 0.35172,
+      "price": 1.51,
+      "mc": 5511522208.0,
+      "change_24h": 0.86603,
       "btc_dom": 99.7,
       "range": ""
     },
     {
       "token": "UNI",
-      "price": 6.3,
-      "mc": 3961331519.0,
-      "change_24h": -0.34045,
+      "price": 6.22,
+      "mc": 3890404483.0,
+      "change_24h": 2.82604,
       "btc_dom": 99.8,
       "range": ""
     }
