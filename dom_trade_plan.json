@@ -1,0 +1,8 @@
+{
+  "timestamp": "2025-11-26T01:44:41.926692Z",
+  "from_signals_timestamp": "2025-11-26T01:44:41.870586Z",
+  "plan_action": "SWITCH",
+  "target_type": "ALT",
+  "target_token": "SOL",
+  "notes": "Rotate full equity into ALT SOL via USDC hub."
+}

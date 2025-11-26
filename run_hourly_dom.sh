@@ -3,6 +3,13 @@ set -euo pipefail
 
 cd /root/bbotpat
 
+# Activate virtualenv for hourly DOM pipeline
+if [ -d ".venv" ]; then
+  # shellcheck disable=SC1091
+  source .venv/bin/activate
+fi
+
+
 echo "[run_hourly_dom] Starting at $(date -Is)"
 
 # 1) Update prices, dominance, bands, HMI

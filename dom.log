@@ -1,0 +1,50 @@
+[run_hourly_dom] Starting at 2025-11-26T00:20:01+00:00
+/root/bbotpat/export_prices.py:120: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+[prices] wrote docs/prices_latest.json
+/root/bbotpat/update_dominance.py:135: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "timestamp": datetime.utcnow().isoformat() + "Z",
+Wrote docs/dom_bands_latest.json with dom=75.9%, range=67.0–82.0%, action=Stable up
+/root/bbotpat/update_dom_mc_history.py:85: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  today = datetime.utcnow().date().isoformat()
+/root/bbotpat/compute_fg2_index.py:84: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+  d = datetime.utcfromtimestamp(open_time_ms / 1000.0).date()
+/root/bbotpat/compute_fg2_index.py:233: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  cutoff = datetime.utcnow().date() - timedelta(days=730)
+Loading HMI history…
+History rows before update: 731
+History rows after update: 731
+Saved updated history to data/hmi_oi_history.csv
+Computing HMI…
+Saved HMI data to output/fg2_daily.csv
+           date    FG_lite     FG_vol      FG_oi  FG_spotperp
+726  2025-11-22  60.412252  24.053957  51.202921        100.0
+727  2025-11-23  60.004678  19.345277  52.271245        100.0
+728  2025-11-24  58.916239  19.209712  50.148593        100.0
+729  2025-11-25  55.216834  24.184953  40.759688        100.0
+730  2025-11-26  55.262242  23.405331  41.162353        100.0
+Wrote HMI JSONs: hmi_latest.json, docs/hmi_latest.json (HMI=55.3)
+/root/bbotpat/export_hmi_json.py:77: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  "exported_at": datetime.utcnow().isoformat() + "Z",
+Wrote HMI JSONs: hmi_latest.json, docs/hmi_latest.json (HMI=55.3, band=Stabled)
+[dom_hourly] Updated state + signals at 2025-11-26T00:20:06.397258Z (action=HOLD, pos=ALT/SOL)
+[dom_trade_plan] Plan: action=HOLD, target=ALT/SOL
+[dom_trade_plan] Notes: Hold current position: ALT SOL.
+[execute_dom_trade] Plan action=HOLD, target=ALT/SOL
+[execute_dom_trade] Notes: Hold current position: ALT SOL.
+[execute_dom_trade] HOLD: No trades to execute.
+[send_dom_hourly_telegram] TELEGRAM_DOM_BOT_TOKEN or TELEGRAM_DOM_CHAT_ID not set.
+[send_dom_hourly_telegram] Message would have been:
+
+[DOM Model]
+Equity: $100.00 (ROI: 0.00%)
+HMI: 55.3 (Stabled)
+HMI override: inactive
+Holding: ALT SOL
+Entry: $136.94
+Current: $136.94
+Target: $185.18
+Plan action: HOLD
+Plan target: ALT SOL
+Notes: Hold current position: ALT SOL.
+[run_hourly_dom] Done at 2025-11-26T00:20:06+00:00

@@ -1,5 +1,5 @@
 {
-  "timestamp": "2025-11-25T22:45:27.845721Z",
+  "timestamp": "2025-11-26T01:44:41.870586Z",
   "equity_usd": 100.0,
   "roi_frac": 0.0,
   "position": {
@@ -10,7 +10,7 @@
     "target_price": 185.1798682270842,
     "hmi_override": false
   },
-  "hmi": 56.0,
-  "hmi_band": "It's digital gold",
-  "action": "HOLD"
+  "hmi": 55.7,
+  "hmi_band": "Stabled",
+  "action": "SWITCH"
 }
