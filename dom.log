@@ -48,3 +48,168 @@ Plan action: HOLD
 Plan target: ALT SOL
 Notes: Hold current position: ALT SOL.
 [run_hourly_dom] Done at 2025-11-26T00:20:06+00:00
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T03:20:08.926176Z] --- execute_trades.py START ---
+[2025-11-26T03:20:08.927807Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T03:20:08.927877Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T03:20:08.927915Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T03:20:08.927961Z] [iter 1] Computing state...
+[2025-11-26T03:20:09.436613Z] [iter 1] Total value=100.79 USDC, max weight error=0.11%
+[2025-11-26T03:20:09.436789Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T03:20:09.881167Z] [summary] Final max weight error=0.11%
+[2025-11-26T03:20:10.002329Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T04:20:07.532898Z] --- execute_trades.py START ---
+[2025-11-26T04:20:07.533293Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T04:20:07.533355Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T04:20:07.533396Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T04:20:07.533466Z] [iter 1] Computing state...
+[2025-11-26T04:20:08.046520Z] [iter 1] Total value=99.87 USDC, max weight error=0.11%
+[2025-11-26T04:20:08.046670Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T04:20:08.496717Z] [summary] Final max weight error=0.11%
+[2025-11-26T04:20:08.600557Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T05:20:07.398155Z] --- execute_trades.py START ---
+[2025-11-26T05:20:07.398506Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T05:20:07.398571Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T05:20:07.398614Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T05:20:07.398653Z] [iter 1] Computing state...
+[2025-11-26T05:20:07.919894Z] [iter 1] Total value=100.18 USDC, max weight error=0.11%
+[2025-11-26T05:20:07.920058Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T05:20:08.368339Z] [summary] Final max weight error=0.11%
+[2025-11-26T05:20:08.555879Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T06:20:07.643341Z] --- execute_trades.py START ---
+[2025-11-26T06:20:07.643649Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T06:20:07.643704Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T06:20:07.643744Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T06:20:07.643781Z] [iter 1] Computing state...
+[2025-11-26T06:20:08.162731Z] [iter 1] Total value=100.26 USDC, max weight error=0.11%
+[2025-11-26T06:20:08.162935Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T06:20:08.608190Z] [summary] Final max weight error=0.11%
+[2025-11-26T06:20:08.766764Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T07:20:07.927360Z] --- execute_trades.py START ---
+[2025-11-26T07:20:07.928469Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T07:20:07.928548Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T07:20:07.928591Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T07:20:07.928632Z] [iter 1] Computing state...
+[2025-11-26T07:20:08.452894Z] [iter 1] Total value=100.83 USDC, max weight error=0.11%
+[2025-11-26T07:20:08.453066Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T07:20:08.903352Z] [summary] Final max weight error=0.11%
+[2025-11-26T07:20:09.121075Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T08:20:08.560176Z] --- execute_trades.py START ---
+[2025-11-26T08:20:08.560457Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T08:20:08.560511Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T08:20:08.560551Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T08:20:08.560603Z] [iter 1] Computing state...
+[2025-11-26T08:20:09.101125Z] [iter 1] Total value=100.28 USDC, max weight error=0.11%
+[2025-11-26T08:20:09.101330Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T08:20:09.551242Z] [summary] Final max weight error=0.11%
+[2025-11-26T08:20:09.692731Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T09:20:11.922998Z] --- execute_trades.py START ---
+[2025-11-26T09:20:11.923265Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T09:20:11.923313Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T09:20:11.923356Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T09:20:11.923435Z] [iter 1] Computing state...
+[2025-11-26T09:20:12.463970Z] [iter 1] Total value=98.96 USDC, max weight error=0.11%
+[2025-11-26T09:20:12.464122Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T09:20:12.918235Z] [summary] Final max weight error=0.11%
+[2025-11-26T09:20:13.080759Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T10:20:08.199095Z] --- execute_trades.py START ---
+[2025-11-26T10:20:08.199319Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T10:20:08.199359Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T10:20:08.199387Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T10:20:08.199427Z] [iter 1] Computing state...
+[2025-11-26T10:20:08.725530Z] [iter 1] Total value=99.08 USDC, max weight error=0.11%
+[2025-11-26T10:20:08.725822Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T10:20:09.176586Z] [summary] Final max weight error=0.11%
+[2025-11-26T10:20:09.361688Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T11:20:07.909205Z] --- execute_trades.py START ---
+[2025-11-26T11:20:07.909476Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T11:20:07.909534Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T11:20:07.909580Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T11:20:07.909624Z] [iter 1] Computing state...
+[2025-11-26T11:20:08.446538Z] [iter 1] Total value=99.07 USDC, max weight error=0.11%
+[2025-11-26T11:20:08.446778Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T11:20:08.900464Z] [summary] Final max weight error=0.11%
+[2025-11-26T11:20:09.052941Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T12:20:08.385051Z] --- execute_trades.py START ---
+[2025-11-26T12:20:08.385336Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T12:20:08.385405Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T12:20:08.385477Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T12:20:08.385518Z] [iter 1] Computing state...
+[2025-11-26T12:20:08.915219Z] [iter 1] Total value=98.12 USDC, max weight error=0.11%
+[2025-11-26T12:20:08.915477Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T12:20:09.366795Z] [summary] Final max weight error=0.11%
+[2025-11-26T12:20:09.597536Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T13:20:07.883099Z] --- execute_trades.py START ---
+[2025-11-26T13:20:07.883346Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T13:20:07.883387Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T13:20:07.883431Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T13:20:07.883461Z] [iter 1] Computing state...
+[2025-11-26T13:20:08.414802Z] [iter 1] Total value=98.43 USDC, max weight error=0.11%
+[2025-11-26T13:20:08.414962Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T13:20:08.874849Z] [summary] Final max weight error=0.11%
+[2025-11-26T13:20:09.125605Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T14:20:09.370152Z] --- execute_trades.py START ---
+[2025-11-26T14:20:09.370578Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T14:20:09.370663Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T14:20:09.370717Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T14:20:09.370764Z] [iter 1] Computing state...
+[2025-11-26T14:20:09.894791Z] [iter 1] Total value=98.75 USDC, max weight error=0.11%
+[2025-11-26T14:20:09.894971Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T14:20:10.347005Z] [summary] Final max weight error=0.11%
+[2025-11-26T14:20:10.508895Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T15:20:07.498482Z] --- execute_trades.py START ---
+[2025-11-26T15:20:07.498756Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T15:20:07.498807Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T15:20:07.498852Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T15:20:07.498896Z] [iter 1] Computing state...
+[2025-11-26T15:20:08.026560Z] [iter 1] Total value=98.63 USDC, max weight error=0.11%
+[2025-11-26T15:20:08.026774Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T15:20:08.476676Z] [summary] Final max weight error=0.11%
+[2025-11-26T15:20:08.619862Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T16:20:07.158468Z] --- execute_trades.py START ---
+[2025-11-26T16:20:07.158786Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T16:20:07.158868Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T16:20:07.158926Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T16:20:07.158974Z] [iter 1] Computing state...
+[2025-11-26T16:20:07.686355Z] [iter 1] Total value=99.56 USDC, max weight error=0.11%
+[2025-11-26T16:20:07.686598Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T16:20:08.134760Z] [summary] Final max weight error=0.11%
+[2025-11-26T16:20:08.263133Z] --- execute_trades.py END ---
+/root/bbotpat/execute_trades.py:78: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  line = f"[{datetime.utcnow().isoformat()}Z] {msg}"
+[2025-11-26T17:20:08.640779Z] --- execute_trades.py START ---
+[2025-11-26T17:20:08.641118Z] [info] LIVE_TRADING=True, STABLE=USDC
+[2025-11-26T17:20:08.641190Z] [info] Universe=['SOL', 'USDC']
+[2025-11-26T17:20:08.641240Z] [info] Target weights={'SOL': 1.0}
+[2025-11-26T17:20:08.641284Z] [iter 1] Computing state...
+[2025-11-26T17:20:09.172117Z] [iter 1] Total value=99.01 USDC, max weight error=0.11%
+[2025-11-26T17:20:09.172287Z] [iter 1] Within tolerance; no trades needed.
+[2025-11-26T17:20:09.625899Z] [summary] Final max weight error=0.11%
+[2025-11-26T17:20:09.774972Z] --- execute_trades.py END ---
