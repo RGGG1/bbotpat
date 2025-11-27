@@ -1,10 +1,10 @@
 {
-  "timestamp": "2025-11-27T20:20:08.047551Z",
-  "hmi": 57.5,
+  "timestamp": "2025-11-27T22:20:07.622404Z",
+  "hmi": 57.4,
   "hmi_band": "Stabled",
   "weights": [
     {
-      "asset": "TON",
+      "asset": "UNI",
       "weight": 1.0
     }
   ]

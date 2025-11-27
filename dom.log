@@ -233,3 +233,23 @@ prices_latest.json
 
 sent 270,659 bytes  received 130 bytes  180,526.00 bytes/sec
 total size is 446,464  speedup is 1.65
+sending incremental file list
+dom_bands_latest.json
+dom_mc_history.json
+dom_signals_hourly.json
+dom_trade_plan.json
+hmi_latest.json
+prices_latest.json
+
+sent 270,704 bytes  received 130 bytes  541,668.00 bytes/sec
+total size is 492,944  speedup is 1.82
+sending incremental file list
+dom_bands_latest.json
+dom_mc_history.json
+dom_signals_hourly.json
+dom_trade_plan.json
+hmi_latest.json
+prices_latest.json
+
+sent 270,698 bytes  received 130 bytes  541,656.00 bytes/sec
+total size is 492,410  speedup is 1.82

@@ -13,12 +13,15 @@ Hourly dominance-based strategy (DOM model) - SIMULATION ONLY for now.
 - Decides what we *should* hold:
     * STABLES (USDC)
     * BTC
-    * One ALT from the dominance universe (strongest signal, with mcap tiebreak)
+    * One ALT from the dominance universe
+- New selection rule:
+    * For each ALT, compute a target price from its dominance band and an implied
+      potential ROI: (target_price / entry_price) - 1.
+    * Choose the ALT with the highest potential ROI.
+    * While in an ALT, only rotate if a new ALT has potential ROI >= 10% better
+      than the current one.
 - Applies rules:
     * HMI override (risk-off) -> flatten to STABLES
-    * ALT vs BTC regime at 50/50 cutoff
-    * Exit ALT when its own dominance mean-reverts into neutral band
-    * Rotate from current ALT to another ALT if its score is >5 points higher
     * All moves are full equity (100% of current value) into new asset
 - Writes:
     * dom_hourly_state.json (root)
@@ -42,6 +45,10 @@ INITIAL_EQUITY_USD = 100.0
 
 # HMI override threshold: risk-off if HMI < 45 ("NGMI" or worse)
 HMI_RISK_OFF_THRESHOLD = 45.0
+
+# Relative improvement threshold for switching between ALTs, expressed on ROI.
+# E.g. current ROI = 0.05 (5%), new = 0.055 (5.5%) -> 0.055 >= 0.05 * 1.10 => switch.
+ALT_SWITCH_ROI_MULTIPLIER = 1.10
 
 
 def now_iso() -> str:
@@ -73,7 +80,6 @@ def load_hmi() -> Tuple[Optional[float], str]:
 def load_prices() -> Optional[Dict[str, Any]]:
     # Prefer docs/ (same JSON the website uses), fall back to root if needed
     return load_json_first([DOCS / "prices_latest.json", ROOT / "prices_latest.json"])
-
 
 
 def load_state() -> Dict[str, Any]:
@@ -189,6 +195,8 @@ def compute_alt_score(dom_low: float, dom_high: float, dom_current: float) -> fl
     Map dominance position to 0-100 score:
         0   -> BTC dominance at low end (ALT expensive vs BTC)
         100 -> BTC dominance at high end (ALT cheap vs BTC)
+
+    NOTE: kept for reference, no longer used for selection now that we use ROI.
     """
     if dom_high <= dom_low:
         return 0.0
@@ -198,8 +206,8 @@ def compute_alt_score(dom_low: float, dom_high: float, dom_current: float) -> fl
 
 def pick_best_alt(alts: List[Dict[str, Any]], mc_map: Dict[str, float]) -> Tuple[Optional[Dict[str, Any]], float]:
     """
-    Pick best ALT by score, breaking ties by higher market cap.
-    Returns (alt_dict_or_None, best_score).
+    Legacy scorer (not used by the new ROI-based selection).
+    Left in place for potential debugging or future use.
     """
     best: Optional[Dict[str, Any]] = None
     best_score = -1.0
@@ -305,86 +313,121 @@ def main() -> None:
     if hmi is not None and hmi < HMI_RISK_OFF_THRESHOLD:
         hmi_override = True
 
-    # 5) Compute best ALT & regime if no override
+    # 5) ROI-based ALT evaluation (only used when not in HMI override)
+    # For each ALT, compute a dominance-based target price and implied potential ROI.
+    alt_candidates: List[Dict[str, Any]] = []
     best_alt: Optional[Dict[str, Any]] = None
-    best_score = -1.0
-    regime = "BTC"  # default
 
-    if not hmi_override and alts:
-        best_alt, best_score = pick_best_alt(alts, mc_map)
-        if best_alt is not None and best_score > 50.0:
-            regime = "ALT"
-        else:
-            regime = "BTC"
+    if alts:
+        for alt in alts:
+            token = alt["token"]
+            L = float(alt["dom_low"])
+            H = float(alt["dom_high"])
+            # neutral band high for target
+            _, neutral_high = compute_neutral_band(L, H)
 
-    # 6) Decide action: HOLD / SWITCH / FLATTEN_TO_STABLES
+            entry_price_alt = float(price_map.get(token, 0.0)) or 0.0
+            if entry_price_alt <= 0:
+                alt["entry_price"] = None
+                alt["target_price"] = None
+                alt["potential_roi"] = None
+                continue
+
+            target_price_alt = compute_alt_target_price(token, neutral_high, price_map, mc_map)
+            alt["entry_price"] = entry_price_alt
+            alt["target_price"] = target_price_alt
+
+            if target_price_alt is None or target_price_alt <= 0:
+                alt["potential_roi"] = None
+                continue
+
+            potential_roi = (target_price_alt / entry_price_alt) - 1.0
+            alt["potential_roi"] = potential_roi
+
+            alt_candidates.append(alt)
+
+        if alt_candidates:
+            # Choose the ALT with the highest potential ROI
+            best_alt = max(
+                alt_candidates,
+                key=lambda a: (a["potential_roi"] if a["potential_roi"] is not None else float("-inf"))
+            )
+
+    # 6) Decide action: HOLD / SWITCH / FLATTEN_TO_STABLES using ROI logic
     action = "HOLD"
     from_token = pos_token
     to_token = pos_token
 
-    # HMI override always flattens to stables
     if hmi_override:
+        # HMI risk-off: always flatten to stables, regardless of ROI
         if pos_type != "STABLES":
             action = "FLATTEN_TO_STABLES"
             to_token = "NONE"
 
     else:
-        # No HMI override
-        if pos_type == "STABLES":
-            if regime == "ALT" and best_alt is not None:
-                action = "SWITCH"
-                from_token = "NONE"
-                to_token = best_alt["token"]
-            else:
-                action = "SWITCH"
-                from_token = "NONE"
-                to_token = "BTC"
-
-        elif pos_type == "BTC":
-            if regime == "ALT" and best_alt is not None:
-                action = "SWITCH"
-                from_token = "BTC"
-                to_token = best_alt["token"]
-            else:
+        # No HMI override – use ROI-based selection among ALTs
+        if best_alt is None or best_alt.get("potential_roi") is None:
+            # No valid ALT candidate with a target; default behaviour:
+            # - If already in BTC, hold.
+            # - If in ALT or STABLES, move/hold in BTC.
+            if pos_type == "BTC":
                 action = "HOLD"
                 to_token = "BTC"
-
-        elif pos_type == "ALT":
-            # Check mean-reversion exit for this ALT
-            alt_row = next((a for a in alts if a["token"] == pos_token), None)
-            if alt_row is None:
-                # If we lost dominance data for this token, be safe and flatten
-                action = "FLATTEN_TO_STABLES"
-                to_token = "NONE"
             else:
-                L = float(alt_row["dom_low"])
-                H = float(alt_row["dom_high"])
-                C = float(alt_row["dom_current"])
-                neutral_low, neutral_high = compute_neutral_band(L, H)
+                action = "SWITCH"
+                from_token = pos_token
+                to_token = "BTC"
+        else:
+            best_token = best_alt["token"]
+            best_roi = float(best_alt.get("potential_roi", 0.0))
 
-                # Exit if dominance has mean-reverted into neutral
-                if C <= neutral_high:
-                    action = "FLATTEN_TO_STABLES"
-                    to_token = "NONE"
-                else:
-                    # Consider rotation to a stronger ALT if available
-                    if best_alt is not None:
-                        score_current = float(alt_row.get("score", compute_alt_score(L, H, C)))
-                        score_best = float(best_alt.get("score", 0.0))
-                        if (
-                            best_alt["token"] != pos_token
-                            and score_best > 50.0
-                            and (score_best - score_current) > 5.0
-                        ):
-                            action = "SWITCH"
-                            from_token = pos_token
-                            to_token = best_alt["token"]
-                        else:
-                            action = "HOLD"
-                            to_token = pos_token
+            if pos_type == "ALT":
+                # Find the current ALT's ROI, if available
+                current_alt = next((a for a in alt_candidates if a["token"] == pos_token), None)
+                current_roi = None
+                if current_alt is not None:
+                    current_roi = current_alt.get("potential_roi")
+
+                if current_alt is None or current_roi is None:
+                    # We don't have a valid ROI for the current ALT – if best is different & >0, rotate
+                    if best_token != pos_token and best_roi > 0:
+                        action = "SWITCH"
+                        from_token = pos_token
+                        to_token = best_token
                     else:
                         action = "HOLD"
                         to_token = pos_token
+                else:
+                    # We have ROI for both current and best candidate
+                    if best_token == pos_token:
+                        # We're already in the best ROI token
+                        action = "HOLD"
+                        to_token = pos_token
+                    else:
+                        # Only switch if new ALT ROI is >= 10% better than current ALT ROI
+                        if best_roi >= current_roi * ALT_SWITCH_ROI_MULTIPLIER and best_roi > 0:
+                            action = "SWITCH"
+                            from_token = pos_token
+                            to_token = best_token
+                        else:
+                            action = "HOLD"
+                            to_token = pos_token
+
+            elif pos_type in ("STABLES", "BTC", "NONE"):
+                # From stables or BTC, if best ALT ROI is positive, go into that ALT
+                if best_roi > 0:
+                    action = "SWITCH"
+                    from_token = pos_token
+                    to_token = best_token
+                else:
+                    # If best ALT ROI is not positive, prefer BTC as a default
+                    if pos_type == "BTC":
+                        action = "HOLD"
+                        to_token = "BTC"
+                    else:
+                        action = "SWITCH"
+                        from_token = pos_token
+                        to_token = "BTC"
 
     # 7) Apply action to state (SIM executor)
     # Equity already updated from previous position; we always move full equity

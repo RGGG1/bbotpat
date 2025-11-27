@@ -1,8 +1,8 @@
 {
-  "timestamp": "2025-11-27T20:20:08.131816Z",
-  "from_signals_timestamp": "2025-11-27T20:20:08.047551Z",
-  "plan_action": "HOLD",
+  "timestamp": "2025-11-27T22:28:32.407603Z",
+  "from_signals_timestamp": "2025-11-27T22:28:32.328151Z",
+  "plan_action": "SWITCH",
   "target_type": "ALT",
-  "target_token": "TON",
-  "notes": "Hold current position: ALT TON."
+  "target_token": "UNI",
+  "notes": "Rotate full equity into ALT UNI via USDC hub."
 }
