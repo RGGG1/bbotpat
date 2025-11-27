@@ -1,16 +1,16 @@
 {
-  "timestamp": "2025-11-26T17:48:34.445789Z",
-  "equity_usd": 100.0,
-  "roi_frac": 0.0,
+  "timestamp": "2025-11-27T20:20:08.047551Z",
+  "equity_usd": 109.72893557318787,
+  "roi_frac": 0.09728935573187858,
   "position": {
     "type": "ALT",
-    "token": "SOL",
-    "entry_price": 136.94,
-    "current_price": 136.94,
-    "target_price": 185.1798682270842,
+    "token": "TON",
+    "entry_price": 1.6,
+    "current_price": 1.65,
+    "target_price": 1.6435707965556592,
     "hmi_override": false
   },
-  "hmi": 56.4,
+  "hmi": 57.5,
   "hmi_band": "Stabled",
   "action": "HOLD"
 }

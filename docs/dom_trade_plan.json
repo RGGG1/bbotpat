@@ -1,8 +1,8 @@
 {
-  "timestamp": "2025-11-26T17:48:34.514508Z",
-  "from_signals_timestamp": "2025-11-26T17:48:34.445789Z",
+  "timestamp": "2025-11-27T20:20:08.131816Z",
+  "from_signals_timestamp": "2025-11-27T20:20:08.047551Z",
   "plan_action": "HOLD",
   "target_type": "ALT",
-  "target_token": "SOL",
-  "notes": "Hold current position: ALT SOL."
+  "target_token": "TON",
+  "notes": "Hold current position: ALT TON."
 }

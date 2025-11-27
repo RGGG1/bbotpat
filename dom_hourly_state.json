@@ -1,11 +1,11 @@
 {
-  "equity_usd": 100.0,
+  "equity_usd": 109.72893557318787,
   "position_type": "ALT",
-  "position_token": "SOL",
-  "position_units": 0.7302468234263181,
-  "entry_price": 136.94,
-  "entry_timestamp": "2025-11-26T02:20:06.358028Z",
-  "last_update": "2025-11-26T17:48:34.445789Z",
+  "position_token": "TON",
+  "position_units": 66.50238519587144,
+  "entry_price": 1.6,
+  "entry_timestamp": "2025-11-27T01:10:38.691807Z",
+  "last_update": "2025-11-27T20:20:08.047551Z",
   "base_timestamp": "2025-11-26T01:20:06.504846Z",
   "base_balance_usd": 100.0,
   "mode": "SIM"

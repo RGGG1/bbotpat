@@ -71,7 +71,9 @@ def load_hmi() -> Tuple[Optional[float], str]:
 
 
 def load_prices() -> Optional[Dict[str, Any]]:
-    return load_json_first([ROOT / "prices_latest.json", DOCS / "prices_latest.json"])
+    # Prefer docs/ (same JSON the website uses), fall back to root if needed
+    return load_json_first([DOCS / "prices_latest.json", ROOT / "prices_latest.json"])
+
 
 
 def load_state() -> Dict[str, Any]:

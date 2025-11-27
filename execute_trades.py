@@ -47,7 +47,18 @@ STABLE = "USDC"
 BASE_URL = "https://api.binance.com"
 
 # Only these assets are actually traded by the rebalancer
-ALLOWED_ASSETS = {"BTC", "ETH", "BNB", "SOL", STABLE}
+ALLOWED_ASSETS = [
+    "BTC",
+    "ETH",
+    "BNB",
+    "SOL",
+    "DOGE",
+    "SUI",
+    "UNI",
+    "USDC",
+    "TON",
+]
+
 
 MIN_TRADE_USD = 1.0          # planner threshold: ignore diffs smaller than this
 TARGET_TOL = 0.005           # 0.5% tolerance on weights

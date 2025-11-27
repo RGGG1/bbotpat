@@ -213,3 +213,23 @@ Notes: Hold current position: ALT SOL.
 [2025-11-26T17:20:09.172287Z] [iter 1] Within tolerance; no trades needed.
 [2025-11-26T17:20:09.625899Z] [summary] Final max weight error=0.11%
 [2025-11-26T17:20:09.774972Z] --- execute_trades.py END ---
+sending incremental file list
+dom_bands_latest.json
+dom_mc_history.json
+dom_signals_hourly.json
+dom_trade_plan.json
+hmi_latest.json
+prices_latest.json
+
+sent 270,657 bytes  received 130 bytes  180,524.67 bytes/sec
+total size is 445,518  speedup is 1.65
+sending incremental file list
+dom_bands_latest.json
+dom_mc_history.json
+dom_signals_hourly.json
+dom_trade_plan.json
+hmi_latest.json
+prices_latest.json
+
+sent 270,659 bytes  received 130 bytes  180,526.00 bytes/sec
+total size is 446,464  speedup is 1.65

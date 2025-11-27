@@ -721,7 +721,7 @@
     </main>
   </div>
 
-  <script>
+   <script>
     const HMI_NEUTRAL_LOW = 40;
     const HMI_NEUTRAL_HIGH = 60;
 
@@ -749,8 +749,8 @@
 
     let pricesRowsGlobal = [];
     let suppliesGlobal = null;
-    let oracleHistories = {};
-    let domBandsGlobal = null;
+    let domHistoryGlobal = null;   // <-- full MC history (730d)
+    let domBandsGlobal = null;     // <-- BTC vs ALTS bands
 
     let oracleSelectedX = ["BTC"];   // default
     let oracleSelectedY = ["ALTS"];  // default: all alts (not BTC)
@@ -860,19 +860,25 @@
       }
     }
 
-    async function fetchOracleHistory() {
+    // NEW: use dom_mc_history.json directly
+    async function fetchDomHistory() {
       try {
-        const resp = await fetch("dom_history_latest.json", { cache: "no-store" });
+        const resp = await fetch("dom_mc_history.json", { cache: "no-store" });
         if (!resp.ok) {
-          console.warn("dom_history_latest.json not found or error");
-          oracleHistories = {};
+          console.warn("dom_mc_history.json not found or error");
+          domHistoryGlobal = null;
           return;
         }
         const data = await resp.json();
-        oracleHistories = data && data.series ? data.series : {};
+        if (!data || !Array.isArray(data.series)) {
+          console.warn("dom_mc_history.json has no 'series' array");
+          domHistoryGlobal = null;
+          return;
+        }
+        domHistoryGlobal = data.series;
       } catch (err) {
-        console.error("Oracle history error:", err);
-        oracleHistories = {};
+        console.error("Dom history error:", err);
+        domHistoryGlobal = null;
       }
     }
 
@@ -888,65 +894,102 @@
     }
 
     function computeActionForRow(row) {
-      const token = row.token;
-      if (!token) return "–";
+  const token = row.token;
+  if (!token) return "–";
 
-      const upToken = String(token).toUpperCase();
+  const upToken = String(token).toUpperCase();
 
-      // No action for BTC or stables
-      if (upToken === "BTC" || upToken.includes("USD")) {
-        return "–";
-      }
+  // No action for BTC or stables
+  if (upToken === "BTC" || upToken.includes("USD")) {
+    return "–";
+  }
 
-      const domRaw = (typeof row.btc_dom === "number") ? row.btc_dom : parseFloat(row.btc_dom || "NaN");
-      if (!domRaw || Number.isNaN(domRaw)) return "–";
+  // Parse current BTC dominance
+  const domRaw = (typeof row.btc_dom === "number")
+    ? row.btc_dom
+    : parseFloat(row.btc_dom ?? "NaN");
+  const hasDom = !Number.isNaN(domRaw);
 
-      const rangeStr = row.range || "";
-      const m = String(rangeStr).match(/(\d+)\D+(\d+)%/);
-      if (!m) return "–";
+  // Helper: parse "73.1–90.1%" or similar into {min, max}
+  function parseRange(str) {
+    if (!str) return null;
+    const cleaned = String(str).replace(/%/g, "");
+    const parts = cleaned.split(/[^\d.]+/).filter(Boolean);
+    if (parts.length < 2) return null;
+    const min = parseFloat(parts[0]);
+    const max = parseFloat(parts[1]);
+    if (Number.isNaN(min) || Number.isNaN(max)) return null;
+    if (!(max > min)) return null;
+    return { min, max };
+  }
 
-      const minPct = parseFloat(m[1]);
-      const maxPct = parseFloat(m[2]);
-      if (!(maxPct > minPct)) return "–";
+  const r = parseRange(row.range || "");
+  const hasRange = !!r;
 
-      let pos = (domRaw - minPct) / (maxPct - minPct);
-      if (!Number.isFinite(pos)) return "–";
-      pos = Math.max(0, Math.min(1, pos));  // clamp [0,1]
+  // If we have both dom and a valid range, do the smooth 40/20/40 mapping
+  if (hasDom && hasRange) {
+    const minPct = r.min;
+    const maxPct = r.max;
 
-      // 40/20/40 style bands:
-      // 0.0–0.4  : BTC-heavy zone
-      // 0.4–0.6  : Stables (flat)
-      // 0.6–1.0  : ALT-heavy zone
-      if (pos >= 0.4 && pos <= 0.6) {
-        return "Stables";
-      }
-
-      let altPct;
-      let btcPct;
-
-      if (pos < 0.4) {
-        // BTC zone: go from 100% BTC / 0% ALT at pos=0
-        // to 50% BTC / 50% ALT at pos=0.4 (contrarian lean)
-        const t = pos / 0.4; // 0..1
-        btcPct = 100 - Math.round(t * 50); // 100->50
-        altPct = 100 - btcPct;             // 0->50
-      } else {
-        // ALT zone: go from 50% ALT / 50% BTC at pos=0.6
-        // to 100% ALT / 0% BTC at pos=1.0
-        const t = (pos - 0.6) / 0.4; // 0..1
-        altPct = 50 + Math.round(t * 50);  // 50->100
-        btcPct = 100 - altPct;             // 50->0
-      }
-
-  // Round to nearest 1% and ensure they sum to 100
-  altPct = Math.round(altPct);
-  if (altPct < 0) altPct = 0;
-  if (altPct > 100) altPct = 100;
-  btcPct = 100 - altPct;
-
-  return `${altPct}/${btcPct}`;
-
+    let pos = (domRaw - minPct) / (maxPct - minPct);
+    if (!Number.isFinite(pos)) {
+      pos = 0.5;
     }
+    pos = Math.max(0, Math.min(1, pos)); // clamp [0,1]
+
+    // 40/20/40 bands:
+    // - 0.0–0.4 : BTC zone
+    // - 0.4–0.6 : Stables zone (we show 50/50)
+    // - 0.6–1.0 : ALT zone
+    let altPct;
+    let btcPct;
+
+    if (pos >= 0.4 && pos <= 0.6) {
+      altPct = 50;
+      btcPct = 50;
+    } else if (pos < 0.4) {
+      // BTC zone: 0 -> 100% BTC, 0% ALT; 0.4 -> 50/50
+      const t = pos / 0.4; // 0..1
+      btcPct = 100 - Math.round(t * 50); // 100->50
+      altPct = 100 - btcPct;             // 0->50
+    } else {
+      // ALT zone: 0.6 -> 50/50; 1.0 -> 100% ALT
+      const t = (pos - 0.6) / 0.4; // 0..1
+      altPct = 50 + Math.round(t * 50);  // 50->100
+      btcPct = 100 - altPct;             // 50->0
+    }
+
+    altPct = Math.round(altPct);
+    if (altPct < 0) altPct = 0;
+    if (altPct > 100) altPct = 100;
+    btcPct = 100 - altPct;
+
+    // ALT/BTC
+    return `${altPct}/${btcPct}`;
+  }
+
+  // Fallback: use dom_action text if range/dom parsing failed
+  const act = (row.dom_action || "").toLowerCase();
+
+  if (!act) return "–";
+
+  // Interpret:
+  //  - "ALT favoured"   -> 80% ALT / 20% BTC
+  //  - "BTC favoured"   -> 20% ALT / 80% BTC
+  //  - "Stables" / etc. -> 50% / 50%
+  if (act.includes("alt fav")) {
+    return "80/20";
+  }
+  if (act.includes("btc fav")) {
+    return "20/80";
+  }
+  if (act.includes("stable")) {
+    return "50/50";
+  }
+
+  return "–";
+}
+
 
     async function fetchPrices() {
       try {
@@ -1023,7 +1066,6 @@
           tdRange.textContent = row.range || "–";
           tr.appendChild(tdRange);
 
-          // NEW: Action column
           const tdAction = document.createElement("td");
           tdAction.className = "center";
           tdAction.textContent = computeActionForRow(row);
@@ -1041,7 +1083,7 @@
       }
     }
 
-            async function fetchKnifecatcher() {
+    async function fetchKnifecatcher() {
       try {
         // --- Knifecatcher #1: existing rebalancer ---
         const resp = await fetch("knifecatcher_latest.json", { cache: "no-store" });
@@ -1146,7 +1188,6 @@
                 domRoiEl.textContent = "--.--%";
               }
 
-              // Build subline: token | Entry | Target OR Stables
               let subText = "Stables";
               if (!hmiOverride && type !== "STABLES" && token !== "NONE") {
                 subText = token + " | Entry: $" + fmtUsd(entryPrice);
@@ -1154,7 +1195,6 @@
                   subText += " | Target: $" + fmtUsd(targetPrice);
                 }
               } else {
-                // Stables (either real, or due to HMI override)
                 if (roiFrac !== null && !Number.isNaN(roiFrac)) {
                   subText = "Stables | ROI: " + fmtPct(roiFrac);
                 } else {
@@ -1172,8 +1212,6 @@
         console.error("Knifecatcher error:", err);
       }
     }
-
-
 
     // -------- Oracle helpers --------
 
@@ -1207,11 +1245,6 @@
       if (typeof val === "number") return val;
       const f = parseFloat(val || "0");
       return Number.isNaN(f) ? 0 : f;
-    }
-
-    function getHistorySeries(key) {
-      if (!oracleHistories) return null;
-      return oracleHistories[key] || null;
     }
 
     function sortTokensByMC(tokens) {
@@ -1261,17 +1294,59 @@
 
       const domNow = (mcX / totalNow) * 100;
 
-      const key = `${Array.from(fullX).sort().join("+")}__${Array.from(fullY).sort().join("+")}`;
-      const hist = getHistorySeries(key);
+      // --- History from dom_mc_history.json ---
       let domMin = null;
       let domMax = null;
       let days = 0;
 
-      if (hist && Array.isArray(hist.values) && hist.values.length > 0) {
-        days = hist.values.length;
-        domMin = Math.min(...hist.values);
-        domMax = Math.max(...hist.values);
-      } else {
+            if (domHistoryGlobal && Array.isArray(domHistoryGlobal)) {
+        const vals = [];
+        for (const row of domHistoryGlobal) {
+          if (!row || !row.mc) continue;
+          const mc = row.mc;
+
+          let hx = 0;
+          let hy = 0;
+
+          for (const t of fullX) {
+            const v = mc[t];
+            if (typeof v === "number") {
+              hx += v;
+            } else if (typeof v === "string") {
+              const f = parseFloat(v);
+              if (!Number.isNaN(f)) hx += f;
+            }
+          }
+
+          for (const t of fullY) {
+            const v = mc[t];
+            if (typeof v === "number") {
+              hy += v;
+            } else if (typeof v === "string") {
+              const f = parseFloat(v);
+              if (!Number.isNaN(f)) hy += f;
+            }
+          }
+
+          // NEW: only use days where BOTH sides have non-zero MC
+          if (hx <= 0 || hy <= 0) continue;
+
+          const tot = hx + hy;
+          if (tot > 0) {
+            vals.push((hx / tot) * 100.0);
+          }
+        }
+
+        if (vals.length > 0) {
+          days = vals.length;
+          domMin = Math.min(...vals);
+          domMax = Math.max(...vals);
+        }
+      }
+
+
+      // Fallbacks for BTC vs ALTS or BTC vs single alt if history missing
+      if ((domMin == null || domMax == null) || !(domMax > domMin)) {
         const xIsBTCOnly = (xTokens.length === 1 && xTokens[0] === "BTC");
         const yIsAltsOnly = (yTokens.length === 1 && yTokens[0] === "ALTS");
 
@@ -1337,8 +1412,10 @@
       xMenu.innerHTML = "";
       yMenu.innerHTML = "";
 
+      // X-side menu (exclude anything already selected on Y)
       xOrder.forEach(tok => {
         if (tok === "ALTS") return;
+        if (oracleSelectedY.includes(tok)) return;
 
         const div = document.createElement("div");
         div.className = "oracle-option";
@@ -1406,8 +1483,10 @@
       });
       xMenu.appendChild(xClear);
 
+      // Y-side menu (exclude anything already selected on X except ALTS)
       yOrder.forEach(tok => {
         if (tok === "ALTS" && !xIsPureBTC) return;
+        if (tok !== "ALTS" && oracleSelectedX.includes(tok)) return;
 
         const div = document.createElement("div");
         div.className = "oracle-option";
@@ -1545,7 +1624,7 @@
     (function init() {
       fetchHMI();
       fetchSupplies()
-        .then(fetchOracleHistory)
+        .then(fetchDomHistory)
         .then(fetchDomBands)
         .then(fetchPrices)
         .then(fetchKnifecatcher);
@@ -1553,3 +1632,4 @@
   </script>
 </body>
 </html>
+

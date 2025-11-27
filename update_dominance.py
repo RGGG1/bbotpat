@@ -3,15 +3,25 @@
 update_dominance.py
 
 Uses:
-- docs/dom_bands_latest.json   (for min_pct, max_pct)
+- docs/dom_bands_latest.json   (for min_pct, max_pct – BTC vs EthBnbSol)
 - docs/hmi_latest.json         (for latest HMI)
-- CoinGecko                    (for live market caps)
+- CoinGecko                    (for live BTC / EthBnbSol market caps)
+- dom_mc_history.json          (for per-token market-cap history)
+- docs/prices_latest.json      (for token rows)
 
-Writes back to docs/dom_bands_latest.json:
-- min_pct, max_pct
-- btc_pct, alt_pct
-- btc_mc_fmt, alt_mc_fmt
-- action
+Writes:
+- docs/dom_bands_latest.json:
+    - min_pct, max_pct
+    - btc_pct, alt_pct
+    - btc_mc_fmt, alt_mc_fmt
+    - action  (Buy BTC / Buy ALTs / Stable up)
+
+- docs/prices_latest.json:
+    - per-token:
+        - btc_dom     (current BTC dominance vs that token)
+        - range       ("low–high%" dominance band from ~730-day history)
+        - dom_action  ("ALT/BTC split", e.g. "38/62")
+        - dom_bias    ("ALT favoured" / "BTC favoured" / "Neutral")
 """
 
 from datetime import datetime
@@ -23,6 +33,11 @@ DOCS = Path("docs")
 DOCS.mkdir(exist_ok=True, parents=True)
 BANDS = DOCS / "dom_bands_latest.json"
 HMI = DOCS / "hmi_latest.json"
+PRICES = DOCS / "prices_latest.json"
+
+# History of per-token market caps
+DOM_MC_HISTORY_ROOT = Path("dom_mc_history.json")
+DOM_MC_HISTORY_DOCS = DOCS / "dom_mc_history.json"
 
 COINGECKO = "https://api.coingecko.com/api/v3"
 
@@ -77,8 +92,163 @@ def compute_action(dom_pct, min_pct, max_pct, hmi):
     return "Buy ALTs"
 
 
+def load_dom_mc_history():
+    """
+    Load dom_mc_history.json from root or docs/.
+    Expected structure:
+
+    {
+      "series": [
+        {
+          "date": "YYYY-MM-DD",
+          "mc": {
+            "BTC": ...,
+            "ETH": ...,
+            ...
+          }
+        },
+        ...
+      ]
+    }
+    """
+    for path in (DOM_MC_HISTORY_DOCS, DOM_MC_HISTORY_ROOT):
+        if path.exists():
+            try:
+                return json.loads(path.read_text())
+            except Exception:
+                continue
+    return None
+
+
+def enrich_prices_with_dom_ranges():
+    """
+    Use dom_mc_history.json to compute per-token BTC dominance history and
+    inject per-token dominance bands into docs/prices_latest.json:
+
+        - btc_dom: current dominance (today)
+        - range: "low–high%" over history (rolling window)
+        - dom_action: "ALT/BTC" split, e.g. "38/62"
+        - dom_bias: "ALT favoured" / "BTC favoured" / "Neutral"
+    """
+    if not PRICES.exists():
+        return
+
+    try:
+        prices_js = json.loads(PRICES.read_text())
+    except Exception:
+        return
+
+    rows = prices_js.get("rows", [])
+    if not rows:
+        return
+
+    hist = load_dom_mc_history()
+    if not hist or "series" not in hist:
+        return
+
+    series = hist["series"]
+    if not series:
+        return
+
+    # Build per-token dominance series: BTC / (BTC + token)
+    token_dom_history = {}  # token -> [dom values over time]
+    for entry in series:
+        mc = entry.get("mc") or {}
+        btc = mc.get("BTC")
+        if not btc or btc <= 0:
+            continue
+        for t, v in mc.items():
+            if t == "BTC":
+                continue
+            if v and v > 0:
+                dom_val = 100.0 * btc / (btc + v)
+                token_dom_history.setdefault(t.upper(), []).append(dom_val)
+
+    latest_mc = series[-1].get("mc") or {}
+    btc_latest = latest_mc.get("BTC", 0.0)
+    if btc_latest <= 0:
+        return
+
+    # Enrich each price row with dominance info where available
+    for row in rows:
+        token = str(row.get("token", "")).upper()
+        if token not in token_dom_history:
+            continue
+
+        hist_vals = token_dom_history[token]
+        if not hist_vals:
+            continue
+
+        dom_low = min(hist_vals)
+        dom_high = max(hist_vals)
+        if dom_high <= dom_low:
+            continue
+
+        token_mc_latest = latest_mc.get(token, 0.0)
+        if token_mc_latest <= 0:
+            continue
+
+        dom_current = 100.0 * btc_latest / (btc_latest + token_mc_latest)
+
+        # Decide decimals based on band width
+        width = dom_high - dom_low
+        if width < 0.02:
+            dec = 4
+        elif width < 0.1:
+            dec = 3
+        elif width < 1.0:
+            dec = 2
+        else:
+            dec = 1
+
+        range_str = f"{dom_low:.{dec}f}–{dom_high:.{dec}f}%"
+
+        # Normalised position in band
+        z = (dom_current - dom_low) / (dom_high - dom_low)
+        if z < 0.0:
+            z = 0.0
+        elif z > 1.0:
+            z = 1.0
+
+        # ALT/BTC split – ALT first, BTC second
+        alt_pct = round((1.0 - z) * 100.0)
+        if alt_pct < 0:
+            alt_pct = 0
+        if alt_pct > 100:
+            alt_pct = 100
+        btc_pct = 100 - alt_pct
+        split_str = f"{alt_pct}/{btc_pct}"
+
+        # Bias label using 40/20/40 bands
+        span = dom_high - dom_low
+        if span > 0:
+            neutral_low = dom_low + 0.40 * span
+            neutral_high = dom_low + 0.60 * span
+            if dom_current < neutral_low:
+                bias = "ALT favoured"
+            elif dom_current > neutral_high:
+                bias = "BTC favoured"
+            else:
+                bias = "Neutral"
+        else:
+            bias = "Neutral"
+
+        row["btc_dom"] = round(dom_current, 1)
+        row["range"] = range_str
+        # Action column should show the split:
+        row["dom_action"] = split_str
+        # Keep a label in case we want it later:
+        row["dom_bias"] = bias
+
+    prices_js["rows"] = rows
+    PRICES.write_text(json.dumps(prices_js, indent=2))
+    print("[dom] Updated prices_latest.json with per-token dominance bands + ALT/BTC splits.")
+
+
 def main():
-    # Load range
+    # ------------------------------------------------------------------
+    # 1) Global BTC vs EthBnbSol dominance band (existing logic)
+    # ------------------------------------------------------------------
     min_pct = 70.0
     max_pct = 85.0
     if BANDS.exists():
@@ -101,7 +271,7 @@ def main():
         except Exception:
             hmi = None
 
-    # Live market caps
+    # Live market caps (BTC vs ETH+BNB+SOL)
     ids = ",".join(IDS.values())
     js = cg_get(
         "/coins/markets",
@@ -143,7 +313,15 @@ def main():
     }
 
     BANDS.write_text(json.dumps(payload, indent=2))
-    print(f"Wrote {BANDS} with dom={payload['btc_pct']}%, range={min_pct}–{max_pct}%, action={action}")
+    print(
+        f"Wrote {BANDS} with dom={payload['btc_pct']}%, "
+        f"range={payload['min_pct']}–{payload['max_pct']}%, action={action}"
+    )
+
+    # ------------------------------------------------------------------
+    # 2) Per-token bands for the token table & KC2 (dynamic, from history)
+    # ------------------------------------------------------------------
+    enrich_prices_with_dom_ranges()
 
 
 if __name__ == "__main__":
