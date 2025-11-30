@@ -1,16 +1,16 @@
 {
-  "timestamp": "2025-11-27T22:28:32.328151Z",
-  "equity_usd": 100.0,
-  "roi_frac": 0.0,
+  "timestamp": "2025-11-29T23:20:06.837287Z",
+  "equity_usd": 97.10144927536233,
+  "roi_frac": -0.02898550724637672,
   "position": {
     "type": "ALT",
     "token": "UNI",
     "entry_price": 6.21,
-    "current_price": 6.21,
-    "target_price": 12.994847917139852,
+    "current_price": 6.03,
+    "target_price": 12.870754166647528,
     "hmi_override": false
   },
-  "hmi": 57.4,
+  "hmi": 55.4,
   "hmi_band": "Stabled",
-  "action": "SWITCH"
+  "action": "HOLD"
 }
