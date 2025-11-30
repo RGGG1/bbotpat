@@ -43,6 +43,14 @@ SIGNALS_DOCS = DOCS / "dom_signals_hourly.json"
 
 INITIAL_EQUITY_USD = 100.0
 
+# Benchmarks for ROI comparison vs simple buy & hold
+BENCHMARK_BASE_PRICES: Dict[str, float] = {
+    "BTC": 91310.0,
+    "ETH": 3015.0,
+    "BNB": 895.0,
+    "SOL": 140.85,
+}
+
 # HMI override threshold: risk-off if HMI < 45 ("NGMI" or worse)
 HMI_RISK_OFF_THRESHOLD = 45.0
 
@@ -148,6 +156,34 @@ def build_price_maps(prices_js: Dict[str, Any]) -> Tuple[Dict[str, float], Dict[
         price_map[token] = price
         mc_map[token] = mc
     return price_map, mc_map
+
+
+def compute_benchmarks(price_map: Dict[str, float]) -> Dict[str, Dict[str, float]]:
+    """
+    Compute ROI for benchmark assets (BTC, ETH, BNB, SOL) vs fixed base prices.
+
+    Returns:
+      {
+        "BTC": {"base_price": ..., "current_price": ..., "roi_frac": ...},
+        ...
+      }
+    """
+    benchmarks: Dict[str, Dict[str, float]] = {}
+
+    for sym, base_px in BENCHMARK_BASE_PRICES.items():
+        cur_px = float(price_map.get(sym, 0.0)) or 0.0
+        roi_frac: Optional[float] = None
+
+        if cur_px > 0.0 and base_px > 0.0:
+            roi_frac = (cur_px / base_px) - 1.0
+
+        benchmarks[sym] = {
+            "base_price": base_px,
+            "current_price": cur_px if cur_px > 0.0 else None,
+            "roi_frac": roi_frac,
+        }
+
+    return benchmarks
 
 
 def extract_alt_dominance(prices_js: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -287,6 +323,7 @@ def main() -> None:
         return
 
     price_map, mc_map = build_price_maps(prices_js)
+    benchmarks = compute_benchmarks(price_map)
     alts = extract_alt_dominance(prices_js)
 
     # 2) Load state
@@ -540,7 +577,9 @@ def main() -> None:
         "hmi": hmi,
         "hmi_band": hmi_band,
         "action": action,
+        "benchmarks": benchmarks,
     }
+
 
     txt = json.dumps(signals_payload, indent=2)
     SIGNALS_ROOT.write_text(txt)

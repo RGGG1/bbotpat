@@ -528,6 +528,28 @@
       );
     }
 
+    /* KC2 side-by-side layout */
+    .kc2-container {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .kc2-main {
+      flex: 1;
+    }
+
+    .kc2-benchmarks {
+      min-width: 130px;
+      border-left: 1px solid rgba(255, 255, 255, 0.25);
+      padding-left: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
     @media (max-width: 700px) {
       .kc-row {
         flex-direction: column;
@@ -541,6 +563,17 @@
 
       .kc-main-value {
         font-size: 26px;
+      }
+
+      .kc2-container {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .kc2-benchmarks {
+        border-left: none;
+        padding-left: 0;
+        margin-top: 6px;
       }
     }
 
@@ -668,10 +701,18 @@
 
           <div class="kc-divider" aria-hidden="true"></div>
 
-          <div class="kc-block kc-block-right">
-            <div class="kc-label">Knifecatcher #2 ROI</div>
-            <div class="kc-main-value" id="kc2-roi">--.--%</div>
-            <div class="kc-subline" id="kc2-subline">DOM hourly model (sim)</div>
+          <div class="kc-block kc-block-right kc2-container">
+            <div class="kc2-main">
+              <div class="kc-label">Knifecatcher #2 ROI</div>
+              <div class="kc-main-value" id="kc2-roi">--.--%</div>
+              <div class="kc-subline" id="kc2-subline">DOM hourly model (sim)</div>
+            </div>
+            <div class="kc2-benchmarks">
+              <div class="kc-subline">BTC: <span id="kc2-btc-roi">--.--%</span></div>
+              <div class="kc-subline">ETH: <span id="kc2-eth-roi">--.--%</span></div>
+              <div class="kc-subline">BNB: <span id="kc2-bnb-roi">--.--%</span></div>
+              <div class="kc-subline">SOL: <span id="kc2-sol-roi">--.--%</span></div>
+            </div>
           </div>
         </div>
       </section>
@@ -883,63 +924,62 @@
     }
 
     function computeActionForRow(row) {
-  const token = row.token;
-  if (!token) return "–";
+      const token = row.token;
+      if (!token) return "–";
 
-  const upToken = String(token).toUpperCase();
+      const upToken = String(token).toUpperCase();
 
-  // No action for BTC or stables
-  if (upToken === "BTC" || upToken.includes("USD")) {
-    return "–";
-  }
+      // No action for BTC or stables
+      if (upToken === "BTC" || upToken.includes("USD")) {
+        return "–";
+      }
 
-  const domRaw = (typeof row.btc_dom === "number")
-    ? row.btc_dom
-    : parseFloat(row.btc_dom ?? "NaN");
-  if (!Number.isFinite(domRaw)) return "–";
+      const domRaw = (typeof row.btc_dom === "number")
+        ? row.btc_dom
+        : parseFloat(row.btc_dom ?? "NaN");
+      if (!Number.isFinite(domRaw)) return "–";
 
-  const rangeStr = row.range || "";
-  const m = rangeStr.match(/(\d+(?:\.\d+)?)\D+(\d+(?:\.\d+)?)%?/);
-  if (!m) return "–";
+      const rangeStr = row.range || "";
+      const m = rangeStr.match(/(\d+(?:\.\d+)?)\D+(\d+(?:\.\d+)?)%?/);
+      if (!m) return "–";
 
-  const minPct = parseFloat(m[1]);
-  const maxPct = parseFloat(m[2]);
-  if (!Number.isFinite(minPct) || !Number.isFinite(maxPct) || maxPct <= minPct) {
-    return "–";
-  }
+      const minPct = parseFloat(m[1]);
+      const maxPct = parseFloat(m[2]);
+      if (!Number.isFinite(minPct) || !Number.isFinite(maxPct) || maxPct <= minPct) {
+        return "–";
+      }
 
-  let pos = (domRaw - minPct) / (maxPct - minPct);
-  if (!Number.isFinite(pos)) return "–";
-  pos = Math.max(0, Math.min(1, pos)); // clamp [0,1]
+      let pos = (domRaw - minPct) / (maxPct - minPct);
+      if (!Number.isFinite(pos)) return "–";
+      pos = Math.max(0, Math.min(1, pos)); // clamp [0,1]
 
-  // 40/20/40 bands:
-  // 0.0–0.4  : BTC-heavy zone
-  // 0.4–0.6  : Stables
-  // 0.6–1.0  : ALT-heavy zone
-  if (pos >= 0.4 && pos <= 0.6) {
-    return "Stables";
-  }
+      // 40/20/40 bands:
+      // 0.0–0.4  : BTC-heavy zone
+      // 0.4–0.6  : Stables
+      // 0.6–1.0  : ALT-heavy zone
+      if (pos >= 0.4 && pos <= 0.6) {
+        return "Stables";
+      }
 
-  let altPct, btcPct;
+      let altPct, btcPct;
 
-  if (pos < 0.4) {
-    // BTC zone: 100/0 at pos=0 -> 50/50 at pos=0.4
-    const t = pos / 0.4;        // 0..1
-    btcPct = 100 - Math.round(t * 50); // 100 -> 50
-    altPct = 100 - btcPct;             // 0   -> 50
-  } else {
-    // ALT zone: 50/50 at pos=0.6 -> 100/0 at pos=1.0
-    const t = (pos - 0.6) / 0.4; // 0..1
-    altPct = 50 + Math.round(t * 50);  // 50 -> 100
-    btcPct = 100 - altPct;             // 50 -> 0
-  }
+      if (pos < 0.4) {
+        // BTC zone: 100/0 at pos=0 -> 50/50 at pos=0.4
+        const t = pos / 0.4;        // 0..1
+        btcPct = 100 - Math.round(t * 50); // 100 -> 50
+        altPct = 100 - btcPct;             // 0   -> 50
+      } else {
+        // ALT zone: 50/50 at pos=0.6 -> 100/0 at pos=1.0
+        const t = (pos - 0.6) / 0.4; // 0..1
+        altPct = 50 + Math.round(t * 50);  // 50 -> 100
+        btcPct = 100 - altPct;             // 50 -> 0
+      }
 
-  altPct = Math.max(0, Math.min(100, Math.round(altPct)));
-  btcPct = 100 - altPct;
+      altPct = Math.max(0, Math.min(100, Math.round(altPct)));
+      btcPct = 100 - altPct;
 
-  return `${altPct}/${btcPct}`;  // ALT/BTC
-}
-
+      return `${altPct}/${btcPct}`;  // ALT/BTC
+    }
 
     // ---- NEW: potential ROI helpers (mirror backend logic) ----
 
@@ -1136,6 +1176,11 @@
         const domRoiEl = document.getElementById("kc2-roi");
         const domSubEl = document.getElementById("kc2-subline");
 
+        const kc2BtcEl = document.getElementById("kc2-btc-roi");
+        const kc2EthEl = document.getElementById("kc2-eth-roi");
+        const kc2BnbEl = document.getElementById("kc2-bnb-roi");
+        const kc2SolEl = document.getElementById("kc2-sol-roi");
+
         if (domBalanceEl && domRoiEl && domSubEl) {
           try {
             const resp2 = await fetch("dom_signals_hourly.json", { cache: "no-store" });
@@ -1170,7 +1215,7 @@
                 return x.toFixed(2);
               }
 
-              function fmtPct(x) {
+              function fmtPct2(x) {
                 if (x === null || Number.isNaN(x)) return "--.--%";
                 const pct = x * 100;
                 const sign = pct > 0 ? "+" : "";
@@ -1184,7 +1229,7 @@
               }
 
               if (roiFrac !== null && !Number.isNaN(roiFrac)) {
-                domRoiEl.textContent = fmtPct(roiFrac);
+                domRoiEl.textContent = fmtPct2(roiFrac);
               } else {
                 domRoiEl.textContent = "--.--%";
               }
@@ -1197,13 +1242,33 @@
                 }
               } else {
                 if (roiFrac !== null && !Number.isNaN(roiFrac)) {
-                  subText = "Stables | ROI: " + fmtPct(roiFrac);
+                  subText = "Stables | ROI: " + fmtPct2(roiFrac);
                 } else {
                   subText = "Stables";
                 }
               }
 
               domSubEl.textContent = subText;
+
+              // --- New: benchmark ROIs ---
+              const benchmarks = sig.benchmarks || {};
+
+              function readBenchmarkRoi(sym) {
+                const row = benchmarks[sym];
+                if (!row) return null;
+
+                if (typeof row.roi_frac === "number") {
+                  return row.roi_frac;
+                }
+
+                const parsed = parseFloat(row.roi_frac || "NaN");
+                return Number.isNaN(parsed) ? null : parsed;
+              }
+
+              if (kc2BtcEl) kc2BtcEl.textContent = fmtPct2(readBenchmarkRoi("BTC"));
+              if (kc2EthEl) kc2EthEl.textContent = fmtPct2(readBenchmarkRoi("ETH"));
+              if (kc2BnbEl) kc2BnbEl.textContent = fmtPct2(readBenchmarkRoi("BNB"));
+              if (kc2SolEl) kc2SolEl.textContent = fmtPct2(readBenchmarkRoi("SOL"));
             }
           } catch (err2) {
             console.error("DOM signals error:", err2);
