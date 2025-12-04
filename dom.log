@@ -2387,3 +2387,18 @@ dom_mc_history.json
 
 sent 267,060 bytes  received 35 bytes  534,190.00 bytes/sec
 total size is 494,951  speedup is 1.85
+sending incremental file list
+dom_bands_latest.json
+dom_mc_history.json
+dom_signals_hourly.json
+dom_trade_plan.json
+hmi_latest.json
+prices_latest.json
+
+sent 270,717 bytes  received 130 bytes  541,694.00 bytes/sec
+total size is 494,949  speedup is 1.83
+sending incremental file list
+dom_mc_history.json
+
+sent 267,059 bytes  received 35 bytes  534,188.00 bytes/sec
+total size is 494,949  speedup is 1.85

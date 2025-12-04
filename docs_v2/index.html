@@ -7,17 +7,21 @@
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <style>
     :root {
-      --bg: #000000;
-      --bg-elevated: #05060a;
-      --border-subtle: #151515;
-      --border-strong: #222222;
+      --bg: #020304;
+      --panel: #05070a;
+      --panel-soft: #06080e;
+      --border-subtle: #15161c;
       --text-main: #f5f5f7;
-      --text-muted: #7c7f8c;
-      --accent: #2fbf71;
-      --positive: #1f8b4d;
-      --negative: #b02030;
+      --text-muted: #8a8d9a;
+      --accent: #35d488;
+      --accent-soft: #27a764;
+      --negative: #e3454f;
       --font-main: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
                    "Inter", "Segoe UI", sans-serif;
+      --cell-off: #11131a;
+      --cell-low: #8d3138;
+      --cell-mid: #b88b34;
+      --cell-high: #2fa364;
     }
 
     * {
@@ -27,7 +31,7 @@
     }
 
     body {
-      background: var(--bg);
+      background: #000;
       color: var(--text-main);
       font-family: var(--font-main);
       min-height: 100vh;
@@ -46,145 +50,161 @@
 
     header {
       display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 20px;
-      gap: 16px;
-    }
-
-    .header-left {
-      display: flex;
+      flex-direction: column;
       align-items: center;
       gap: 10px;
+      margin-bottom: 24px;
     }
 
-    .logo-img {
-      width: 40px;
-      height: 40px;
-      border-radius: 8px;
-      background: #111;
+    .logo-mark {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: radial-gradient(circle at center,#1b2028 0,#05070a 55%,#000 100%);
       display: flex;
       align-items: center;
       justify-content: center;
       overflow: hidden;
     }
 
-    .logo-img img {
-      max-width: 100%;
-      max-height: 100%;
+    .logo-mark img {
+      max-width: 80%;
+      max-height: 80%;
       display: block;
     }
 
-    .logo-text {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
     .logo-wordmark {
-      font-size: 20px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
+      font-size: 30px;
       font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
     }
 
-    .tagline {
-      font-size: 12px;
+    .logo-wordmark span {
+      display: inline-block;
+    }
+
+    .header-tagline {
+      font-size: 13px;
       color: var(--text-muted);
+      margin-top: 2px;
+      text-align: center;
       font-style: italic;
     }
 
-    .header-right {
-      text-align: right;
+    .header-meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      width: 100%;
+      max-width: 960px;
+      margin-top: 8px;
       font-size: 11px;
       color: var(--text-muted);
     }
 
-    .meta-topline span {
+    .meta-updated span {
       color: var(--text-main);
     }
 
-    .meta-oracle-link {
-      margin-top: 4px;
-    }
-
-    .meta-oracle-link a {
-      font-size: 11px;
-      color: var(--text-muted);
+    .meta-oracle a {
       text-decoration: none;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.14em;
+      color: var(--text-muted);
     }
 
-    .meta-oracle-link a:hover {
+    .meta-oracle a:hover {
       color: var(--accent);
     }
 
-    /* GRID LAYOUT */
+    @media (max-width: 640px) {
+      .header-meta-row {
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        text-align: center;
+      }
+    }
+
+    /* LAYOUT GRID */
 
     main {
       display: flex;
       flex-direction: column;
-      gap: 18px;
+      gap: 14px;
     }
 
-    .grid-row {
+    .row-grid {
       display: grid;
       gap: 10px;
-      border-bottom: 1px solid var(--border-subtle);
-      padding-bottom: 10px;
     }
 
-    .grid-top {
-      grid-template-columns: repeat(4, minmax(0,1fr));
+    .row-top {
+      grid-template-columns: repeat(4,minmax(0,1fr));
     }
 
-    .grid-mid-2,
-    .grid-mid-2-alt {
-      grid-template-columns: 2fr 2fr;
+    .row-mid {
+      grid-template-columns: 1.2fr 1.2fr 0.9fr;
     }
 
-    .grid-full {
+    .row-lower {
+      grid-template-columns: 1.2fr 1.2fr;
+    }
+
+    .row-token {
       grid-template-columns: minmax(0,1fr);
     }
 
-    @media (max-width: 960px) {
-      .grid-top {
-        grid-template-columns: repeat(3, minmax(0,1fr));
+    @media (max-width: 1024px) {
+      .row-top {
+        grid-template-columns: repeat(2,minmax(0,1fr));
       }
-      .grid-mid-2,
-      .grid-mid-2-alt {
+      .row-mid {
+        grid-template-columns: repeat(2,minmax(0,1fr));
+      }
+      .row-lower {
         grid-template-columns: minmax(0,1fr);
       }
     }
 
     @media (max-width: 640px) {
-      .grid-top {
-        grid-template-columns: repeat(2, minmax(0,1fr));
+      .row-top {
+        grid-template-columns: repeat(2,minmax(0,1fr));
+      }
+      .row-mid {
+        grid-template-columns: minmax(0,1fr);
       }
     }
 
-    /* “CARD” SECTIONS – VISUALLY MINIMAL, NO BOXES */
+    /* PANELS */
 
-    .section-block {
-      padding: 4px 2px 6px;
+    .panel {
+      background: var(--panel);
+      border-radius: 10px;
+      border: 1px solid var(--border-subtle);
+      padding: 10px 12px 12px;
     }
 
-    .section-header {
+    .panel-soft {
+      background: var(--panel-soft);
+    }
+
+    .panel-header {
       display: flex;
       justify-content: space-between;
       align-items: baseline;
       margin-bottom: 6px;
     }
 
-    .section-title {
+    .panel-title {
       font-size: 11px;
       letter-spacing: 0.12em;
       text-transform: uppercase;
       color: var(--text-muted);
     }
 
-    .section-tag {
+    .panel-tag {
       font-size: 10px;
       color: var(--text-muted);
       text-transform: uppercase;
@@ -192,7 +212,7 @@
     }
 
     .stat-main {
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 600;
     }
 
@@ -217,54 +237,64 @@
     }
 
     .value-positive {
-      color: var(--positive);
+      color: var(--accent);
     }
 
     .value-negative {
       color: var(--negative);
     }
 
-    /* HMI – HEAT BAR */
+    /* HMI CELL MATRIX */
 
-    .hmi-heat-wrap {
+    .hmi-matrix-wrap {
       margin-top: 4px;
       display: flex;
-      flex-direction: column;
-      gap: 6px;
+      gap: 12px;
+      align-items: center;
     }
 
-    .hmi-heat-bar {
-      position: relative;
-      width: 100%;
+    .hmi-matrix {
+      display: grid;
+      grid-template-columns: repeat(6, 14px);
+      grid-auto-rows: 14px;
+      gap: 4px;
+      padding: 6px;
+      border-radius: 6px;
+      background: #05060b;
+    }
+
+    .hmi-cell {
+      width: 14px;
       height: 14px;
-      border-radius: 999px;
-      background: #101010;
-      overflow: hidden;
+      border-radius: 3px;
+      background: var(--cell-off);
     }
 
-    .hmi-heat-fill {
-      position: absolute;
-      inset: 0;
-      transform-origin: left center;
-      transform: scaleX(0);
-      background: linear-gradient(
-        90deg,
-        var(--negative) 0%,
-        #b78c22 45%,
-        var(--positive) 100%
-      );
-    }
-
-    .hmi-heat-labels {
+    .hmi-matrix-meta {
       display: flex;
-      justify-content: space-between;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .hmi-score-line {
+      font-size: 13px;
+    }
+
+    .hmi-score-line span {
+      font-weight: 500;
+    }
+
+    .hmi-status {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .hmi-scale-labels {
       font-size: 9px;
       color: var(--text-muted);
-      opacity: 0.8;
-    }
-
-    .hmi-heat-score {
-      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      margin-top: 2px;
     }
 
     /* AGENTS SUMMARY */
@@ -274,6 +304,7 @@
       flex-direction: column;
       gap: 6px;
       font-size: 11px;
+      margin-top: 4px;
     }
 
     .agent-row {
@@ -283,27 +314,32 @@
       gap: 6px;
     }
 
-    .agent-name {
+    .agent-label {
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.12em;
       font-size: 10px;
     }
 
-    .agent-kpi {
+    .agent-balance {
       font-size: 11px;
     }
 
-    /* CHART PLACEHOLDERS */
+    .agent-roi {
+      font-size: 11px;
+      text-align: right;
+    }
+
+    /* CHART PLACEHOLDER */
 
     .chart-placeholder {
-      height: 150px;
-      border-radius: 6px;
-      background: #05060a;
-      border: 1px solid #151515;
+      height: 140px;
+      border-radius: 8px;
+      background: #05070d;
+      border: 1px dashed #1b1d27;
+      margin-top: 6px;
       position: relative;
       overflow: hidden;
-      margin-top: 6px;
     }
 
     .chart-placeholder::before {
@@ -315,7 +351,7 @@
         rgba(255,255,255,0.02) 1px,
         transparent 1px
       );
-      background-size: 42px 100%;
+      background-size: 40px 100%;
       opacity: 0.7;
     }
 
@@ -332,25 +368,17 @@
       opacity: 0.7;
     }
 
-    .chart-line {
-      position:absolute;
-      inset:14px 12px 10px;
-      border-radius:4px;
-      border-left: 1px solid rgba(255,255,255,0.12);
-      border-bottom: 1px solid rgba(255,255,255,0.12);
-    }
-
     /* TOKEN TABLE */
 
     .table-wrap {
       overflow-x: auto;
+      margin-top: 4px;
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
       font-size: 11px;
-      margin-top: 6px;
     }
 
     thead {
@@ -372,15 +400,15 @@
     }
 
     tbody tr:nth-child(even) {
-      background: #05060a;
+      background: #05070c;
     }
 
     tbody tr:nth-child(odd) {
-      background: #030304;
+      background: #030305;
     }
 
     tbody tr:hover {
-      background: #101218;
+      background: #10121a;
     }
 
     td.center, th.center {
@@ -409,201 +437,203 @@
 <body>
   <div class="app-shell">
     <header>
-      <div class="header-left">
-        <div class="logo-img">
-          <!-- put your HiveAI logo here as logo.png -->
-          <img src="logo.png" alt="HiveAI logo" />
-        </div>
-        <div class="logo-text">
-          <div class="logo-wordmark">
-            <span class="logo-hiveai">HiveAI</span>
-          </div>
-          <div class="tagline">All signal, no noise.</div>
-        </div>
+      <div class="logo-mark">
+        <!-- Put your HiveAI logo file at docs_v2/logo.png -->
+        <img src="logo.png" alt="HiveAI logo" />
       </div>
-      <div class="header-right">
-        <div class="meta-topline">
-          Updated: <span id="meta-date">--/--/-- --:--</span>
+      <div class="logo-wordmark">
+        <span>HIVEAI</span>
+      </div>
+      <div class="header-tagline">All signal, no noise.</div>
+
+      <div class="header-meta-row">
+        <div class="meta-updated">
+          Updated: <span>04/12/25 22:17</span>
         </div>
-        <div class="meta-oracle-link">
+        <div class="meta-oracle">
           <a href="oracle.html">HiveAI Oracle →</a>
         </div>
       </div>
     </header>
 
     <main>
-      <!-- TOP ROW: HMI, Agents, BTC Dominance, BTC -->
-      <section class="grid-row grid-top">
-        <!-- HMI -->
-        <article class="section-block">
-          <div class="section-header">
-            <div class="section-title">Hive Mind Index</div>
+      <!-- TOP ROW: HMI, KC1, KC2, BTC -->
+      <section class="row-grid row-top">
+        <!-- HMI summary with matrix -->
+        <article class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Hive Mind Index</div>
           </div>
-          <div class="hmi-heat-wrap">
-            <div class="hmi-heat-bar">
-              <div class="hmi-heat-fill" id="hmi-heat-fill"></div>
+          <div class="hmi-matrix-wrap">
+            <div class="hmi-matrix" id="hmi-matrix">
+              <!-- cells added by JS -->
             </div>
-            <div class="hmi-heat-labels">
-              <span>Fear</span>
-              <span>Neutral</span>
-              <span>Greed</span>
-            </div>
-            <div class="hmi-heat-score">
-              HMI: <span id="hmi-heat-value">--</span>
-            </div>
-            <div class="stat-sub" id="hmi-status-text">–</div>
-          </div>
-        </article>
-
-        <!-- AGENTS SUMMARY (now second) -->
-        <article class="section-block">
-          <div class="section-header">
-            <div class="section-title">Agents</div>
-          </div>
-          <div class="agent-list">
-            <div class="agent-row">
-              <div>
-                <div class="agent-name">Knifecatcher #1</div>
-                <div class="agent-kpi" id="kc1-balance">$--.--</div>
+            <div class="hmi-matrix-meta">
+              <div class="hmi-score-line">
+                HMI <span id="hmi-score-number">55.0</span>
               </div>
-              <div class="agent-kpi" id="kc1-roi">--.--%</div>
-            </div>
-            <div class="agent-row">
-              <div>
-                <div class="agent-name">Knifecatcher #2</div>
-                <div class="agent-kpi" id="kc2-balance">$--.--</div>
+              <div class="hmi-status" id="hmi-status-text">Neutral with Caution</div>
+              <div class="hmi-scale-labels">
+                <span>Fear</span><span>Neutral</span><span>Greed</span>
               </div>
-              <div class="agent-kpi" id="kc2-roi-main">--.--%</div>
             </div>
           </div>
         </article>
 
-        <!-- BTC DOMINANCE SUMMARY (now third) -->
-        <article class="section-block">
-          <div class="section-header">
-            <div class="section-title">BTC Dominance</div>
+        <!-- KC1 summary -->
+        <article class="panel">
+          <div class="panel-header">
+            <div class="panel-title">KC1 ROI</div>
+            <div class="panel-tag">Vs BTC</div>
           </div>
-          <div class="stat-main" id="dom-btcalts-main">46.8%</div>
+          <div class="stat-main value-positive">+12.8%</div>
           <div class="stat-row">
-            <span>BTC vs Alts</span>
-            <span id="dom-btcalts-combined">
-              <span id="dom-btcalts-range">Range: 38.1–52.4%</span> ·
-              <span id="dom-btcalts-mcaps">Mcaps: $1.6T vs $1.4T</span>
-            </span>
-          </div>
-        </article>
-
-        <!-- BTC BUY & HOLD -->
-        <article class="section-block">
-          <div class="section-header">
-            <div class="section-title">BTC</div>
-            <div class="section-tag">Buy &amp; Hold</div>
-          </div>
-          <div class="stat-main" id="btc-price-main">$--.--</div>
-          <div class="stat-sub" id="btc-roi-main">ROI: --.--%</div>
-        </article>
-      </section>
-
-      <!-- SECOND ROW: Dominance oracle + trend -->
-      <section class="grid-row grid-mid-2">
-        <!-- Dominance oracle -->
-        <article class="section-block">
-          <div class="section-header">
-            <div class="section-title">BTC Dominance</div>
-            <div class="section-tag">Oracle</div>
-          </div>
-          <div class="stat-row" style="margin-bottom:6px;">
-            <span>Compare</span>
-            <span>
-              <span id="oracle-x-label" class="section-tag" style="margin-right:6px;">BTC</span>
-              <span id="oracle-y-label" class="section-tag">Alts</span>
-            </span>
-          </div>
-          <div class="stat-main" id="oracle-main-value">48.3%</div>
-          <div class="stat-sub" id="oracle-main-label">BTC vs Alts</div>
-          <div class="stat-row">
-            <span>Market caps</span>
-            <span id="oracle-mcaps"><strong>$1.6T vs $1.4T</strong></span>
-          </div>
-          <div class="stat-row">
-            <span>Range</span>
-            <span id="oracle-range-text"><strong>38.0–52.0%</strong></span>
-          </div>
-          <div class="stat-sub" id="oracle-error" style="margin-top:4px;"></div>
-        </article>
-
-        <!-- HMI & BTC vs Alts trend placeholder -->
-        <article class="section-block">
-          <div class="section-header">
-            <div class="section-title">HMI &amp; BTC vs Alts</div>
-            <div class="section-tag">Trend</div>
-          </div>
-          <div class="chart-placeholder">
-            <div class="chart-line" id="trend-chart-placeholder"></div>
-          </div>
-        </article>
-      </section>
-
-      <!-- THIRD ROW: KC1 & KC2 expanded -->
-      <section class="grid-row grid-mid-2-alt">
-        <!-- KC1 -->
-        <article class="section-block">
-          <div class="section-header">
-            <div class="section-title">Knifecatcher #1</div>
-            <div class="section-tag">Rebalancer vs BTC</div>
-          </div>
-          <div class="stat-row">
-            <span>Portfolio value</span>
-            <span id="kc1-balance-detail"><strong>$--.--</strong></span>
-          </div>
-          <div class="stat-row">
-            <span>Strategy ROI</span>
-            <span id="kc1-roi-detail" class="value-positive">--.--%</span>
+            <span>Balance</span>
+            <span>$23,550.00</span>
           </div>
           <div class="stat-row">
             <span>BTC ROI</span>
-            <span id="kc1-btc-roi-detail">--.--%</span>
-          </div>
-          <div class="chart-placeholder" style="margin-top:8px;">
-            <div class="chart-line" id="kc1-chart-placeholder"></div>
+            <span>+8.4%</span>
           </div>
         </article>
 
-        <!-- KC2 -->
-        <article class="section-block">
-          <div class="section-header">
-            <div class="section-title">Knifecatcher #2</div>
-            <div class="section-tag" id="kc2-position-label">Adaptive DOM</div>
+        <!-- KC2 summary -->
+        <article class="panel">
+          <div class="panel-header">
+            <div class="panel-title">KC2 ROI</div>
+            <div class="panel-tag">Adaptive DOM</div>
           </div>
+          <div class="stat-main value-positive">+4.3%</div>
           <div class="stat-row">
             <span>Equity</span>
-            <span id="kc2-balance-detail"><strong>$--.--</strong></span>
+            <span>$10,230.17</span>
           </div>
           <div class="stat-row">
-            <span>Strategy ROI</span>
-            <span id="kc2-roi-detail" class="value-positive">--.--%</span>
+            <span>Vs BTC / ETH / BNB / SOL</span>
+            <span>+1.2% / +0.5% / -0.8% / +2.1%</span>
           </div>
-          <div class="stat-row" id="kc2-bench-row">
-            <span>Benchmarks</span>
-            <span id="kc2-benchmarks-text">
-              vs BTC --.--% · ETH --.--% · BNB --.--% · SOL --.--%
-            </span>
+        </article>
+
+        <!-- BTC buy & hold -->
+        <article class="panel">
+          <div class="panel-header">
+            <div class="panel-title">BTC</div>
+            <div class="panel-tag">Buy &amp; Hold</div>
           </div>
-          <div class="stat-row" id="kc2-entry-row">
-            <span>Entry / Target</span>
-            <span id="kc2-entry-target-text">$--.-- / $--.--</span>
+          <div class="stat-main">$91,310</div>
+          <div class="stat-sub">ROI: +134.2%</div>
+        </article>
+      </section>
+
+      <!-- MID ROW: Dominance, HMI detail, Actions -->
+      <section class="row-grid row-mid">
+        <!-- BTC dominance input / range / chart placeholder -->
+        <article class="panel panel-soft">
+          <div class="panel-header">
+            <div class="panel-title">Dominance Input</div>
           </div>
-          <div class="chart-placeholder" style="margin-top:8px;">
-            <div class="chart-line" id="kc2-chart-placeholder"></div>
+          <div class="stat-row">
+            <span>BTC vs Alts</span>
+            <span>54.8%</span>
+          </div>
+          <div class="stat-row">
+            <span>Range</span>
+            <span>38.1–59.4%</span>
+          </div>
+          <div class="stat-row">
+            <span>Mcaps</span>
+            <span>$1.8T vs $1.6T</span>
+          </div>
+          <div class="chart-placeholder" aria-hidden="true"></div>
+        </article>
+
+        <!-- HMI detail panel -->
+        <article class="panel panel-soft">
+          <div class="panel-header">
+            <div class="panel-title">HMI Detail</div>
+          </div>
+          <div class="stat-sub">
+            Regime classification driven by open interest, perps vs spot, and volatility structure.
+          </div>
+          <div class="chart-placeholder" aria-hidden="true" style="margin-top:8px;"></div>
+        </article>
+
+        <!-- High-level action text -->
+        <article class="panel panel-soft">
+          <div class="panel-header">
+            <div class="panel-title">Action</div>
+          </div>
+          <div class="stat-row">
+            <span>Dominance</span>
+            <span class="value-positive">Maintain</span>
+          </div>
+          <div class="stat-row">
+            <span>Allocation</span>
+            <span>Adaptive via KC2</span>
+          </div>
+          <div class="stat-row">
+            <span>Risk posture</span>
+            <span>Neutral with Caution</span>
           </div>
         </article>
       </section>
 
-      <!-- FOURTH ROW: Tokens table -->
-      <section class="grid-row grid-full">
-        <article class="section-block">
-          <div class="section-header">
-            <div class="section-title">Tokens</div>
+      <!-- LOWER ROW: KC1 & KC2 expanded -->
+      <section class="row-grid row-lower">
+        <!-- KC1 detail -->
+        <article class="panel panel-soft">
+          <div class="panel-header">
+            <div class="panel-title">Knifecatcher #1</div>
+            <div class="panel-tag">Rebalancer vs BTC</div>
+          </div>
+          <div class="stat-row">
+            <span>Portfolio value</span>
+            <span><strong>$23,550.00</strong></span>
+          </div>
+          <div class="stat-row">
+            <span>Strategy ROI</span>
+            <span class="value-positive">+12.8%</span>
+          </div>
+          <div class="stat-row">
+            <span>BTC ROI</span>
+            <span>+8.4%</span>
+          </div>
+          <div class="chart-placeholder" style="margin-top:8px;"></div>
+        </article>
+
+        <!-- KC2 detail -->
+        <article class="panel panel-soft">
+          <div class="panel-header">
+            <div class="panel-title">Knifecatcher #2</div>
+            <div class="panel-tag">Adaptive DOM · SOL</div>
+          </div>
+          <div class="stat-row">
+            <span>Equity</span>
+            <span><strong>$10,230.17</strong></span>
+          </div>
+          <div class="stat-row">
+            <span>Strategy ROI</span>
+            <span class="value-positive">+4.3%</span>
+          </div>
+          <div class="stat-row">
+            <span>Benchmarks</span>
+            <span>
+              vs BTC +3.1% · ETH +2.4% · BNB -0.7% · SOL +5.8%
+            </span>
+          </div>
+          <div class="stat-row">
+            <span>Entry / Target</span>
+            <span>$140.85 / $178.20</span>
+          </div>
+          <div class="chart-placeholder" style="margin-top:8px;"></div>
+        </article>
+      </section>
+
+      <!-- TOKEN TABLE -->
+      <section class="row-grid row-token">
+        <article class="panel panel-soft">
+          <div class="panel-header">
+            <div class="panel-title">Tokens</div>
           </div>
           <div class="table-wrap">
             <table>
@@ -617,7 +647,73 @@
                   <th class="center">Pot. ROI</th>
                 </tr>
               </thead>
-              <tbody id="prices-tbody"></tbody>
+              <tbody>
+                <tr>
+                  <td>
+                    <span class="token-name">
+                      <span class="token-dot"></span>
+                      <span>BTC</span>
+                    </span>
+                  </td>
+                  <td class="center">$91,310</td>
+                  <td class="center">46.8%</td>
+                  <td class="center">38.10% – 59.40%</td>
+                  <td class="center">–</td>
+                  <td class="center">–</td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="token-name">
+                      <span class="token-dot eth"></span>
+                      <span>ETH</span>
+                    </span>
+                  </td>
+                  <td class="center">$3,015.00</td>
+                  <td class="center">17.2%</td>
+                  <td class="center">6.45% – 22.80%</td>
+                  <td class="center">Increase</td>
+                  <td class="center">+23.4%</td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="token-name">
+                      <span class="token-dot bnb"></span>
+                      <span>BNB</span>
+                    </span>
+                  </td>
+                  <td class="center">$895.00</td>
+                  <td class="center">4.1%</td>
+                  <td class="center">1.20% – 6.85%</td>
+                  <td class="center">Decrease</td>
+                  <td class="center">+12.7%</td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="token-name">
+                      <span class="token-dot sol"></span>
+                      <span>SOL</span>
+                    </span>
+                  </td>
+                  <td class="center">$140.85</td>
+                  <td class="center">3.8%</td>
+                  <td class="center">0.95% – 5.90%</td>
+                  <td class="center">Increase</td>
+                  <td class="center">+31.2%</td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="token-name">
+                      <span class="token-dot usd"></span>
+                      <span>DOGE</span>
+                    </span>
+                  </td>
+                  <td class="center">$0.246</td>
+                  <td class="center">1.2%</td>
+                  <td class="center">0.10% – 2.40%</td>
+                  <td class="center">Increase</td>
+                  <td class="center">+18.6%</td>
+                </tr>
+              </tbody>
             </table>
           </div>
         </article>
@@ -626,262 +722,42 @@
   </div>
 
   <script>
-    const HMI_NEUTRAL_LOW = 40;
-    const HMI_NEUTRAL_HIGH = 60;
+    // Simple static HMI matrix using a fixed HMI = 55
+    const HMI_ROWS = 4;
+    const HMI_COLS = 6;
 
-    function formatDateTime(ts) {
-      if (!ts) return "--/--/-- --:--";
-      const d = new Date(ts);
-      const dd = String(d.getDate()).padStart(2, "0");
-      const mm = String(d.getMonth() + 1).padStart(2, "0");
-      const yy = String(d.getFullYear()).slice(-2);
-      const hh = String(d.getHours()).padStart(2, "0");
-      const mi = String(d.getMinutes()).padStart(2, "0");
-      return `${dd}/${mm}/${yy} ${hh}:${mi}`;
+    function buildHmiMatrix() {
+      const container = document.getElementById("hmi-matrix");
+      if (!container) return;
+      container.innerHTML = "";
+      for (let i = 0; i < HMI_ROWS * HMI_COLS; i++) {
+        const cell = document.createElement("div");
+        cell.className = "hmi-cell";
+        container.appendChild(cell);
+      }
+      updateHmiMatrix(55);
     }
 
-    function hmiBandLabel(hmi) {
-      if (hmi < 10) return "Zombie Apocalypse";
-      if (hmi < 25) return "McDonald's Applications in high demand";
-      if (hmi < 45) return "NGMI";
-      if (hmi < 50) return "Leaning bearish";
-      if (hmi < 55) return "Cautiously bullish";
-      if (hmi < 75) return "It's digital gold";
-      if (hmi < 90) return "Frothy";
-      return "It's the future of finance";
-    }
-
-    function updateHmiHeat(hmi) {
-      const fillEl = document.getElementById("hmi-heat-fill");
-      const valEl = document.getElementById("hmi-heat-value");
-      const statusEl = document.getElementById("hmi-status-text");
-      if (!fillEl || !valEl || !statusEl) return;
+    function updateHmiMatrix(hmi) {
+      const cells = document.querySelectorAll("#hmi-matrix .hmi-cell");
+      if (!cells.length) return;
       const clamped = Math.max(0, Math.min(100, hmi));
-      const scale = clamped / 100;
-      fillEl.style.transform = `scaleX(${scale})`;
-      valEl.textContent = clamped.toFixed(1);
-      statusEl.textContent = hmiBandLabel(clamped);
+      const activeCount = Math.round((clamped / 100) * cells.length);
+
+      cells.forEach((cell, idx) => {
+        if (idx >= activeCount) {
+          cell.style.background = "var(--cell-off)";
+        } else {
+          const ratio = idx / cells.length;
+          if (ratio < 0.33) cell.style.background = "var(--cell-low)";
+          else if (ratio < 0.66) cell.style.background = "var(--cell-mid)";
+          else cell.style.background = "var(--cell-high)";
+        }
+      });
     }
 
-    async function fetchHMI() {
-      try {
-        const resp = await fetch("hmi_latest.json", { cache: "no-store" });
-        if (!resp.ok) throw new Error("HMI fetch failed");
-        const data = await resp.json();
-        const raw = typeof data.hmi === "number" ? data.hmi : parseFloat(data.hmi);
-        const hmi = Number.isNaN(raw) ? null : raw;
-        if (hmi === null) throw new Error("Invalid HMI");
-        updateHmiHeat(hmi);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    async function fetchPrices() {
-      try {
-        const resp = await fetch("prices_latest.json", { cache: "no-store" });
-        if (!resp.ok) throw new Error("prices fetch failed");
-        const data = await resp.json();
-
-        const metaEl = document.getElementById("meta-date");
-        if (metaEl && data && data.timestamp) {
-          metaEl.textContent = formatDateTime(data.timestamp);
-        }
-
-        const tbody = document.getElementById("prices-tbody");
-        tbody.innerHTML = "";
-
-        const rows = Array.isArray(data.rows) ? data.rows : [];
-        let btcPrice = null;
-
-        rows.forEach(row => {
-          const tr = document.createElement("tr");
-
-          const tdToken = document.createElement("td");
-          const dot = document.createElement("span");
-          dot.className = "token-dot " + row.token.toLowerCase();
-          const name = document.createElement("span");
-          name.textContent = row.token;
-          const wrap = document.createElement("span");
-          wrap.className = "token-name";
-          wrap.appendChild(dot);
-          wrap.appendChild(name);
-          tdToken.appendChild(wrap);
-          tr.appendChild(tdToken);
-
-          const tdPrice = document.createElement("td");
-          tdPrice.className = "center";
-          const priceVal = typeof row.price === "number" ? row.price : parseFloat(row.price || "0");
-          if (!Number.isNaN(priceVal) && priceVal > 0) {
-            if (priceVal >= 1000) tdPrice.textContent = "$" + Math.round(priceVal).toLocaleString();
-            else if (priceVal >= 1) tdPrice.textContent = "$" + priceVal.toFixed(2);
-            else if (priceVal >= 0.01) tdPrice.textContent = "$" + priceVal.toFixed(3);
-            else tdPrice.textContent = "$" + priceVal.toFixed(6);
-          } else tdPrice.textContent = "–";
-          tr.appendChild(tdPrice);
-
-          if (row.token === "BTC" && !Number.isNaN(priceVal)) {
-            btcPrice = priceVal;
-          }
-
-          const tdDom = document.createElement("td");
-          tdDom.className = "center";
-          const dom = typeof row.btc_dom === "number" ? row.btc_dom : parseFloat(row.btc_dom || "NaN");
-          tdDom.textContent = Number.isFinite(dom) ? dom.toFixed(2) + "%" : "–";
-          tr.appendChild(tdDom);
-
-          const tdRange = document.createElement("td");
-          tdRange.className = "center";
-          const match = (row.range || "").match(/(\d+(?:\.\d+)?)[^\d]+(\d+(?:\.\d+)?)/);
-          if (match) {
-            const low = parseFloat(match[1]);
-            const high = parseFloat(match[2]);
-            tdRange.textContent = low.toFixed(2) + "% – " + high.toFixed(2) + "%";
-          } else tdRange.textContent = "–";
-          tr.appendChild(tdRange);
-
-          const tdAction = document.createElement("td");
-          tdAction.className = "center";
-          tdAction.textContent = row.action || "–";
-          tr.appendChild(tdAction);
-
-          const tdRoi = document.createElement("td");
-          tdRoi.className = "center";
-          if (row.potential_roi == null) tdRoi.textContent = "–";
-          else {
-            const rv = typeof row.potential_roi === "number"
-              ? row.potential_roi
-              : parseFloat(row.potential_roi || "NaN");
-            if (!Number.isFinite(rv)) tdRoi.textContent = "–";
-            else {
-              const pct = rv * 100;
-              const sign = pct > 0 ? "+" : "";
-              tdRoi.textContent = sign + pct.toFixed(1) + "%";
-            }
-          }
-          tr.appendChild(tdRoi);
-
-          tbody.appendChild(tr);
-        });
-
-        const btcPriceEl = document.getElementById("btc-price-main");
-        if (btcPriceEl && btcPrice != null) {
-          if (btcPrice >= 1000) btcPriceEl.textContent = "$" + Math.round(btcPrice).toLocaleString();
-          else btcPriceEl.textContent = "$" + btcPrice.toFixed(2);
-        }
-
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    async function fetchKnifecatcher() {
-      try {
-        // KC1
-        const resp1 = await fetch("knifecatcher_latest.json", { cache: "no-store" });
-        if (resp1.ok) {
-          const data = await resp1.json();
-          const base = parseFloat(data.base_balance_usd || "0");
-          const port = parseFloat(data.portfolio_value || "0");
-          const btcv = parseFloat(data.btc_value || "0");
-
-          const balEl = document.getElementById("kc1-balance");
-          const balDetail = document.getElementById("kc1-balance-detail");
-          const roiEl = document.getElementById("kc1-roi");
-          const roiDetail = document.getElementById("kc1-roi-detail");
-          const btcRoiDetail = document.getElementById("kc1-btc-roi-detail");
-          const btcRoiTop = document.getElementById("btc-roi-main");
-
-          if (!Number.isNaN(port)) {
-            const txt = "$" + port.toFixed(2);
-            if (balEl) balEl.textContent = txt;
-            if (balDetail) balDetail.textContent = txt;
-          }
-
-          let algoRoi = null, btcRoi = null;
-          if (base > 0) {
-            algoRoi = port / base - 1;
-            btcRoi = btcv / base - 1;
-          }
-          const fmt = x => x == null || Number.isNaN(x)
-            ? "--.--%"
-            : ((x*100>0?"+":"") + (x*100).toFixed(1) + "%");
-
-          if (roiEl) roiEl.textContent = fmt(algoRoi);
-          if (roiDetail) roiDetail.textContent = fmt(algoRoi);
-          if (btcRoiDetail) btcRoiDetail.textContent = fmt(btcRoi);
-          if (btcRoiTop) btcRoiTop.textContent = "ROI: " + fmt(btcRoi);
-        }
-
-        // KC2
-        const resp2 = await fetch("dom_signals_hourly.json", { cache: "no-store" });
-        if (resp2.ok) {
-          const sig = await resp2.json();
-          const equity = parseFloat(sig.equity_usd || "NaN");
-          const roiFrac = parseFloat(sig.roi_frac || "NaN");
-          const pos = sig.position || {};
-          const token = (pos.token || "Stables").toString().toUpperCase();
-          const entryPrice = parseFloat(pos.entry_price || "NaN");
-          const targetPrice = parseFloat(pos.target_price || "NaN");
-          const benchmarks = sig.benchmarks || {};
-
-          const balEl = document.getElementById("kc2-balance");
-          const balDetail = document.getElementById("kc2-balance-detail");
-          const roiMain = document.getElementById("kc2-roi-main");
-          const roiDetail = document.getElementById("kc2-roi-detail");
-          const posLabel = document.getElementById("kc2-position-label");
-          const benchText = document.getElementById("kc2-benchmarks-text");
-          const entryTargetText = document.getElementById("kc2-entry-target-text");
-
-          const fmtUsd = x => Number.isNaN(x) ? "$--.--" : "$" + x.toFixed(2);
-          const fmtPct = x => Number.isNaN(x)
-            ? "--.--%"
-            : ((x*100>0?"+":"") + (x*100).toFixed(1) + "%");
-
-          if (!Number.isNaN(equity)) {
-            const txt = fmtUsd(equity);
-            if (balEl) balEl.textContent = txt;
-            if (balDetail) balDetail.textContent = txt;
-          }
-
-          if (!Number.isNaN(roiFrac)) {
-            const txt = fmtPct(roiFrac);
-            if (roiMain) roiMain.textContent = txt;
-            if (roiDetail) roiDetail.textContent = txt;
-          }
-
-          if (posLabel) posLabel.textContent = "Adaptive DOM · " + token;
-
-          const getBench = sym => {
-            const b = benchmarks[sym];
-            if (!b) return "--.--%";
-            const rf = parseFloat(b.roi_frac || "NaN");
-            return fmtPct(rf);
-          };
-
-          if (benchText) {
-            benchText.textContent =
-              "vs BTC " + getBench("BTC") +
-              " · ETH " + getBench("ETH") +
-              " · BNB " + getBench("BNB") +
-              " · SOL " + getBench("SOL");
-          }
-
-          if (entryTargetText) {
-            entryTargetText.textContent = fmtUsd(entryPrice) + " / " + fmtUsd(targetPrice);
-          }
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    (function init() {
-      fetchHMI();
-      fetchPrices();
-      fetchKnifecatcher();
-      // dominance / oracle history wiring can be added here later
-    })();
+    buildHmiMatrix();
   </script>
 </body>
 </html>
+
