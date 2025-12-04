@@ -1,0 +1,47 @@
+{
+  "timestamp": "2025-11-30T00:00:12.213043Z",
+  "source": "coingecko",
+  "supplies": {
+    "BTC": {
+      "id": "bitcoin",
+      "circulating_supply": 19955493.0
+    },
+    "ETH": {
+      "id": "ethereum",
+      "circulating_supply": 120695520.9003923
+    },
+    "BNB": {
+      "id": "binancecoin",
+      "circulating_supply": 137736341.66
+    },
+    "SOL": {
+      "id": "solana",
+      "circulating_supply": 559529898.6104174
+    },
+    "DOGE": {
+      "id": "dogecoin",
+      "circulating_supply": 151976406383.7052
+    },
+    "TON": {
+      "id": "the-open-network",
+      "circulating_supply": 2490282204.456532
+    },
+    "SUI": {
+      "id": "sui",
+      "circulating_supply": 3681325480.198332
+    },
+    "UNI": {
+      "id": "uniswap",
+      "circulating_supply": 629892750.2713912
+    },
+    "USDT": {
+      "id": "tether",
+      "circulating_supply": 184617105483.9831
+    },
+    "USDC": {
+      "id": "usd-coin",
+      "circulating_supply": 76566190344.30786
+    }
+  },
+  "missing": []
+}

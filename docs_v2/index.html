@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>HiveAI – All signal, no noise.</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <style>
+    :root {
+      --bg: #000000;
+      --bg-elevated: #05060a;
+      --border-subtle: #151515;
+      --border-strong: #222222;
+      --text-main: #f5f5f7;
+      --text-muted: #7c7f8c;
+      --accent: #2fbf71;
+      --positive: #1f8b4d;
+      --negative: #b02030;
+      --font-main: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                   "Inter", "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text-main);
+      font-family: var(--font-main);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 24px 16px 40px;
+    }
+
+    .app-shell {
+      width: 100%;
+      max-width: 1120px;
+    }
+
+    /* HEADER */
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 20px;
+      gap: 16px;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-img {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      background: #111;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .logo-img img {
+      max-width: 100%;
+      max-height: 100%;
+      display: block;
+    }
+
+    .logo-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .logo-wordmark {
+      font-size: 20px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .tagline {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    .header-right {
+      text-align: right;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .meta-topline span {
+      color: var(--text-main);
+    }
+
+    .meta-oracle-link {
+      margin-top: 4px;
+    }
+
+    .meta-oracle-link a {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .meta-oracle-link a:hover {
+      color: var(--accent);
+    }
+
+    /* GRID LAYOUT */
+
+    main {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .grid-row {
+      display: grid;
+      gap: 10px;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 10px;
+    }
+
+    .grid-top {
+      grid-template-columns: repeat(4, minmax(0,1fr));
+    }
+
+    .grid-mid-2,
+    .grid-mid-2-alt {
+      grid-template-columns: 2fr 2fr;
+    }
+
+    .grid-full {
+      grid-template-columns: minmax(0,1fr);
+    }
+
+    @media (max-width: 960px) {
+      .grid-top {
+        grid-template-columns: repeat(3, minmax(0,1fr));
+      }
+      .grid-mid-2,
+      .grid-mid-2-alt {
+        grid-template-columns: minmax(0,1fr);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .grid-top {
+        grid-template-columns: repeat(2, minmax(0,1fr));
+      }
+    }
+
+    /* “CARD” SECTIONS – VISUALLY MINIMAL, NO BOXES */
+
+    .section-block {
+      padding: 4px 2px 6px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 6px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .section-tag {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .stat-main {
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    .stat-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 6px;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .stat-row strong {
+      color: var(--text-main);
+      font-weight: 500;
+    }
+
+    .value-positive {
+      color: var(--positive);
+    }
+
+    .value-negative {
+      color: var(--negative);
+    }
+
+    /* HMI – HEAT BAR */
+
+    .hmi-heat-wrap {
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .hmi-heat-bar {
+      position: relative;
+      width: 100%;
+      height: 14px;
+      border-radius: 999px;
+      background: #101010;
+      overflow: hidden;
+    }
+
+    .hmi-heat-fill {
+      position: absolute;
+      inset: 0;
+      transform-origin: left center;
+      transform: scaleX(0);
+      background: linear-gradient(
+        90deg,
+        var(--negative) 0%,
+        #b78c22 45%,
+        var(--positive) 100%
+      );
+    }
+
+    .hmi-heat-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--text-muted);
+      opacity: 0.8;
+    }
+
+    .hmi-heat-score {
+      font-size: 11px;
+    }
+
+    /* AGENTS SUMMARY */
+
+    .agent-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 11px;
+    }
+
+    .agent-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .agent-name {
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 10px;
+    }
+
+    .agent-kpi {
+      font-size: 11px;
+    }
+
+    /* CHART PLACEHOLDERS */
+
+    .chart-placeholder {
+      height: 150px;
+      border-radius: 6px;
+      background: #05060a;
+      border: 1px solid #151515;
+      position: relative;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .chart-placeholder::before {
+      content:"";
+      position:absolute;
+      inset:0;
+      background-image: linear-gradient(
+        to right,
+        rgba(255,255,255,0.02) 1px,
+        transparent 1px
+      );
+      background-size: 42px 100%;
+      opacity: 0.7;
+    }
+
+    .chart-placeholder::after {
+      content:"";
+      position:absolute;
+      inset:0;
+      background-image: linear-gradient(
+        to top,
+        rgba(255,255,255,0.02) 1px,
+        transparent 1px
+      );
+      background-size: 100% 32px;
+      opacity: 0.7;
+    }
+
+    .chart-line {
+      position:absolute;
+      inset:14px 12px 10px;
+      border-radius:4px;
+      border-left: 1px solid rgba(255,255,255,0.12);
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+    }
+
+    /* TOKEN TABLE */
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+      margin-top: 6px;
+    }
+
+    thead {
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    th, td {
+      padding: 6px 4px;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    th {
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #05060a;
+    }
+
+    tbody tr:nth-child(odd) {
+      background: #030304;
+    }
+
+    tbody tr:hover {
+      background: #101218;
+    }
+
+    td.center, th.center {
+      text-align: center;
+    }
+
+    .token-name {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .token-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f7931a;
+    }
+
+    .token-dot.eth { background:#627eea;}
+    .token-dot.bnb { background:#f3ba2f;}
+    .token-dot.sol { background:#00ffbd;}
+    .token-dot.usd { background:#26a17b;}
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <div class="header-left">
+        <div class="logo-img">
+          <!-- put your HiveAI logo here as logo.png -->
+          <img src="logo.png" alt="HiveAI logo" />
+        </div>
+        <div class="logo-text">
+          <div class="logo-wordmark">
+            <span class="logo-hiveai">HiveAI</span>
+          </div>
+          <div class="tagline">All signal, no noise.</div>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="meta-topline">
+          Updated: <span id="meta-date">--/--/-- --:--</span>
+        </div>
+        <div class="meta-oracle-link">
+          <a href="oracle.html">HiveAI Oracle →</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- TOP ROW: HMI, Agents, BTC Dominance, BTC -->
+      <section class="grid-row grid-top">
+        <!-- HMI -->
+        <article class="section-block">
+          <div class="section-header">
+            <div class="section-title">Hive Mind Index</div>
+          </div>
+          <div class="hmi-heat-wrap">
+            <div class="hmi-heat-bar">
+              <div class="hmi-heat-fill" id="hmi-heat-fill"></div>
+            </div>
+            <div class="hmi-heat-labels">
+              <span>Fear</span>
+              <span>Neutral</span>
+              <span>Greed</span>
+            </div>
+            <div class="hmi-heat-score">
+              HMI: <span id="hmi-heat-value">--</span>
+            </div>
+            <div class="stat-sub" id="hmi-status-text">–</div>
+          </div>
+        </article>
+
+        <!-- AGENTS SUMMARY (now second) -->
+        <article class="section-block">
+          <div class="section-header">
+            <div class="section-title">Agents</div>
+          </div>
+          <div class="agent-list">
+            <div class="agent-row">
+              <div>
+                <div class="agent-name">Knifecatcher #1</div>
+                <div class="agent-kpi" id="kc1-balance">$--.--</div>
+              </div>
+              <div class="agent-kpi" id="kc1-roi">--.--%</div>
+            </div>
+            <div class="agent-row">
+              <div>
+                <div class="agent-name">Knifecatcher #2</div>
+                <div class="agent-kpi" id="kc2-balance">$--.--</div>
+              </div>
+              <div class="agent-kpi" id="kc2-roi-main">--.--%</div>
+            </div>
+          </div>
+        </article>
+
+        <!-- BTC DOMINANCE SUMMARY (now third) -->
+        <article class="section-block">
+          <div class="section-header">
+            <div class="section-title">BTC Dominance</div>
+          </div>
+          <div class="stat-main" id="dom-btcalts-main">46.8%</div>
+          <div class="stat-row">
+            <span>BTC vs Alts</span>
+            <span id="dom-btcalts-combined">
+              <span id="dom-btcalts-range">Range: 38.1–52.4%</span> ·
+              <span id="dom-btcalts-mcaps">Mcaps: $1.6T vs $1.4T</span>
+            </span>
+          </div>
+        </article>
+
+        <!-- BTC BUY & HOLD -->
+        <article class="section-block">
+          <div class="section-header">
+            <div class="section-title">BTC</div>
+            <div class="section-tag">Buy &amp; Hold</div>
+          </div>
+          <div class="stat-main" id="btc-price-main">$--.--</div>
+          <div class="stat-sub" id="btc-roi-main">ROI: --.--%</div>
+        </article>
+      </section>
+
+      <!-- SECOND ROW: Dominance oracle + trend -->
+      <section class="grid-row grid-mid-2">
+        <!-- Dominance oracle -->
+        <article class="section-block">
+          <div class="section-header">
+            <div class="section-title">BTC Dominance</div>
+            <div class="section-tag">Oracle</div>
+          </div>
+          <div class="stat-row" style="margin-bottom:6px;">
+            <span>Compare</span>
+            <span>
+              <span id="oracle-x-label" class="section-tag" style="margin-right:6px;">BTC</span>
+              <span id="oracle-y-label" class="section-tag">Alts</span>
+            </span>
+          </div>
+          <div class="stat-main" id="oracle-main-value">48.3%</div>
+          <div class="stat-sub" id="oracle-main-label">BTC vs Alts</div>
+          <div class="stat-row">
+            <span>Market caps</span>
+            <span id="oracle-mcaps"><strong>$1.6T vs $1.4T</strong></span>
+          </div>
+          <div class="stat-row">
+            <span>Range</span>
+            <span id="oracle-range-text"><strong>38.0–52.0%</strong></span>
+          </div>
+          <div class="stat-sub" id="oracle-error" style="margin-top:4px;"></div>
+        </article>
+
+        <!-- HMI & BTC vs Alts trend placeholder -->
+        <article class="section-block">
+          <div class="section-header">
+            <div class="section-title">HMI &amp; BTC vs Alts</div>
+            <div class="section-tag">Trend</div>
+          </div>
+          <div class="chart-placeholder">
+            <div class="chart-line" id="trend-chart-placeholder"></div>
+          </div>
+        </article>
+      </section>
+
+      <!-- THIRD ROW: KC1 & KC2 expanded -->
+      <section class="grid-row grid-mid-2-alt">
+        <!-- KC1 -->
+        <article class="section-block">
+          <div class="section-header">
+            <div class="section-title">Knifecatcher #1</div>
+            <div class="section-tag">Rebalancer vs BTC</div>
+          </div>
+          <div class="stat-row">
+            <span>Portfolio value</span>
+            <span id="kc1-balance-detail"><strong>$--.--</strong></span>
+          </div>
+          <div class="stat-row">
+            <span>Strategy ROI</span>
+            <span id="kc1-roi-detail" class="value-positive">--.--%</span>
+          </div>
+          <div class="stat-row">
+            <span>BTC ROI</span>
+            <span id="kc1-btc-roi-detail">--.--%</span>
+          </div>
+          <div class="chart-placeholder" style="margin-top:8px;">
+            <div class="chart-line" id="kc1-chart-placeholder"></div>
+          </div>
+        </article>
+
+        <!-- KC2 -->
+        <article class="section-block">
+          <div class="section-header">
+            <div class="section-title">Knifecatcher #2</div>
+            <div class="section-tag" id="kc2-position-label">Adaptive DOM</div>
+          </div>
+          <div class="stat-row">
+            <span>Equity</span>
+            <span id="kc2-balance-detail"><strong>$--.--</strong></span>
+          </div>
+          <div class="stat-row">
+            <span>Strategy ROI</span>
+            <span id="kc2-roi-detail" class="value-positive">--.--%</span>
+          </div>
+          <div class="stat-row" id="kc2-bench-row">
+            <span>Benchmarks</span>
+            <span id="kc2-benchmarks-text">
+              vs BTC --.--% · ETH --.--% · BNB --.--% · SOL --.--%
+            </span>
+          </div>
+          <div class="stat-row" id="kc2-entry-row">
+            <span>Entry / Target</span>
+            <span id="kc2-entry-target-text">$--.-- / $--.--</span>
+          </div>
+          <div class="chart-placeholder" style="margin-top:8px;">
+            <div class="chart-line" id="kc2-chart-placeholder"></div>
+          </div>
+        </article>
+      </section>
+
+      <!-- FOURTH ROW: Tokens table -->
+      <section class="grid-row grid-full">
+        <article class="section-block">
+          <div class="section-header">
+            <div class="section-title">Tokens</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th class="center">Price</th>
+                  <th class="center">Dom</th>
+                  <th class="center">Range</th>
+                  <th class="center">Action</th>
+                  <th class="center">Pot. ROI</th>
+                </tr>
+              </thead>
+              <tbody id="prices-tbody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const HMI_NEUTRAL_LOW = 40;
+    const HMI_NEUTRAL_HIGH = 60;
+
+    function formatDateTime(ts) {
+      if (!ts) return "--/--/-- --:--";
+      const d = new Date(ts);
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yy = String(d.getFullYear()).slice(-2);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mi = String(d.getMinutes()).padStart(2, "0");
+      return `${dd}/${mm}/${yy} ${hh}:${mi}`;
+    }
+
+    function hmiBandLabel(hmi) {
+      if (hmi < 10) return "Zombie Apocalypse";
+      if (hmi < 25) return "McDonald's Applications in high demand";
+      if (hmi < 45) return "NGMI";
+      if (hmi < 50) return "Leaning bearish";
+      if (hmi < 55) return "Cautiously bullish";
+      if (hmi < 75) return "It's digital gold";
+      if (hmi < 90) return "Frothy";
+      return "It's the future of finance";
+    }
+
+    function updateHmiHeat(hmi) {
+      const fillEl = document.getElementById("hmi-heat-fill");
+      const valEl = document.getElementById("hmi-heat-value");
+      const statusEl = document.getElementById("hmi-status-text");
+      if (!fillEl || !valEl || !statusEl) return;
+      const clamped = Math.max(0, Math.min(100, hmi));
+      const scale = clamped / 100;
+      fillEl.style.transform = `scaleX(${scale})`;
+      valEl.textContent = clamped.toFixed(1);
+      statusEl.textContent = hmiBandLabel(clamped);
+    }
+
+    async function fetchHMI() {
+      try {
+        const resp = await fetch("hmi_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("HMI fetch failed");
+        const data = await resp.json();
+        const raw = typeof data.hmi === "number" ? data.hmi : parseFloat(data.hmi);
+        const hmi = Number.isNaN(raw) ? null : raw;
+        if (hmi === null) throw new Error("Invalid HMI");
+        updateHmiHeat(hmi);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function fetchPrices() {
+      try {
+        const resp = await fetch("prices_latest.json", { cache: "no-store" });
+        if (!resp.ok) throw new Error("prices fetch failed");
+        const data = await resp.json();
+
+        const metaEl = document.getElementById("meta-date");
+        if (metaEl && data && data.timestamp) {
+          metaEl.textContent = formatDateTime(data.timestamp);
+        }
+
+        const tbody = document.getElementById("prices-tbody");
+        tbody.innerHTML = "";
+
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        let btcPrice = null;
+
+        rows.forEach(row => {
+          const tr = document.createElement("tr");
+
+          const tdToken = document.createElement("td");
+          const dot = document.createElement("span");
+          dot.className = "token-dot " + row.token.toLowerCase();
+          const name = document.createElement("span");
+          name.textContent = row.token;
+          const wrap = document.createElement("span");
+          wrap.className = "token-name";
+          wrap.appendChild(dot);
+          wrap.appendChild(name);
+          tdToken.appendChild(wrap);
+          tr.appendChild(tdToken);
+
+          const tdPrice = document.createElement("td");
+          tdPrice.className = "center";
+          const priceVal = typeof row.price === "number" ? row.price : parseFloat(row.price || "0");
+          if (!Number.isNaN(priceVal) && priceVal > 0) {
+            if (priceVal >= 1000) tdPrice.textContent = "$" + Math.round(priceVal).toLocaleString();
+            else if (priceVal >= 1) tdPrice.textContent = "$" + priceVal.toFixed(2);
+            else if (priceVal >= 0.01) tdPrice.textContent = "$" + priceVal.toFixed(3);
+            else tdPrice.textContent = "$" + priceVal.toFixed(6);
+          } else tdPrice.textContent = "–";
+          tr.appendChild(tdPrice);
+
+          if (row.token === "BTC" && !Number.isNaN(priceVal)) {
+            btcPrice = priceVal;
+          }
+
+          const tdDom = document.createElement("td");
+          tdDom.className = "center";
+          const dom = typeof row.btc_dom === "number" ? row.btc_dom : parseFloat(row.btc_dom || "NaN");
+          tdDom.textContent = Number.isFinite(dom) ? dom.toFixed(2) + "%" : "–";
+          tr.appendChild(tdDom);
+
+          const tdRange = document.createElement("td");
+          tdRange.className = "center";
+          const match = (row.range || "").match(/(\d+(?:\.\d+)?)[^\d]+(\d+(?:\.\d+)?)/);
+          if (match) {
+            const low = parseFloat(match[1]);
+            const high = parseFloat(match[2]);
+            tdRange.textContent = low.toFixed(2) + "% – " + high.toFixed(2) + "%";
+          } else tdRange.textContent = "–";
+          tr.appendChild(tdRange);
+
+          const tdAction = document.createElement("td");
+          tdAction.className = "center";
+          tdAction.textContent = row.action || "–";
+          tr.appendChild(tdAction);
+
+          const tdRoi = document.createElement("td");
+          tdRoi.className = "center";
+          if (row.potential_roi == null) tdRoi.textContent = "–";
+          else {
+            const rv = typeof row.potential_roi === "number"
+              ? row.potential_roi
+              : parseFloat(row.potential_roi || "NaN");
+            if (!Number.isFinite(rv)) tdRoi.textContent = "–";
+            else {
+              const pct = rv * 100;
+              const sign = pct > 0 ? "+" : "";
+              tdRoi.textContent = sign + pct.toFixed(1) + "%";
+            }
+          }
+          tr.appendChild(tdRoi);
+
+          tbody.appendChild(tr);
+        });
+
+        const btcPriceEl = document.getElementById("btc-price-main");
+        if (btcPriceEl && btcPrice != null) {
+          if (btcPrice >= 1000) btcPriceEl.textContent = "$" + Math.round(btcPrice).toLocaleString();
+          else btcPriceEl.textContent = "$" + btcPrice.toFixed(2);
+        }
+
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function fetchKnifecatcher() {
+      try {
+        // KC1
+        const resp1 = await fetch("knifecatcher_latest.json", { cache: "no-store" });
+        if (resp1.ok) {
+          const data = await resp1.json();
+          const base = parseFloat(data.base_balance_usd || "0");
+          const port = parseFloat(data.portfolio_value || "0");
+          const btcv = parseFloat(data.btc_value || "0");
+
+          const balEl = document.getElementById("kc1-balance");
+          const balDetail = document.getElementById("kc1-balance-detail");
+          const roiEl = document.getElementById("kc1-roi");
+          const roiDetail = document.getElementById("kc1-roi-detail");
+          const btcRoiDetail = document.getElementById("kc1-btc-roi-detail");
+          const btcRoiTop = document.getElementById("btc-roi-main");
+
+          if (!Number.isNaN(port)) {
+            const txt = "$" + port.toFixed(2);
+            if (balEl) balEl.textContent = txt;
+            if (balDetail) balDetail.textContent = txt;
+          }
+
+          let algoRoi = null, btcRoi = null;
+          if (base > 0) {
+            algoRoi = port / base - 1;
+            btcRoi = btcv / base - 1;
+          }
+          const fmt = x => x == null || Number.isNaN(x)
+            ? "--.--%"
+            : ((x*100>0?"+":"") + (x*100).toFixed(1) + "%");
+
+          if (roiEl) roiEl.textContent = fmt(algoRoi);
+          if (roiDetail) roiDetail.textContent = fmt(algoRoi);
+          if (btcRoiDetail) btcRoiDetail.textContent = fmt(btcRoi);
+          if (btcRoiTop) btcRoiTop.textContent = "ROI: " + fmt(btcRoi);
+        }
+
+        // KC2
+        const resp2 = await fetch("dom_signals_hourly.json", { cache: "no-store" });
+        if (resp2.ok) {
+          const sig = await resp2.json();
+          const equity = parseFloat(sig.equity_usd || "NaN");
+          const roiFrac = parseFloat(sig.roi_frac || "NaN");
+          const pos = sig.position || {};
+          const token = (pos.token || "Stables").toString().toUpperCase();
+          const entryPrice = parseFloat(pos.entry_price || "NaN");
+          const targetPrice = parseFloat(pos.target_price || "NaN");
+          const benchmarks = sig.benchmarks || {};
+
+          const balEl = document.getElementById("kc2-balance");
+          const balDetail = document.getElementById("kc2-balance-detail");
+          const roiMain = document.getElementById("kc2-roi-main");
+          const roiDetail = document.getElementById("kc2-roi-detail");
+          const posLabel = document.getElementById("kc2-position-label");
+          const benchText = document.getElementById("kc2-benchmarks-text");
+          const entryTargetText = document.getElementById("kc2-entry-target-text");
+
+          const fmtUsd = x => Number.isNaN(x) ? "$--.--" : "$" + x.toFixed(2);
+          const fmtPct = x => Number.isNaN(x)
+            ? "--.--%"
+            : ((x*100>0?"+":"") + (x*100).toFixed(1) + "%");
+
+          if (!Number.isNaN(equity)) {
+            const txt = fmtUsd(equity);
+            if (balEl) balEl.textContent = txt;
+            if (balDetail) balDetail.textContent = txt;
+          }
+
+          if (!Number.isNaN(roiFrac)) {
+            const txt = fmtPct(roiFrac);
+            if (roiMain) roiMain.textContent = txt;
+            if (roiDetail) roiDetail.textContent = txt;
+          }
+
+          if (posLabel) posLabel.textContent = "Adaptive DOM · " + token;
+
+          const getBench = sym => {
+            const b = benchmarks[sym];
+            if (!b) return "--.--%";
+            const rf = parseFloat(b.roi_frac || "NaN");
+            return fmtPct(rf);
+          };
+
+          if (benchText) {
+            benchText.textContent =
+              "vs BTC " + getBench("BTC") +
+              " · ETH " + getBench("ETH") +
+              " · BNB " + getBench("BNB") +
+              " · SOL " + getBench("SOL");
+          }
+
+          if (entryTargetText) {
+            entryTargetText.textContent = fmtUsd(entryPrice) + " / " + fmtUsd(targetPrice);
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    (function init() {
+      fetchHMI();
+      fetchPrices();
+      fetchKnifecatcher();
+      // dominance / oracle history wiring can be added here later
+    })();
+  </script>
+</body>
+</html>

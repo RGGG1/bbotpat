@@ -50,3 +50,6 @@ LOG=/root/dom.log
 
   echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] --- run_dom.sh END (OK) ---"
 } >> "$LOG" 2>&1
+
+cp /root/bbotpat/knifecatcher_latest.json /root/bbotpat/docs/ 2>/dev/null || true
+/bin/bash /root/bbotpat/sync_docs.sh
