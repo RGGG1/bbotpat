@@ -1,11 +1,11 @@
 {
-  "equity_usd": 96.2962962962963,
+  "equity_usd": 89.5330112721417,
   "position_type": "ALT",
   "position_token": "UNI",
   "position_units": 16.10305958132045,
   "entry_price": 6.21,
   "entry_timestamp": "2025-11-27T22:28:32.328151Z",
-  "last_update": "2025-12-04T21:20:06.532361Z",
+  "last_update": "2025-12-06T23:20:07.101496Z",
   "base_timestamp": "2025-11-27T22:28:32.329309Z",
   "base_balance_usd": 100.0,
   "mode": "SIM"
