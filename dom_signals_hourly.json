@@ -1,38 +1,38 @@
 {
-  "timestamp": "2025-12-06T23:20:07.101496Z",
-  "equity_usd": 89.5330112721417,
-  "roi_frac": -0.10466988727858295,
+  "timestamp": "2025-12-07T22:20:07.822109Z",
+  "equity_usd": 87.43961352657004,
+  "roi_frac": -0.12560386473429963,
   "position": {
     "type": "ALT",
     "token": "UNI",
     "entry_price": 6.21,
-    "current_price": 5.56,
-    "target_price": 12.670114403544527,
+    "current_price": 5.43,
+    "target_price": 12.620821680491641,
     "hmi_override": false
   },
-  "hmi": 52.9,
+  "hmi": 52.6,
   "hmi_band": "Stabled",
   "action": "HOLD",
   "benchmarks": {
     "BTC": {
       "base_price": 91310.0,
-      "current_price": 89146.0,
-      "roi_frac": -0.023699485269959464
+      "current_price": 89336.0,
+      "roi_frac": -0.021618661701894637
     },
     "ETH": {
       "base_price": 3015.0,
-      "current_price": 3036.94,
-      "roi_frac": 0.007276948590381416
+      "current_price": 3033.98,
+      "roi_frac": 0.006295190713101251
     },
     "BNB": {
       "base_price": 895.0,
-      "current_price": 891.71,
-      "roi_frac": -0.003675977653631257
+      "current_price": 886.3,
+      "roi_frac": -0.009720670391061503
     },
     "SOL": {
       "base_price": 140.85,
-      "current_price": 131.85,
-      "roi_frac": -0.06389776357827481
+      "current_price": 131.06,
+      "roi_frac": -0.06950656727014548
     }
   }
 }
