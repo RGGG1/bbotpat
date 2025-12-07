@@ -1,11 +1,11 @@
 {
-  "timestamp": "2025-12-07T05:15:06.861252Z",
-  "hmi": 53.7,
+  "timestamp": "2025-12-07T17:15:06.466528Z",
+  "hmi": 54.7,
   "hmi_band": "Cautiously bullish",
   "weights": [
     {
       "asset": "BTC",
-      "weight": 0.2074
+      "weight": 0.1939
     },
     {
       "asset": "ETH",
@@ -13,27 +13,27 @@
     },
     {
       "asset": "BNB",
-      "weight": 0.0786
+      "weight": 0.0821
     },
     {
       "asset": "SOL",
-      "weight": 0.1013
+      "weight": 0.1051
     },
     {
       "asset": "DOGE",
-      "weight": 0.1343
+      "weight": 0.1363
     },
     {
       "asset": "TON",
-      "weight": 0.1394
+      "weight": 0.1402
     },
     {
       "asset": "SUI",
-      "weight": 0.0799
+      "weight": 0.081
     },
     {
       "asset": "UNI",
-      "weight": 0.1163
+      "weight": 0.1186
     },
     {
       "asset": "STABLES",
