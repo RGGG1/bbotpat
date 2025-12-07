@@ -1,94 +1,85 @@
 {
-  "timestamp": "2025-12-06T23:20:03.394662Z",
+  "timestamp": "2025-12-07T05:15:06.859968Z",
   "health": {
-    "coingecko_ok": true
+    "hmi_ok": true,
+    "binance_ok": true,
+    "supplies_ok": true,
+    "bands_ok": true,
+    "prices_ok": true,
+    "json_written": false
   },
   "rows": [
     {
       "token": "BTC",
-      "price": 89146.0,
-      "mc": 1780025639010.0,
-      "change_24h": -0.00248,
+      "price": 89466.48,
+      "mc": 1785620319739.2,
+      "change_24h": -0.264,
       "btc_dom": null,
       "range": ""
     },
     {
       "token": "ETH",
-      "price": 3036.94,
-      "mc": 366833094944.0,
-      "change_24h": 0.7802,
+      "price": 3046.34,
+      "mc": 367679266368.22003,
+      "change_24h": 0.247,
       "btc_dom": 82.9,
-      "range": "73.1\u201390.1%",
-      "dom_action": "42/58",
-      "dom_bias": "Neutral"
+      "range": "73\u201390%"
     },
     {
       "token": "BNB",
-      "price": 891.71,
-      "mc": 122875288495.0,
-      "change_24h": 1.27793,
-      "btc_dom": 93.6,
-      "range": "92.7\u201396.0%",
-      "dom_action": "74/26",
-      "dom_bias": "ALT favoured"
+      "price": 894.23,
+      "mc": 123167624676.0908,
+      "change_24h": 1.077,
+      "btc_dom": 93.5,
+      "range": "93\u201396%"
     },
     {
       "token": "SOL",
-      "price": 131.85,
-      "mc": 73906294223.0,
-      "change_24h": -0.54812,
+      "price": 132.88,
+      "mc": 74415302898.78815,
+      "change_24h": -0.308,
       "btc_dom": 96.0,
-      "range": "93.7\u201396.7%",
-      "dom_action": "24/76",
-      "dom_bias": "BTC favoured"
+      "range": "92\u201396%"
     },
     {
       "token": "DOGE",
-      "price": 0.13961,
-      "mc": 22536990525.0,
-      "change_24h": 0.47662,
+      "price": 0.14013,
+      "mc": 22641849861.964878,
+      "change_24h": 0.179,
       "btc_dom": 98.7,
-      "range": "96.7\u201398.9%",
-      "dom_action": "6/94",
-      "dom_bias": "BTC favoured"
+      "range": "96\u201399%"
     },
     {
       "token": "TON",
-      "price": 1.6,
-      "mc": 3901684105.0,
-      "change_24h": 1.88658,
+      "price": 1.601,
+      "mc": 3915966368.1391606,
+      "change_24h": 0.502,
       "btc_dom": 99.8,
-      "range": "99.7768\u201399.7886%",
-      "dom_action": "59/41",
-      "dom_bias": "Neutral"
+      "range": "99\u2013100%"
     },
     {
       "token": "USDTC",
       "price": 1.0,
-      "mc": 263804916872.0,
+      "mc": 263757275873.69733,
       "change_24h": 0.0,
       "btc_dom": null,
       "range": ""
     },
     {
       "token": "SUI",
-      "price": 1.56,
-      "mc": 5822201110.0,
-      "change_24h": 0.44909,
+      "price": 1.5778,
+      "mc": 5896027743.83532,
+      "change_24h": 2.255,
       "btc_dom": 99.7,
-      "range": "99.18\u201399.92%",
-      "dom_action": "34/66",
-      "dom_bias": "BTC favoured"
+      "range": "99\u2013100%"
     },
     {
       "token": "UNI",
-      "price": 5.56,
-      "mc": 3499424737.0,
-      "change_24h": 0.82103,
+      "price": 5.583,
+      "mc": 3516761703.105597,
+      "change_24h": 1.325,
       "btc_dom": 99.8,
-      "range": "99.11\u201399.85%",
-      "dom_action": "6/94",
-      "dom_bias": "BTC favoured"
+      "range": "99\u2013100%"
     }
   ]
 }
