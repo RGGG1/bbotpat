@@ -1,30 +1,30 @@
 {
-  "timestamp": "2025-12-07T00:00:11.597746Z",
+  "timestamp": "2025-12-14T00:00:06.100880Z",
   "source": "coingecko",
   "supplies": {
     "BTC": {
       "id": "bitcoin",
-      "circulating_supply": 19958540.0
+      "circulating_supply": 19961800.0
     },
     "ETH": {
       "id": "ethereum",
-      "circulating_supply": 120695413.6334815
+      "circulating_supply": 120695126.6126076
     },
     "BNB": {
       "id": "binancecoin",
-      "circulating_supply": 137735956.8299999
+      "circulating_supply": 137735534.12
     },
     "SOL": {
       "id": "solana",
-      "circulating_supply": 560018835.7825719
+      "circulating_supply": 561900485.6826835
     },
     "DOGE": {
       "id": "dogecoin",
-      "circulating_supply": 161577462798.579
+      "circulating_supply": 167878603126.579
     },
     "TON": {
       "id": "the-open-network",
-      "circulating_supply": 2445950261.173742
+      "circulating_supply": 2447680695.757035
     },
     "SUI": {
       "id": "sui",
@@ -36,11 +36,11 @@
     },
     "USDT": {
       "id": "tether",
-      "circulating_supply": 185632101181.9279
+      "circulating_supply": 186213681625.792
     },
     "USDC": {
       "id": "usd-coin",
-      "circulating_supply": 78148619277.5527
+      "circulating_supply": 78427623636.48607
     }
   },
   "missing": []
