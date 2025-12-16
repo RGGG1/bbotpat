@@ -4,388 +4,317 @@
   <meta charset="UTF-8" />
   <title>HiveAI - All signal, no noise</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     :root {
       --bg: #000000;
-      --bg-elevated: #050509;
-      --border-subtle: #22232f;
-      --text-main: #f5f5f7;
-      --text-muted: #888aa0;
-      --accent-red: #ff4b5c;
-      --accent-green: #4dff88;
-      --accent-neutral: #ffffff;
-      --font-main: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
-                   "Inter", "Segoe UI", sans-serif;
+      --panel: #0b0d10;
+      --panel2: #0a0b0d;
+      --border: rgba(255, 255, 255, 0.08);
+      --border2: rgba(255, 255, 255, 0.12);
+
+      --text: #f5f5f7;
+      --muted: #8c90a3;
+
+      /* Binance-ish yellow */
+      --yellow: #f0b90b;
+      --yellow-soft: rgba(240, 185, 11, 0.18);
+
+      --green: #16c784;
+      --red: #ea3943;
+
+      --font: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       background: var(--bg);
-      color: var(--text-main);
-      font-family: var(--font-main);
+      color: var(--text);
+      font-family: var(--font);
       min-height: 100vh;
       display: flex;
       justify-content: center;
       align-items: flex-start;
-      padding: 24px 16px;
+      padding: 22px 14px;
     }
 
-    .app-shell {
+    .shell {
       width: 100%;
-      max-width: 1040px;
+      max-width: 1120px;
     }
 
+    /* Header */
     header {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
-      margin-bottom: 16px;
+      gap: 14px;
+      margin-bottom: 10px;
     }
 
-    .title-stack {
+    .brand {
       display: flex;
       flex-direction: column;
-      gap: 4px;
-    }
-
-    .logo-row {
-      display: flex;
-      align-items: baseline;
       gap: 6px;
+      min-width: 240px;
+    }
+
+    .brand-title {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 10px;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-transform: none;
       font-size: 22px;
-      font-weight: 600;
-      letter-spacing: 0.03em;
+      line-height: 1.1;
     }
 
-    .logo-slash {
-      font-size: 24px;
-      line-height: 1;
-      transition: color 0.28s ease;
+    .brand-title .hive {
+      color: var(--yellow);
     }
 
-    .logo-hive {
-      transition: color 0.28s ease;
-    }
-
-    .logo-ai {
-      color: var(--text-main);
-      opacity: 0.9;
-    }
-
-    .logo-accent-red {
-      color: var(--accent-red);
-    }
-
-    .logo-accent-green {
-      color: var(--accent-green);
-    }
-
-    .logo-accent-neutral {
-      color: var(--accent-neutral);
-    }
-
-    .tagline {
-      font-size: 11px;
+    .brand-tagline {
+      font-size: 12px;
+      color: var(--muted);
       font-style: italic;
-      color: var(--text-muted);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
+      letter-spacing: 0.02em;
     }
 
-    .meta-topline {
+    .meta {
       text-align: right;
       font-size: 11px;
-      color: var(--text-muted);
+      color: var(--muted);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-end;
+      padding-top: 2px;
     }
 
-    .meta-oracle-link {
-      margin-top: 4px;
-    }
-
-    .card-oracle-link {
-      font-size: 10px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
+    .meta a {
       text-decoration: none;
-      color: var(--text-muted);
+      font-size: 10px;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: var(--muted);
       white-space: nowrap;
     }
 
-    .card-oracle-link:hover {
-      color: var(--accent-green);
-    }
+    .meta a:hover { color: var(--yellow); }
 
+    /* Sections */
     main {
       display: flex;
       flex-direction: column;
-      gap: 16px;
-    }
-
-    /* HERO LAYOUT (HMI + ACTION + AGENTS) */
-
-    .hero {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .hero-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 2fr) minmax(0, 2fr);
-      grid-template-rows: auto auto;
-      grid-template-areas:
-        "hmi action"
-        "hmi agents";
-      gap: 16px;
-    }
-
-    @media (max-width: 720px) {
-      .hero-grid {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: auto auto auto;
-        grid-template-areas:
-          "hmi"
-          "action"
-          "agents";
-      }
+      gap: 14px;
     }
 
     .section {
-      padding: 12px 12px 14px;
-      background: var(--bg-elevated);
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+      border: 1px solid var(--border);
       border-radius: 10px;
-      border: 1px solid var(--border-subtle);
-      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+      padding: 14px 14px 14px;
+      box-shadow: 0 16px 50px rgba(0,0,0,0.55);
     }
 
     .section-title {
       font-size: 12px;
-      font-weight: 500;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: var(--text-main);
-      margin-bottom: 6px;
+      font-weight: 600;
+      color: var(--yellow);
+      margin-bottom: 10px;
     }
 
-    .section-muted {
-      font-size: 11px;
-      color: var(--text-muted);
+    /* HMI block */
+    .hmi-wrap {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
     }
 
-    .section--hmi {
-      grid-area: hmi;
-    }
-
-    .section--action {
-      grid-area: action;
-    }
-
-    .section--agents {
-      grid-area: agents;
-    }
-
-    /* HMI VISUAL */
-
-    .hmi-main {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      margin-top: 4px;
-      margin-bottom: 6px;
+    .hmi-topline {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: end;
     }
 
     .hmi-score {
-      font-size: 48px;
-      font-weight: 600;
-      line-height: 1;
-      margin-bottom: 6px;
+      text-align: right;
+      font-weight: 800;
+      font-size: 68px;
+      line-height: 0.95;
+      letter-spacing: 0.01em;
     }
 
-    .hmi-band {
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--accent-neutral);
-      margin-bottom: 8px;
-      text-align: center;
-    }
-
-    .hmi-bar-wrapper {
-      width: 100%;
-      max-width: 260px;
-      margin: 0 auto 8px;
-    }
-
-    .hmi-bar {
-      width: 100%;
-      height: 6px;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #820000, #ff8400, #ffd000, #00c060);
+    /* ===== NEW HMI GRAPHIC (exponential bar chart, red->orange->yellow fill, grey remainder) ===== */
+    .hmi-bars-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 0;
+      height: 54px;
+      border-radius: 10px;
+      padding: 8px 10px 6px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.08);
       overflow: hidden;
       position: relative;
     }
 
-    .hmi-bar-knob {
-      position: absolute;
-      top: 50%;
-      width: 12px;
-      height: 12px;
-      border-radius: 999px;
-      border: 2px solid #ffffff;
-      background: #000000;
-      transform: translate(-50%, -50%);
-      box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
+    .hmi-bars {
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 6px;
+      align-items: end;
+      width: 100%;
+      height: 100%;
     }
 
-    .hmi-label-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 10px;
-      color: var(--text-muted);
-      margin-top: 4px;
+    .hmi-barcol {
+      width: 100%;
+      border-radius: 6px 6px 4px 4px;
+      background: #2a2c31; /* inactive grey */
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+      transition: background 220ms ease, opacity 220ms ease, transform 220ms ease;
     }
+
+    .hmi-barcol.active {
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35), 0 8px 18px rgba(0,0,0,0.35);
+    }
+
+    /* subtle “trend” feel */
+    .hmi-barcol.active { transform: translateY(-0.5px); }
+    /* ===== END NEW HMI GRAPHIC ===== */
+
+    .hmi-status {
+      text-align: center;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+      margin-top: 2px;
+    }
+
+    .hmi-legend {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .hmi-legend span:nth-child(1) { text-align: left; }
+    .hmi-legend span:nth-child(2) { text-align: center; }
+    .hmi-legend span:nth-child(3) { text-align: right; }
 
     .hmi-tracking {
-      text-align: center;
-      margin-top: 4px;
-    }
-
-    .hmi-tracking-items {
-      font-size: 11px;
-      color: var(--text-muted);
       display: inline-flex;
-      gap: 10px;
+      gap: 12px;
       align-items: center;
-      flex-wrap: wrap;
       justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--muted);
     }
 
-    .hmi-dot {
-      width: 6px;
-      height: 6px;
+    .dot {
+      width: 6px; height: 6px;
       border-radius: 999px;
-      background: var(--accent-green);
-      box-shadow: 0 0 6px rgba(77, 255, 136, 0.7);
+      background: var(--yellow);
+      box-shadow: 0 0 10px rgba(240,185,11,0.35);
+      display: inline-block;
+      margin-right: 6px;
+      transform: translateY(-1px);
     }
 
-    /* ACTION SECTION */
-
-    .action-header-row {
+    /* ACTION */
+    .action-line {
       display: flex;
+      align-items: baseline;
       justify-content: space-between;
-      align-items: baseline;
-      gap: 8px;
-      margin-bottom: 6px;
+      gap: 10px;
+      margin-bottom: 10px;
     }
 
-    .action-title-main {
-      display: flex;
-      align-items: baseline;
-      gap: 6px;
-    }
-
-    .action-label {
+    .action-title {
+      color: var(--yellow);
       font-size: 12px;
-      font-weight: 500;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: var(--text-main);
+      font-weight: 650;
     }
 
-    .action-mode {
+    .action-kind {
       font-size: 12px;
-      font-weight: 500;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: var(--accent-green);
+      font-weight: 650;
+      color: var(--yellow);
     }
 
     .action-token {
-      font-size: 36px;
-      font-weight: 600;
       text-align: center;
-      margin-bottom: 4px;
-      color: var(--accent-green);
+      font-size: 72px;
+      line-height: 0.95;
+      font-weight: 850;
+      letter-spacing: 0.01em;
+      color: var(--yellow);
+      margin-top: 2px;
     }
 
-    .action-line {
-      font-size: 12px;
-      color: var(--text-muted);
+    .action-sub {
       text-align: center;
+      font-size: 14px;
+      color: var(--text);
+      margin-top: 8px;
+      opacity: 0.95;
     }
 
-    /* AGENTS TABLE */
+    .divider {
+      height: 1px;
+      background: rgba(255,255,255,0.08);
+      margin: 14px 0;
+    }
 
+    /* Agents table */
     .agents-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 12px;
-      margin-top: 6px;
+      margin-top: 2px;
+      font-size: 13px;
     }
 
-    .agents-table th,
-    .agents-table td {
-      padding: 4px 4px;
-      text-align: center;
-    }
-
-    .agents-table th {
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      font-size: 10px;
-      color: var(--text-muted);
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .agents-table td:first-child,
-    .agents-table th:first-child {
+    .agents-table thead th {
       text-align: left;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-weight: 650;
+      color: var(--muted);
+      padding: 8px 6px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
     }
 
-    .agents-name {
-      font-size: 12px;
+    .agents-table tbody td {
+      padding: 10px 6px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
     }
 
-    .agents-positive {
-      color: var(--accent-green);
-    }
+    .agents-table tbody tr:last-child td { border-bottom: none; }
 
-    .agents-negative {
-      color: var(--accent-red);
-    }
+    .right { text-align: right; }
+    .center { text-align: center; }
 
-    /* ANALYTICS LAYOUT */
-
-    .analytics {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .analytics-top {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: 16px;
-    }
-
-    /* DOMINANCE PANEL */
-
-    .section--dominance {
-      position: relative;
-    }
-
+    /* Dominance section (reuse v1 dropdown logic but v2-ish styling) */
     .oracle-header-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 8px;
+      gap: 10px;
+      margin-bottom: 10px;
     }
 
     .oracle-header-right {
@@ -396,24 +325,21 @@
       margin-left: auto;
     }
 
-    .oracle-pill-wrapper {
-      position: relative;
-    }
+    .oracle-pill-wrapper { position: relative; }
 
     .oracle-pill {
       display: inline-flex;
       align-items: center;
       justify-content: space-between;
-      gap: 6px;
-      padding: 4px 8px;
+      gap: 8px;
+      padding: 6px 10px;
       border-radius: 999px;
-      border: 1px solid #33334a;
-      background: #080814;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.03);
       cursor: pointer;
-      min-width: 96px;
-      font-size: 11px;
-      color: var(--text-main);
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+      min-width: 110px;
+      font-size: 12px;
+      color: var(--text);
     }
 
     .oracle-pill-label {
@@ -423,447 +349,310 @@
     }
 
     .oracle-pill-arrow {
-      font-size: 9px;
-      opacity: 0.8;
+      font-size: 10px;
+      opacity: 0.85;
+      color: var(--muted);
     }
 
     .oracle-vs {
-      font-size: 11px;
+      font-size: 12px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-muted);
+      letter-spacing: 0.10em;
+      color: var(--muted);
     }
 
     .oracle-dropdown {
       position: absolute;
-      top: calc(100% + 4px);
+      top: calc(100% + 6px);
       left: 0;
       z-index: 20;
-      background: #050509;
+      background: #050608;
       border-radius: 10px;
-      border: 1px solid #33334a;
-      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.7);
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 14px 50px rgba(0,0,0,0.75);
       padding: 6px 6px 6px;
-      min-width: 160px;
-      max-height: 260px;
+      min-width: 180px;
+      max-height: 280px;
       overflow-y: auto;
       display: none;
     }
 
-    .oracle-dropdown.open {
-      display: block;
-    }
+    .oracle-dropdown.open { display: block; }
 
     .oracle-option {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 4px 6px;
-      border-radius: 6px;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 8px;
       cursor: pointer;
-      font-size: 11px;
-      color: var(--text-main);
+      font-size: 12px;
+      color: var(--muted);
     }
 
-    .oracle-option:hover {
-      background: #121224;
-    }
+    .oracle-option:hover { background: rgba(255,255,255,0.06); }
+
+    .oracle-option.selected { color: var(--yellow); }
 
     .oracle-option-box {
       width: 14px;
       height: 14px;
       border-radius: 4px;
-      border: 1px solid #44445a;
+      border: 1px solid rgba(255,255,255,0.18);
       display: inline-flex;
       align-items: center;
       justify-content: center;
       font-size: 10px;
-      color: var(--accent-green);
+      color: var(--yellow);
     }
 
     .oracle-option.selected .oracle-option-box {
-      background: #101f16;
-      border-color: #1f9f4a;
+      background: rgba(240,185,11,0.10);
+      border-color: rgba(240,185,11,0.35);
     }
 
-    .oracle-option-tick {
-      display: none;
-    }
-
-    .oracle-option.selected .oracle-option-tick {
-      display: block;
-    }
-
-    .oracle-option-label {
-      white-space: nowrap;
-    }
+    .oracle-option-tick { display: none; }
+    .oracle-option.selected .oracle-option-tick { display: block; }
 
     .oracle-clear {
       margin-top: 6px;
-      padding: 4px 6px;
+      padding: 6px 8px;
       text-align: right;
       font-size: 10px;
-      color: var(--text-muted);
-      border-top: 1px solid #222238;
+      color: var(--muted);
+      border-top: 1px solid rgba(255,255,255,0.10);
       cursor: pointer;
     }
 
-    .oracle-clear:hover {
-      color: var(--accent-neutral);
-    }
+    .oracle-clear:hover { color: var(--yellow); }
 
     .oracle-main-line {
       font-size: 16px;
-      font-weight: 500;
-      margin-bottom: 4px;
+      font-weight: 650;
+      margin-bottom: 6px;
     }
 
     .oracle-main-line .dom-value {
-      font-size: 32px;
-      font-weight: 600;
-      margin-right: 6px;
+      font-size: 38px;
+      font-weight: 850;
+      margin-right: 8px;
+      color: var(--text);
     }
 
     .oracle-main-line .dom-label {
       font-size: 13px;
-      color: var(--accent-neutral);
+      color: var(--muted);
+      font-weight: 600;
     }
 
     .oracle-sub-line,
     .oracle-range-line {
       font-size: 13px;
-      color: var(--text-muted);
-      margin-top: 2px;
+      color: var(--muted);
+      margin-top: 3px;
     }
 
     .oracle-sub-line span,
-    .oracle-range-line span {
-      color: var(--text-main);
-    }
+    .oracle-range-line span { color: var(--text); }
 
     .oracle-error {
-      font-size: 11px;
-      color: var(--accent-red);
-      margin-top: 4px;
-    }
-
-    .oracle-chart-placeholder {
-      margin-top: 10px;
-      height: 80px;
-      border-radius: 8px;
-      background: radial-gradient(circle at 0% 0%, #1a1b2a, #050509);
-      border: 1px solid #1c1d2a;
-      opacity: 0.9;
-    }
-
-    /* PRICES / TOKENS */
-
-    .prices-card {
-      padding: 10px 12px 12px;
-      background: var(--bg-elevated);
-      border-radius: 10px;
-      border: 1px solid var(--border-subtle);
-      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
-    }
-
-    .prices-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      margin-bottom: 6px;
-    }
-
-    .prices-title {
       font-size: 12px;
-      font-weight: 500;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--text-main);
+      color: var(--red);
+      margin-top: 6px;
     }
 
+    /* Tokens table */
     .prices-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 12px;
-      margin-top: 6px;
+      font-size: 12.5px;
+      margin-top: 8px;
     }
 
     .prices-table thead {
-      border-bottom: 1px solid var(--border-subtle);
+      border-bottom: 1px solid rgba(255,255,255,0.10);
     }
 
     .prices-table th,
-    .prices-table td {
-      padding: 6px 4px;
-    }
+    .prices-table td { padding: 10px 6px; }
 
     .prices-table th {
-      font-weight: 500;
+      font-weight: 650;
       text-transform: uppercase;
-      letter-spacing: 0.07em;
+      letter-spacing: 0.10em;
       font-size: 10px;
-      color: var(--text-muted);
+      color: var(--muted);
     }
 
     .prices-table th.token-col,
-    .prices-table td.token-col {
-      text-align: left;
-    }
+    .prices-table td.token-col { text-align: left; }
 
     .prices-table th.center,
-    .prices-table td.center {
-      text-align: center;
-    }
+    .prices-table td.center { text-align: center; }
 
-    .prices-table tbody tr {
-      border-bottom: 1px solid #11111a;
-    }
-
-    .prices-table tbody tr:last-child {
-      border-bottom: none;
-    }
-
-    .prices-table tbody tr:nth-child(even) {
-      background: #070711;
-    }
-
-    .prices-table tbody tr:nth-child(odd) {
-      background: #050509;
-    }
-
-    .token-cell {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .token-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 999px;
-      flex-shrink: 0;
-    }
-
-    .token-dot-positive {
-      background: var(--accent-green);
-    }
-
-    .token-dot-negative {
-      background: var(--accent-red);
-    }
-
-    .token-dot-neutral {
-      background: #ffffff;
-    }
-
-    .footer-note {
-      margin-top: 6px;
-      font-size: 11px;
-      color: var(--text-muted);
-      line-height: 1.5;
-    }
-
-    .footer-note-title {
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-size: 10px;
-      margin-bottom: 2px;
-    }
-
-    .oracle-notes-card {
-      margin-top: 4px;
-      padding: 10px 12px 12px;
-      background: var(--bg-elevated);
-      border-radius: 10px;
-      border: 1px solid var(--border-subtle);
-      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
-    }
+    .prices-table tbody tr { border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .prices-table tbody tr:last-child { border-bottom: none; }
 
     @media (max-width: 700px) {
-      .prices-table {
-        font-size: 11px;
-      }
-      .prices-table th,
-      .prices-table td {
-        padding: 5px 3px;
-      }
+      body { padding: 14px 10px; }
+      .hmi-score { font-size: 64px; }
+      .action-token { font-size: 64px; }
+      header { margin-bottom: 8px; }
+      .hmi-bars-wrap { height: 50px; }
+      .hmi-bars { gap: 5px; }
     }
   </style>
 </head>
+
 <body>
-  <div class="app-shell">
+  <div class="shell">
     <header>
-      <div class="title-stack">
-        <div class="logo-row">
-          <span id="logo-slash" class="logo-slash logo-accent-neutral">/</span>
-          <span class="logo-wordmark">
-            <span id="logo-hive" class="logo-hive logo-accent-neutral">HiveAI</span>
-          </span>
+      <div class="brand">
+        <div class="brand-title">
+          <span class="hive">HiveAI</span>
         </div>
-        <div class="tagline">All signal, no noise</div>
+        <div class="brand-tagline">All signal, no noise</div>
       </div>
-      <div class="meta-topline">
-        Updated: <span id="meta-date">--/--/-- --:--</span>
-        <div class="meta-oracle-link">
-          <a href="oracle.html" class="card-oracle-link">HiveAI Oracle →</a>
-        </div>
+
+      <div class="meta">
+        <div>Updated: <span id="meta-date">--/--/-- --:--</span></div>
+        <a href="/oracle.html">HiveAI Oracle →</a>
       </div>
     </header>
 
     <main>
-      <!-- HERO: HMI + ACTION + AGENTS -->
-      <section class="hero">
-        <div class="hero-grid">
-          <!-- HMI -->
-          <section class="section section--hmi">
-            <div class="section-title">Hive Mind Index</div>
-            <div class="hmi-main">
-              <div id="hmi-score" class="hmi-score">--.-</div>
-              <div id="hmi-status" class="hmi-band">–</div>
-              <div class="hmi-bar-wrapper">
-                <div class="hmi-bar">
-                  <div id="hmi-bar-knob" class="hmi-bar-knob" style="left: 50%;"></div>
-                </div>
-                <div class="hmi-label-row">
-                  <span>Fear</span>
-                  <span>Neutral</span>
-                  <span>Greed</span>
-                </div>
-              </div>
-            </div>
-            <div class="hmi-tracking">
-              <div class="hmi-tracking-items">
-                <span class="hmi-dot" aria-hidden="true"></span><span>Open interest</span>
-                <span class="hmi-dot" aria-hidden="true"></span><span>Perps vs spot</span>
-                <span class="hmi-dot" aria-hidden="true"></span><span>Volatility</span>
-              </div>
-            </div>
-          </section>
+      <!-- HMI -->
+      <section class="section" id="hmi-section">
+        <div class="section-title">Hive Mind Index</div>
 
-          <!-- ACTION -->
-          <section class="section section--action">
-            <div class="action-header-row">
-              <div class="action-title-main">
-                <div class="action-label">Action -</div>
-                <div id="action-mode" class="action-mode">Buy</div>
+        <div class="hmi-wrap">
+          <div class="hmi-topline">
+            <div>
+              <!-- NEW HMI BAR CHART -->
+              <div class="hmi-bars-wrap" aria-hidden="true">
+                <div class="hmi-bars" id="hmi-bars"></div>
+              </div>
+
+              <div class="hmi-tracking" style="margin-top:10px;">
+                <span><span class="dot"></span>Open interest</span>
+                <span><span class="dot"></span>Perps vs spot</span>
+                <span><span class="dot"></span>Volatility</span>
               </div>
             </div>
-            <div id="action-token" class="action-token">$UNI</div>
-            <div id="action-line" class="action-line">Entry: $0.00 | Target: $0.00</div>
-          </section>
 
-          <!-- AGENTS -->
-          <section class="section section--agents">
-            <div class="section-title">Agents</div>
-            <table class="agents-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Balance</th>
-                  <th>ROI</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td class="agents-name">BTC buy and hold</td>
-                  <td id="agents-btc-balance">$--.--</td>
-                  <td id="agents-btc-roi">--.--%</td>
-                </tr>
-                <tr>
-                  <td class="agents-name">Index Rebalancer</td>
-                  <td id="agents-kc1-balance">$--.--</td>
-                  <td id="agents-kc1-roi">--.--%</td>
-                </tr>
-                <tr>
-                  <td class="agents-name">Knifecatcher</td>
-                  <td id="agents-kc2-balance">$--.--</td>
-                  <td id="agents-kc2-roi">--.--%</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
+            <div class="hmi-score" id="hmi-value">--</div>
+          </div>
+
+          <div class="hmi-status" id="hmi-status">–</div>
+
+          <div class="hmi-legend">
+            <span>Fear</span>
+            <span>Neutral</span>
+            <span>Greed</span>
+          </div>
         </div>
       </section>
 
-      <!-- ANALYTICS: Dominance + Token table -->
-      <section class="analytics">
-        <div class="analytics-top">
-          <!-- DOMINANCE -->
-          <section class="section section--dominance">
-            <div class="oracle-header-row">
-              <div class="section-title">Dominance</div>
-              <div class="oracle-header-right">
-                <div class="oracle-pill-wrapper">
-                  <div class="oracle-pill" id="oracle-x-pill">
-                    <span class="oracle-pill-label" id="oracle-x-label">Select</span>
-                    <span class="oracle-pill-arrow">▾</span>
-                  </div>
-                  <div class="oracle-dropdown" id="oracle-x-menu"></div>
-                </div>
-                <span class="oracle-vs">vs</span>
-                <div class="oracle-pill-wrapper">
-                  <div class="oracle-pill" id="oracle-y-pill">
-                    <span class="oracle-pill-label" id="oracle-y-label">Select</span>
-                    <span class="oracle-pill-arrow">▾</span>
-                  </div>
-                  <div class="oracle-dropdown" id="oracle-y-menu"></div>
-                </div>
-              </div>
-            </div>
-
-            <div class="oracle-main-line" id="oracle-main-line">
-              <span class="dom-value">--</span>
-              <span class="dom-label">Select X and Y</span>
-            </div>
-            <div class="oracle-sub-line" id="oracle-sub-line">
-              Market caps: <span>–</span>
-            </div>
-            <div class="oracle-range-line" id="oracle-range-line">
-              Range: <span>–</span>
-            </div>
-            <div class="oracle-error" id="oracle-error"></div>
-
-            <div class="oracle-chart-placeholder"></div>
-          </section>
+      <!-- ACTION -->
+      <section class="section" id="action-section">
+        <div class="action-line">
+          <div class="action-title" id="action-title">ACTION</div>
+          <div class="action-kind" id="action-kind">BUY</div>
         </div>
 
-        <!-- TOKENS -->
-        <section class="prices-card">
-          <div class="prices-header">
-            <div class="prices-title">Tokens</div>
-          </div>
-          <table class="prices-table">
-            <thead>
-              <tr>
-                <th class="token-col">Token</th>
-                <th class="center">Price</th>
-                <th class="center">Dom</th>
-                <th class="center">Range</th>
-                <th class="center">Action</th>
-                <th class="center">Pot. ROI</th>
-              </tr>
-            </thead>
-            <tbody id="prices-tbody">
-            </tbody>
-          </table>
-        </section>
+        <div class="action-token" id="action-token">$--</div>
+        <div class="action-sub" id="action-sub">Entry: -- | Target: --</div>
+      </section>
 
-        <!-- ORACLE NOTES -->
-        <section class="oracle-notes-card">
-          <div class="footer-note">
-            <div class="footer-note-title">HiveAI Oracle Notes</div>
-            <div>
-              <ul style="margin-top:6px;line-height:1.35;list-style:disc;padding-left:18px;">
-                <li>Hive Mind Index (HMI) is our custom fear and greed index, factored for predictive signaling.</li>
-                <li>HMI and Dom values updated hourly.</li>
-                <li>'Dom' represents BTC dominance against token.</li>
-                <li>'Range' represents up to 2-year BTC Dom range against token.</li>
-                <li>USDTC = USDT and USDC combined.</li>
-                <li>Additional token listing available on request.</li>
-              </ul>
+      <!-- AGENTS -->
+      <section class="section" id="agents-section">
+        <div class="section-title">Agents</div>
+        <table class="agents-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th class="right">Balance</th>
+              <th class="right">ROI</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>BTC buy and hold</td>
+              <td class="right" id="agent-btc-balance">$--</td>
+              <td class="right" id="agent-btc-roi">--%</td>
+            </tr>
+            <tr>
+              <td>Index Rebalancer</td>
+              <td class="right" id="agent-kc1-balance">$--</td>
+              <td class="right" id="agent-kc1-roi">--%</td>
+            </tr>
+            <tr>
+              <td>Knifecatcher</td>
+              <td class="right" id="agent-kc2-balance">$--</td>
+              <td class="right" id="agent-kc2-roi">--%</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- DOMINANCE -->
+      <section class="section" id="dom-section">
+        <div class="oracle-header-row">
+          <div class="section-title" style="margin:0;">Dominance</div>
+
+          <div class="oracle-header-right">
+            <div class="oracle-pill-wrapper">
+              <div class="oracle-pill" id="oracle-x-pill">
+                <span class="oracle-pill-label" id="oracle-x-label">Select</span>
+                <span class="oracle-pill-arrow">▾</span>
+              </div>
+              <div class="oracle-dropdown" id="oracle-x-menu"></div>
+            </div>
+
+            <span class="oracle-vs">vs</span>
+
+            <div class="oracle-pill-wrapper">
+              <div class="oracle-pill" id="oracle-y-pill">
+                <span class="oracle-pill-label" id="oracle-y-label">Select</span>
+                <span class="oracle-pill-arrow">▾</span>
+              </div>
+              <div class="oracle-dropdown" id="oracle-y-menu"></div>
             </div>
           </div>
-        </section>
+        </div>
+
+        <div class="oracle-main-line" id="oracle-main-line">
+          <span class="dom-value">--</span>
+          <span class="dom-label">Select X and Y</span>
+        </div>
+
+        <div class="oracle-sub-line" id="oracle-sub-line">
+          Market caps: <span>–</span>
+        </div>
+
+        <div class="oracle-range-line" id="oracle-range-line">
+          Range: <span>–</span>
+        </div>
+
+        <div class="oracle-error" id="oracle-error"></div>
+      </section>
+
+      <!-- TOKENS -->
+      <section class="section" id="tokens-section">
+        <div class="section-title">Tokens</div>
+        <table class="prices-table">
+          <thead>
+            <tr>
+              <th class="token-col">Token</th>
+              <th class="center">Price</th>
+              <th class="center">Dom</th>
+              <th class="center">Range</th>
+              <th class="center">Action</th>
+              <th class="center">Pot. ROI</th>
+            </tr>
+          </thead>
+          <tbody id="prices-tbody"></tbody>
+        </table>
       </section>
     </main>
   </div>
@@ -872,27 +661,7 @@
     const HMI_NEUTRAL_LOW = 40;
     const HMI_NEUTRAL_HIGH = 60;
 
-    const ORACLE_TOKENS = [
-      "BTC",
-      "ETH",
-      "BNB",
-      "SOL",
-      "DOGE",
-      "TON",
-      "SUI",
-      "UNI"
-    ];
-
-    const BINANCE_SYMBOLS = {
-      BTC: "BTCUSDT",
-      ETH: "ETHUSDT",
-      BNB: "BNBUSDT",
-      SOL: "SOLUSDT",
-      DOGE: "DOGEUSDT",
-      TON: "TONUSDT",
-      SUI: "SUIUSDT",
-      UNI: "UNIUSDT"
-    };
+    const ORACLE_TOKENS = ["BTC","ETH","BNB","SOL","DOGE","TON","SUI","UNI"];
 
     let pricesRowsGlobal = [];
     let suppliesGlobal = null;
@@ -915,44 +684,13 @@
 
     function formatMC(v) {
       if (!v || v <= 0) return "$0";
-      if (v >= 1e12) {
-        return `$${(v / 1e12).toFixed(1)}T`;
-      }
-      if (v >= 1e9) {
-        return `$${Math.round(v / 1e9)}B`;
-      }
-      if (v >= 1e6) {
-        return `$${Math.round(v / 1e6)}M`;
-      }
+      if (v >= 1e12) return `$${(v / 1e12).toFixed(1)}T`;
+      if (v >= 1e9) return `$${Math.round(v / 1e9)}B`;
+      if (v >= 1e6) return `$${Math.round(v / 1e6)}M`;
       return `$${Math.round(v).toLocaleString()}`;
     }
 
-    function updateLogoColor(hmi) {
-      const slashEl = document.getElementById("logo-slash");
-      const hiveEl = document.getElementById("logo-hive");
-
-      if (!slashEl || !hiveEl) return;
-
-      slashEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
-      hiveEl.classList.remove("logo-accent-red", "logo-accent-green", "logo-accent-neutral");
-
-      if (typeof hmi !== "number" || Number.isNaN(hmi)) {
-        slashEl.classList.add("logo-accent-neutral");
-        hiveEl.classList.add("logo-accent-neutral");
-        return;
-      }
-
-      if (hmi < HMI_NEUTRAL_LOW) {
-        slashEl.classList.add("logo-accent-red");
-        hiveEl.classList.add("logo-accent-red");
-      } else if (hmi > HMI_NEUTRAL_HIGH) {
-        slashEl.classList.add("logo-accent-green");
-        hiveEl.classList.add("logo-accent-green");
-      } else {
-        slashEl.classList.add("logo-accent-neutral");
-        hiveEl.classList.add("logo-accent-neutral");
-      }
-    }
+    function clamp01(x) { return Math.max(0, Math.min(1, x)); }
 
     function hmiBandLabel(hmi) {
       if (hmi < 10) return "Zombie Apocalypse";
@@ -965,25 +703,68 @@
       return "It's the future of finance";
     }
 
-    function updateHmiVisual(hmi) {
-      const scoreEl = document.getElementById("hmi-score");
-      const statusEl = document.getElementById("hmi-status");
-      const knobEl = document.getElementById("hmi-bar-knob");
-
-      if (hmi == null || Number.isNaN(hmi)) {
-        if (scoreEl) scoreEl.textContent = "--.-";
-        if (statusEl) statusEl.textContent = "unavailable";
-        if (knobEl) knobEl.style.left = "50%";
-        updateLogoColor(NaN);
-        return;
-      }
-
-      const clamped = Math.max(0, Math.min(100, hmi));
-      if (scoreEl) scoreEl.textContent = hmi.toFixed(1);
-      if (statusEl) statusEl.textContent = hmiBandLabel(hmi);
-      if (knobEl) knobEl.style.left = `${clamped}%`;
-      updateLogoColor(hmi);
+    /* ===== NEW HMI RENDERER: exponential bars, fill to score, red->orange->yellow; remainder grey ===== */
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function lerpColor(c1, c2, t) {
+      return {
+        r: Math.round(lerp(c1.r, c2.r, t)),
+        g: Math.round(lerp(c1.g, c2.g, t)),
+        b: Math.round(lerp(c1.b, c2.b, t)),
+      };
     }
+    function rgbToCss(c) { return `rgb(${c.r}, ${c.g}, ${c.b})`; }
+
+    function gradientRedOrangeYellow(t) {
+      // 0..1 mapped into two segments:
+      // deep red (#6b0f0f) -> orange (#d55a14) -> bright yellow (#f0b90b)
+      const red = { r: 107, g: 15, b: 15 };
+      const orange = { r: 213, g: 90, b: 20 };
+      const yellow = { r: 240, g: 185, b: 11 };
+
+      if (t <= 0.55) {
+        const tt = t / 0.55;
+        return lerpColor(red, orange, tt);
+      } else {
+        const tt = (t - 0.55) / 0.45;
+        return lerpColor(orange, yellow, tt);
+      }
+    }
+
+    function renderHmiBars(hmi) {
+      const barsEl = document.getElementById("hmi-bars");
+      if (!barsEl) return;
+
+      const N = 24;
+      const fillCount = Math.round(clamp01(hmi / 100) * N);
+
+      // exponential profile B/C style (more steep near the end)
+      const exp = 2.25; // “B and C exponential” feel
+
+      // build once per update (simple + robust)
+      barsEl.innerHTML = "";
+
+      for (let i = 1; i <= N; i++) {
+        const col = document.createElement("div");
+        col.className = "hmi-barcol";
+
+        const x = i / N; // 0..1
+        const h = Math.max(0.08, Math.pow(x, exp)); // 0.08..1
+        col.style.height = (h * 100).toFixed(2) + "%";
+
+        if (i <= fillCount) {
+          col.classList.add("active");
+          const c = gradientRedOrangeYellow(x);
+          col.style.background = rgbToCss(c);
+          col.style.opacity = "1";
+        } else {
+          col.style.background = "#2a2c31";
+          col.style.opacity = "0.9";
+        }
+
+        barsEl.appendChild(col);
+      }
+    }
+    /* ===== END NEW HMI RENDERER ===== */
 
     async function fetchHMI() {
       try {
@@ -993,15 +774,18 @@
 
         const hmiRaw = (typeof data.hmi === "number") ? data.hmi : parseFloat(data.hmi);
         const hmi = Number.isNaN(hmiRaw) ? null : hmiRaw;
+        if (hmi === null) throw new Error("Invalid HMI");
 
-        if (hmi === null) {
-          throw new Error("Invalid HMI in JSON");
-        }
+        const hmiEl = document.getElementById("hmi-value");
+        const statusEl = document.getElementById("hmi-status");
 
-        updateHmiVisual(hmi);
+        if (hmiEl) hmiEl.textContent = Math.round(hmi).toString();
+        if (statusEl) statusEl.textContent = hmiBandLabel(hmi);
+
+        // NEW: render exponential bars filled to score
+        renderHmiBars(hmi);
       } catch (err) {
         console.error("HMI error:", err);
-        updateHmiVisual(null);
       }
     }
 
@@ -1021,7 +805,6 @@
       try {
         const resp = await fetch("/dom_history_latest.json", { cache: "no-store" });
         if (!resp.ok) {
-          console.warn("dom_history_latest.json not found or error");
           oracleHistories = {};
           return;
         }
@@ -1044,56 +827,7 @@
       }
     }
 
-    function computeActionForRow(row) {
-      const token = row.token;
-      if (!token) return "–";
-
-      const upToken = String(token).toUpperCase();
-
-      if (upToken === "BTC" || upToken.includes("USD")) {
-        return "–";
-      }
-
-      const domRaw = (typeof row.btc_dom === "number")
-        ? row.btc_dom
-        : parseFloat(row.btc_dom ?? "NaN");
-      if (!Number.isFinite(domRaw)) return "–";
-
-      const rangeStr = row.range || "";
-      const m = rangeStr.match(/(\d+(?:\.\d+)?)\D+(\d+(?:\.\d+)?)%?/);
-      if (!m) return "–";
-
-      const minPct = parseFloat(m[1]);
-      const maxPct = parseFloat(m[2]);
-      if (!Number.isFinite(minPct) || !Number.isFinite(maxPct) || maxPct <= minPct) {
-        return "–";
-      }
-
-      let pos = (domRaw - minPct) / (maxPct - minPct);
-      if (!Number.isFinite(pos)) return "–";
-      pos = Math.max(0, Math.min(1, pos)); 
-
-      if (pos >= 0.4 && pos <= 0.6) {
-        return "Stables";
-      }
-
-      let altPct, btcPct;
-
-      if (pos < 0.4) {
-        const t = pos / 0.4;        
-        btcPct = 100 - Math.round(t * 50);
-        altPct = 100 - btcPct;
-      } else {
-        const t = (pos - 0.6) / 0.4; 
-        altPct = 50 + Math.round(t * 50);
-        btcPct = 100 - altPct;
-      }
-
-      altPct = Math.max(0, Math.min(100, Math.round(altPct)));
-      btcPct = 100 - altPct;
-
-      return `${altPct}/${btcPct}`;  
-    }
+    // ---- Potential ROI helpers ----
 
     function parseRangeToLowHigh(rangeStr) {
       if (!rangeStr) return null;
@@ -1129,26 +863,63 @@
       if (!(domTarget > 0 && domTarget < 1)) return null;
 
       const sTarget = (1.0 - domTarget) / domTarget * btcMc;
-
       const supplyEst = altMc / priceNow;
       if (!(supplyEst > 0)) return null;
 
       const targetPrice = sTarget / supplyEst;
       if (!(targetPrice > 0)) return null;
 
-      const roiFrac = targetPrice / priceNow - 1.0;
-      return roiFrac;
+      return (targetPrice / priceNow) - 1.0;
+    }
+
+    function computeActionForRow(row) {
+      const token = row.token;
+      if (!token) return "–";
+      const upToken = String(token).toUpperCase();
+
+      if (upToken === "BTC" || upToken.includes("USD")) return "–";
+
+      const domRaw = (typeof row.btc_dom === "number")
+        ? row.btc_dom
+        : parseFloat(row.btc_dom ?? "NaN");
+      if (!Number.isFinite(domRaw)) return "–";
+
+      const rangeStr = row.range || "";
+      const m = rangeStr.match(/(\d+(?:\.\d+)?)\D+(\d+(?:\.\d+)?)%?/);
+      if (!m) return "–";
+
+      const minPct = parseFloat(m[1]);
+      const maxPct = parseFloat(m[2]);
+      if (!Number.isFinite(minPct) || !Number.isFinite(maxPct) || maxPct <= minPct) return "–";
+
+      let pos = (domRaw - minPct) / (maxPct - minPct);
+      if (!Number.isFinite(pos)) return "–";
+      pos = Math.max(0, Math.min(1, pos));
+
+      if (pos >= 0.4 && pos <= 0.6) return "Stables";
+
+      let altPct, btcPct;
+      if (pos < 0.4) {
+        const t = pos / 0.4;
+        btcPct = 100 - Math.round(t * 50);
+        altPct = 100 - btcPct;
+      } else {
+        const t = (pos - 0.6) / 0.4;
+        altPct = 50 + Math.round(t * 50);
+        btcPct = 100 - altPct;
+      }
+
+      altPct = Math.max(0, Math.min(100, Math.round(altPct)));
+      btcPct = 100 - altPct;
+      return `${altPct}/${btcPct}`;
     }
 
     function formatRangeTwoDecimals(rangeStr) {
       if (!rangeStr) return "–";
-
-      const m = rangeStr.match(/(\d+(?:\.\d+)?)[^\d]+(\d+(?:\.\d+)?)/);
+      const m = String(rangeStr).match(/(\d+(?:\.\d+)?)[^\d]+(\d+(?:\.\d+)?)/);
       if (!m) return rangeStr;
-
       const low = parseFloat(m[1]);
       const high = parseFloat(m[2]);
-
       return low.toFixed(2) + "% – " + high.toFixed(2) + "%";
     }
 
@@ -1159,9 +930,7 @@
         const data = await resp.json();
 
         const metaEl = document.getElementById("meta-date");
-        if (metaEl && data && data.timestamp) {
-          metaEl.textContent = formatDateTime(data.timestamp);
-        }
+        if (metaEl && data && data.timestamp) metaEl.textContent = formatDateTime(data.timestamp);
 
         const tbody = document.getElementById("prices-tbody");
         tbody.innerHTML = "";
@@ -1184,64 +953,24 @@
 
           const tdToken = document.createElement("td");
           tdToken.className = "token-col";
-
-          const tokenWrap = document.createElement("div");
-          tokenWrap.className = "token-cell";
-
-          const dot = document.createElement("span");
-          dot.className = "token-dot token-dot-neutral";
-
-          let change24 = null;
-          if (typeof row.change_24h_pct === "number") {
-            change24 = row.change_24h_pct;
-          } else if (typeof row.change_24h === "number") {
-            change24 = row.change_24h;
-          } else if (typeof row.pct_change_24h === "number") {
-            change24 = row.pct_change_24h;
-          }
-
-          if (change24 !== null && !Number.isNaN(change24)) {
-            if (change24 > 0) {
-              dot.className = "token-dot token-dot-positive";
-            } else if (change24 < 0) {
-              dot.className = "token-dot token-dot-negative";
-            }
-          }
-
-          const tokenLabel = document.createElement("span");
-          tokenLabel.textContent = row.token || "";
-
-          tokenWrap.appendChild(dot);
-          tokenWrap.appendChild(tokenLabel);
-          tdToken.appendChild(tokenWrap);
+          tdToken.textContent = row.token || "";
           tr.appendChild(tdToken);
 
           const tdPrice = document.createElement("td");
           tdPrice.className = "center";
           const priceVal = typeof row.price === "number" ? row.price : parseFloat(row.price || "0");
           if (!Number.isNaN(priceVal) && priceVal > 0) {
-            if (priceVal >= 1000) {
-              tdPrice.textContent = "$" + Math.round(priceVal).toLocaleString();
-            } else if (priceVal >= 1) {
-              tdPrice.textContent = "$" + priceVal.toFixed(2);
-            } else if (priceVal >= 0.01) {
-              tdPrice.textContent = "$" + priceVal.toFixed(3);
-            } else {
-              tdPrice.textContent = "$" + priceVal.toFixed(6);
-            }
-          } else {
-            tdPrice.textContent = "–";
-          }
+            if (priceVal >= 1000) tdPrice.textContent = "$" + Math.round(priceVal).toLocaleString();
+            else if (priceVal >= 1) tdPrice.textContent = "$" + priceVal.toFixed(2);
+            else if (priceVal >= 0.01) tdPrice.textContent = "$" + priceVal.toFixed(3);
+            else tdPrice.textContent = "$" + priceVal.toFixed(6);
+          } else tdPrice.textContent = "–";
           tr.appendChild(tdPrice);
 
           const tdDom = document.createElement("td");
           tdDom.className = "center";
-          const dom = typeof row.btc_dom === "number" ? row.btc_dom : null;
-          if (dom === null || Number.isNaN(dom)) {
-            tdDom.textContent = "–";
-          } else {
-            tdDom.textContent = dom.toFixed(1) + "%";
-          }
+          const dom = (typeof row.btc_dom === "number") ? row.btc_dom : parseFloat(row.btc_dom ?? "NaN");
+          tdDom.textContent = Number.isFinite(dom) ? dom.toFixed(1) + "%" : "–";
           tr.appendChild(tdDom);
 
           const tdRange = document.createElement("td");
@@ -1257,9 +986,8 @@
           const tdRoi = document.createElement("td");
           tdRoi.className = "center";
           const roiFrac = computePotentialRoi(row, btcMc);
-          if (roiFrac == null || Number.isNaN(roiFrac)) {
-            tdRoi.textContent = "–";
-          } else {
+          if (roiFrac == null || Number.isNaN(roiFrac)) tdRoi.textContent = "–";
+          else {
             const pct = roiFrac * 100;
             const sign = pct > 0 ? "+" : "";
             tdRoi.textContent = sign + pct.toFixed(1) + "%";
@@ -1273,155 +1001,105 @@
         updateOracle();
       } catch (err) {
         console.error("Prices error:", err);
-        const tbody = document.getElementById("prices-tbody");
-        tbody.innerHTML = "";
       }
     }
 
-    function setActionFromSig(sig) {
-      const modeEl = document.getElementById("action-mode");
-      const tokenEl = document.getElementById("action-token");
-      const lineEl = document.getElementById("action-line");
-
-      if (!modeEl || !tokenEl || !lineEl || !sig) return;
-
-      const pos = sig.position || {};
-      const type = (pos.type || "").toUpperCase();
-      const token = (pos.token || "NONE").toUpperCase();
-      const actionRaw = (sig.action || "BUY").toUpperCase();
-
-      const entryPrice = (typeof pos.entry_price === "number")
-        ? pos.entry_price
-        : parseFloat(pos.entry_price || "NaN");
-
-      const targetPrice = (typeof pos.target_price === "number")
-        ? pos.target_price
-        : parseFloat(pos.target_price || "NaN");
-
-      const equityUsd = (typeof sig.equity_usd === "number")
-        ? sig.equity_usd
-        : parseFloat(sig.equity_usd || "NaN");
-
-      function fmtUsd(x) {
-        if (x == null || Number.isNaN(x)) return "--";
-        return x.toFixed(2);
-      }
-
-      let modeLabel = "Buy";
-      let modeColor = "var(--accent-green)";
-      let bigToken = "$" + token;
-      let lineText = "";
-
-      if (type === "STABLES") {
-        modeLabel = "Stable up";
-        modeColor = "#ffd000";
-        bigToken = "STABLES";
-        lineText = "Equity: $" + fmtUsd(equityUsd);
-      } else {
-        if (actionRaw === "SELL") {
-          modeLabel = "Sell";
-          modeColor = "var(--accent-red)";
-        } else if (actionRaw === "BUY" || actionRaw === "HOLD") {
-          modeLabel = "Buy";
-          modeColor = "var(--accent-green)";
-        }
-        lineText = "Entry: $" + fmtUsd(entryPrice) + " | Target: $" + fmtUsd(targetPrice);
-      }
-
-      modeEl.textContent = modeLabel;
-      modeEl.style.color = modeColor;
-      tokenEl.textContent = bigToken;
-      lineEl.textContent = lineText;
-    }
-
-    function updateAgentsFromData(kc1Data, sig) {
-      const btcBalEl = document.getElementById("agents-btc-balance");
-      const btcRoiEl = document.getElementById("agents-btc-roi");
-      const kc1BalEl = document.getElementById("agents-kc1-balance");
-      const kc1RoiEl = document.getElementById("agents-kc1-roi");
-      const kc2BalEl = document.getElementById("agents-kc2-balance");
-      const kc2RoiEl = document.getElementById("agents-kc2-roi");
-
-      function fmtPct(x) {
-        if (x == null || Number.isNaN(x)) return "--.--%";
-        const pct = x * 100;
-        const sign = pct > 0 ? "+" : "";
-        return sign + pct.toFixed(1) + "%";
-      }
-
-      function fmtUsd(x) {
-        if (x == null || Number.isNaN(x)) return "$--.--";
-        return "$" + x.toFixed(2);
-      }
-
-      if (kc1Data) {
-        const base = typeof kc1Data.base_balance_usd === "number"
-          ? kc1Data.base_balance_usd
-          : parseFloat(kc1Data.base_balance_usd || "0");
-
-        const portVal = typeof kc1Data.portfolio_value === "number"
-          ? kc1Data.portfolio_value
-          : parseFloat(kc1Data.portfolio_value || "0");
-
-        let algoRoi = null;
-        if (base && base > 0 && !Number.isNaN(portVal)) {
-          algoRoi = (portVal / base) - 1;
-        }
-
-        if (kc1BalEl) kc1BalEl.textContent = fmtUsd(portVal);
-        if (kc1RoiEl) kc1RoiEl.textContent = fmtPct(algoRoi);
-      }
-
-      if (sig && sig.benchmarks && sig.benchmarks.BTC) {
-        const b = sig.benchmarks.BTC;
-        const roiFrac = typeof b.roi_frac === "number"
-          ? b.roi_frac
-          : parseFloat(b.roi_frac || "NaN");
-        const balance = 100 * (1 + (roiFrac || 0));
-
-        if (btcBalEl) btcBalEl.textContent = fmtUsd(balance);
-        if (btcRoiEl) btcRoiEl.textContent = fmtPct(roiFrac);
-      }
-
-      if (sig) {
-        const equityUsd = typeof sig.equity_usd === "number"
-          ? sig.equity_usd
-          : parseFloat(sig.equity_usd || "NaN");
-
-        const roiFrac = typeof sig.roi_frac === "number"
-          ? sig.roi_frac
-          : parseFloat(sig.roi_frac || "NaN");
-
-        if (kc2BalEl) kc2BalEl.textContent = fmtUsd(equityUsd);
-        if (kc2RoiEl) kc2RoiEl.textContent = fmtPct(roiFrac);
-      }
-    }
-
-    async function fetchKnifecatcher() {
+    async function fetchAgentsAndAction() {
+      // KC1 + BTC buy & hold from knifecatcher_latest.json
+      // KC2 + recommended trade from dom_signals_hourly.json
       try {
         const resp = await fetch("/knifecatcher_latest.json", { cache: "no-store" });
         if (!resp.ok) throw new Error("knifecatcher fetch failed");
-        const kc1Data = await resp.json();
+        const data = await resp.json();
 
-        try {
-          const resp2 = await fetch("/dom_signals_hourly.json", { cache: "no-store" });
-          if (!resp2.ok) throw new Error("dom signals fetch failed");
-          const sig = await resp2.json();
+        const base = typeof data.base_balance_usd === "number" ? data.base_balance_usd : parseFloat(data.base_balance_usd || "0");
+        const portVal = typeof data.portfolio_value === "number" ? data.portfolio_value : parseFloat(data.portfolio_value || "0");
+        const btcVal = typeof data.btc_value === "number" ? data.btc_value : parseFloat(data.btc_value || "0");
 
-          if (sig && sig.position) {
-            setActionFromSig(sig);
-          }
+        const kc1BalEl = document.getElementById("agent-kc1-balance");
+        const kc1RoiEl = document.getElementById("agent-kc1-roi");
+        const btcBalEl = document.getElementById("agent-btc-balance");
+        const btcRoiEl = document.getElementById("agent-btc-roi");
 
-          updateAgentsFromData(kc1Data, sig);
-        } catch (err2) {
-          console.error("DOM signals error:", err2);
-          updateAgentsFromData(kc1Data, null);
+        function fmtUsd(x) { return (Number.isFinite(x) ? "$" + x.toFixed(2) : "$--"); }
+        function fmtPct(x) {
+          if (!Number.isFinite(x)) return "--%";
+          const pct = x * 100;
+          const sign = pct > 0 ? "+" : "";
+          return sign + pct.toFixed(1) + "%";
         }
-      } catch (err) {
-        console.error("Knifecatcher error:", err);
+
+        if (Number.isFinite(portVal) && kc1BalEl) kc1BalEl.textContent = fmtUsd(portVal);
+        if (base > 0 && kc1RoiEl) kc1RoiEl.textContent = fmtPct((portVal / base) - 1);
+
+        if (base > 0 && btcRoiEl) btcRoiEl.textContent = fmtPct((btcVal / base) - 1);
+        // “Assume $100 originally” request: show BTC buy&hold balance as 100*(1+roi)
+        if (base > 0 && btcBalEl) {
+          const roi = (btcVal / base) - 1;
+          btcBalEl.textContent = fmtUsd(100 * (1 + roi));
+        }
+        // Similarly, KC1 balance as $100*(1+roi)
+        if (base > 0 && kc1BalEl) {
+          const roi = (portVal / base) - 1;
+          kc1BalEl.textContent = fmtUsd(100 * (1 + roi));
+        }
+      } catch (e) {
+        console.error("KC1/BTC agents error:", e);
+      }
+
+      try {
+        const resp2 = await fetch("/dom_signals_hourly.json", { cache: "no-store" });
+        if (!resp2.ok) throw new Error("dom_signals fetch failed");
+        const sig = await resp2.json();
+
+        const kc2BalEl = document.getElementById("agent-kc2-balance");
+        const kc2RoiEl = document.getElementById("agent-kc2-roi");
+
+        const actionKindEl = document.getElementById("action-kind");
+        const actionTokenEl = document.getElementById("action-token");
+        const actionSubEl = document.getElementById("action-sub");
+
+        function fmtUsd(x) { return (Number.isFinite(x) ? "$" + x.toFixed(2) : "$--"); }
+        function fmtPct(x) {
+          if (!Number.isFinite(x)) return "--%";
+          const pct = x * 100;
+          const sign = pct > 0 ? "+" : "";
+          return sign + pct.toFixed(1) + "%";
+        }
+
+        const equityUsd = (typeof sig.equity_usd === "number") ? sig.equity_usd : parseFloat(sig.equity_usd || "NaN");
+        const roiFrac = (typeof sig.roi_frac === "number") ? sig.roi_frac : parseFloat(sig.roi_frac || "NaN");
+
+        if (kc2BalEl && Number.isFinite(equityUsd)) {
+          // “Assume $100 originally”: use ROI to compute balance
+          if (Number.isFinite(roiFrac)) kc2BalEl.textContent = fmtUsd(100 * (1 + roiFrac));
+          else kc2BalEl.textContent = fmtUsd(equityUsd);
+        }
+        if (kc2RoiEl) kc2RoiEl.textContent = fmtPct(roiFrac);
+
+        // Action box from KC2 position (always “A always green” per your latest instruction set)
+        const pos = sig && sig.position ? sig.position : null;
+        if (!pos) return;
+
+        const token = (pos.token || "STABLES").toString().toUpperCase();
+        const entry = (typeof pos.entry_price === "number") ? pos.entry_price : parseFloat(pos.entry_price || "NaN");
+        const target = (typeof pos.target_price === "number") ? pos.target_price : parseFloat(pos.target_price || "NaN");
+
+        // If in stables, show STABLES; otherwise show token.
+        if (actionKindEl) actionKindEl.textContent = "BUY";
+        if (actionTokenEl) actionTokenEl.textContent = token === "NONE" ? "STABLES" : "$" + token;
+
+        let sub = "Entry: -- | Target: --";
+        if (Number.isFinite(entry) && Number.isFinite(target)) {
+          sub = `Entry: $${entry.toFixed(2)} | Target: $${target.toFixed(2)}`;
+        }
+        if (actionSubEl) actionSubEl.textContent = sub;
+      } catch (e2) {
+        console.error("KC2/action error:", e2);
       }
     }
 
+    // -------- Oracle helpers --------
     function formatTokenLabel(token) {
       if (token === "ALTS") return "Alts";
       const lower = token.toLowerCase();
@@ -1462,45 +1140,28 @@
     }
 
     function computeOracleDomAndRange(xTokens, yTokens) {
-      if (!Array.isArray(xTokens) || !Array.isArray(yTokens)) {
-        return { ok: false, reason: "Missing selections" };
-      }
-      if (xTokens.length === 0 || yTokens.length === 0) {
-        return { ok: false, reason: "Select both sides" };
-      }
+      if (!Array.isArray(xTokens) || !Array.isArray(yTokens)) return { ok: false, reason: "Missing selections" };
+      if (xTokens.length === 0 || yTokens.length === 0) return { ok: false, reason: "Select both sides" };
 
-      const expandSide = (tokens) => {
-        if (tokens.includes("ALTS")) {
-          return ORACLE_TOKENS.filter(t => t !== "BTC");
-        }
-        return tokens;
-      };
-
+      const expandSide = (tokens) => tokens.includes("ALTS") ? ORACLE_TOKENS.filter(t => t !== "BTC") : tokens;
       const xSet = expandSide(xTokens);
       const ySet = expandSide(yTokens);
 
       const fullX = new Set(xSet);
       const fullY = new Set(ySet);
 
-      if (fullX.size === 0 || fullY.size === 0) {
-        return { ok: false, reason: "Both X and Y must have at least one token" };
-      }
+      if (fullX.size === 0 || fullY.size === 0) return { ok: false, reason: "Both sides need tokens" };
 
       const mcX = Array.from(fullX).reduce((acc, t) => acc + getLiveMC(t), 0);
       const mcY = Array.from(fullY).reduce((acc, t) => acc + getLiveMC(t), 0);
-
       const totalNow = mcX + mcY;
-      if (totalNow <= 0) {
-        return { ok: false, reason: "No market cap data" };
-      }
+      if (totalNow <= 0) return { ok: false, reason: "No market cap data" };
 
       const domNow = (mcX / totalNow) * 100;
 
       const key = `${Array.from(fullX).sort().join("+")}__${Array.from(fullY).sort().join("+")}`;
       const hist = getHistorySeries(key);
-      let domMin = null;
-      let domMax = null;
-      let days = 0;
+      let domMin = null, domMax = null, days = 0;
 
       if (hist && Array.isArray(hist.values) && hist.values.length > 0) {
         days = hist.values.length;
@@ -1509,28 +1170,11 @@
       } else {
         const xIsBTCOnly = (xTokens.length === 1 && xTokens[0] === "BTC");
         const yIsAltsOnly = (yTokens.length === 1 && yTokens[0] === "ALTS");
-
         if (xIsBTCOnly && yIsAltsOnly && domBandsGlobal) {
           const mn = parseFloat(domBandsGlobal.min_pct);
           const mx = parseFloat(domBandsGlobal.max_pct);
           if (!Number.isNaN(mn) && !Number.isNaN(mx)) {
-            domMin = mn;
-            domMax = mx;
-            days = domBandsGlobal.days || 0;
-          }
-        } else if (xIsBTCOnly && yTokens.length === 1 && ORACLE_TOKENS.includes(yTokens[0])) {
-          const token = yTokens[0];
-          const row = pricesRowsGlobal.find(r => r.token === token);
-          if (row && row.range) {
-            const m = String(row.range).match(/(\d+)\D+(\d+)%/);
-            if (m) {
-              const mn = parseFloat(m[1]);
-              const mx = parseFloat(m[2]);
-              if (!Number.isNaN(mn) && !Number.isNaN(mx)) {
-                domMin = mn;
-                domMax = mx;
-              }
-            }
+            domMin = mn; domMax = mx; days = domBandsGlobal.days || 0;
           }
         }
       }
@@ -1573,8 +1217,6 @@
       yMenu.innerHTML = "";
 
       xOrder.forEach(tok => {
-        if (tok === "ALTS") return;
-
         const div = document.createElement("div");
         div.className = "oracle-option";
         div.dataset.token = tok;
@@ -1594,30 +1236,16 @@
         div.appendChild(box);
         div.appendChild(label);
 
-        if (oracleSelectedX.includes(tok)) {
-          div.classList.add("selected");
-        }
+        if (oracleSelectedX.includes(tok)) div.classList.add("selected");
 
         div.addEventListener("click", (e) => {
           e.stopPropagation();
           if (tok === "BTC") {
-            if (oracleSelectedX.includes("BTC")) {
-              oracleSelectedX = oracleSelectedX.filter(t => t !== "BTC");
-            } else {
-              oracleSelectedX = ["BTC"];
-            }
+            oracleSelectedX = oracleSelectedX.includes("BTC") ? oracleSelectedX.filter(t => t !== "BTC") : ["BTC"];
           } else {
             oracleSelectedX = oracleSelectedX.filter(t => t !== "BTC");
-            if (oracleSelectedX.includes(tok)) {
-              oracleSelectedX = oracleSelectedX.filter(t => t !== tok);
-            } else {
-              oracleSelectedX = [...oracleSelectedX, tok];
-            }
+            oracleSelectedX = oracleSelectedX.includes(tok) ? oracleSelectedX.filter(t => t !== tok) : [...oracleSelectedX, tok];
           }
-          Array.from(xMenu.querySelectorAll(".oracle-option")).forEach(opt => {
-            const t = opt.dataset.token;
-            opt.classList.toggle("selected", oracleSelectedX.includes(t));
-          });
           xLabel.textContent = formatTokenSetLabel(oracleSelectedX);
           buildOracleMenus();
           updateOracle();
@@ -1632,9 +1260,6 @@
       xClear.addEventListener("click", (e) => {
         e.stopPropagation();
         oracleSelectedX = [];
-        Array.from(xMenu.querySelectorAll(".oracle-option")).forEach(opt => {
-          opt.classList.remove("selected");
-        });
         xLabel.textContent = "Select";
         buildOracleMenus();
         updateOracle();
@@ -1663,9 +1288,7 @@
         div.appendChild(box);
         div.appendChild(label);
 
-        if (oracleSelectedY.includes(tok)) {
-          div.classList.add("selected");
-        }
+        if (oracleSelectedY.includes(tok)) div.classList.add("selected");
 
         div.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -1673,19 +1296,8 @@
             oracleSelectedY = ["ALTS"];
           } else {
             oracleSelectedY = oracleSelectedY.filter(t => t !== "ALTS");
-            if (oracleSelectedY.includes(tok)) {
-              oracleSelectedY = oracleSelectedY.filter(t => t !== tok);
-            } else {
-              oracleSelectedY = [...oracleSelectedY, tok];
-            }
-            if (oracleSelectedY.length === 0) {
-              oracleSelectedY = [];
-            }
+            oracleSelectedY = oracleSelectedY.includes(tok) ? oracleSelectedY.filter(t => t !== tok) : [...oracleSelectedY, tok];
           }
-          Array.from(yMenu.querySelectorAll(".oracle-option")).forEach(opt => {
-            const t = opt.dataset.token;
-            opt.classList.toggle("selected", oracleSelectedY.includes(t));
-          });
           yLabel.textContent = formatTokenSetLabel(oracleSelectedY);
           buildOracleMenus();
           updateOracle();
@@ -1700,9 +1312,6 @@
       yClear.addEventListener("click", (e) => {
         e.stopPropagation();
         oracleSelectedY = [];
-        Array.from(yMenu.querySelectorAll(".oracle-option")).forEach(opt => {
-          opt.classList.remove("selected");
-        });
         yLabel.textContent = "Select";
         buildOracleMenus();
         updateOracle();
@@ -1712,7 +1321,7 @@
       xLabel.textContent = formatTokenSetLabel(oracleSelectedX);
       yLabel.textContent = formatTokenSetLabel(oracleSelectedY);
 
-      function closeAllDropdowns() {
+      function closeAll() {
         xMenu.classList.remove("open");
         yMenu.classList.remove("open");
       }
@@ -1720,22 +1329,19 @@
       xPill.onclick = (e) => {
         e.stopPropagation();
         const isOpen = xMenu.classList.contains("open");
-        closeAllDropdowns();
+        closeAll();
         if (!isOpen) xMenu.classList.add("open");
       };
       yPill.onclick = (e) => {
         e.stopPropagation();
         const isOpen = yMenu.classList.contains("open");
-        closeAllDropdowns();
+        closeAll();
         if (!isOpen) yMenu.classList.add("open");
       };
 
+      document.addEventListener("click", closeAll);
       xMenu.addEventListener("click", (e) => e.stopPropagation());
       yMenu.addEventListener("click", (e) => e.stopPropagation());
-
-      document.addEventListener("click", () => {
-        closeAllDropdowns();
-      });
     }
 
     async function updateOracle() {
@@ -1747,7 +1353,6 @@
       if (!mainEl || !subEl || !rangeEl || !errEl) return;
 
       const res = computeOracleDomAndRange(oracleSelectedX, oracleSelectedY);
-
       if (!res.ok) {
         mainEl.innerHTML = '<span class="dom-value">--</span><span class="dom-label">Select X and Y</span>';
         subEl.innerHTML = 'Market caps: <span>–</span>';
@@ -1757,22 +1362,14 @@
       }
 
       errEl.textContent = "";
+      const domStr = Number.isFinite(res.domNow) ? res.domNow.toFixed(1) : "--";
+      mainEl.innerHTML = `<span class="dom-value">${domStr}</span><span class="dom-label">${res.labelX} vs ${res.labelY}</span>`;
 
-      const domVal = res.domNow;
-      const domStr = domVal != null && !Number.isNaN(domVal) ? domVal.toFixed(1) : "--";
-
-      const label = `${res.labelX} vs ${res.labelY}`;
-      mainEl.innerHTML = `<span class="dom-value">${domStr}</span><span class="dom-label">${label}</span>`;
-
-      const mcXfmt = formatMC(res.mcX || 0);
-      const mcYfmt = formatMC(res.mcY || 0);
-      subEl.innerHTML = `Market caps: <span>${mcXfmt} vs ${mcYfmt}</span>`;
+      subEl.innerHTML = `Market caps: <span>${formatMC(res.mcX || 0)} vs ${formatMC(res.mcY || 0)}</span>`;
 
       let rangeSpan = "–";
       if (res.domMin != null && res.domMax != null && res.domMax > res.domMin) {
-        const mn = Math.round(res.domMin);
-        const mx = Math.round(res.domMax);
-        rangeSpan = `${mn}%–${mx}%`;
+        rangeSpan = `${Math.round(res.domMin)}%–${Math.round(res.domMax)}%`;
       }
       rangeEl.innerHTML = `Range: <span>${rangeSpan}</span>`;
     }
@@ -1783,7 +1380,7 @@
         .then(fetchOracleHistory)
         .then(fetchDomBands)
         .then(fetchPrices)
-        .then(fetchKnifecatcher);
+        .then(fetchAgentsAndAction);
     })();
   </script>
 </body>
