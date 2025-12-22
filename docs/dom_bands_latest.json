@@ -1,11 +1,11 @@
 {
-  "timestamp": "2025-12-21T17:15:08.561189Z",
-  "btc_pct": 75.2,
-  "alt_pct": 24.8,
+  "timestamp": "2025-12-22T05:15:07.004426Z",
+  "btc_pct": 75.0,
+  "alt_pct": 25.0,
   "min_pct": 66.0,
   "max_pct": 82.0,
   "days": 730,
   "btc_mc_fmt": "$1.8T",
-  "alt_mc_fmt": "$584B",
+  "alt_mc_fmt": "$591B",
   "action": "Stable up"
 }
