@@ -1,11 +1,11 @@
 {
-  "timestamp": "2025-12-22T17:15:08.498343Z",
-  "hmi": 61.1,
+  "timestamp": "2025-12-23T05:15:06.317485Z",
+  "hmi": 60.7,
   "hmi_band": "It's digital gold",
   "weights": [
     {
       "asset": "BTC",
-      "weight": 0.1685
+      "weight": 0.1713
     },
     {
       "asset": "ETH",
@@ -13,27 +13,27 @@
     },
     {
       "asset": "BNB",
-      "weight": 0.1016
+      "weight": 0.1002
     },
     {
       "asset": "SOL",
-      "weight": 0.1158
+      "weight": 0.115
     },
     {
       "asset": "DOGE",
-      "weight": 0.135
+      "weight": 0.1349
     },
     {
       "asset": "TON",
-      "weight": 0.1428
+      "weight": 0.1426
     },
     {
       "asset": "SUI",
-      "weight": 0.0893
+      "weight": 0.0904
     },
     {
       "asset": "UNI",
-      "weight": 0.1042
+      "weight": 0.1027
     },
     {
       "asset": "STABLES",
