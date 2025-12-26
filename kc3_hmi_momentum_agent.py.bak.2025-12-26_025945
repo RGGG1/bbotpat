@@ -1,0 +1,395 @@
+#!/usr/bin/env python3
+import json
+import time
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional, Dict, Any, List, Tuple
+
+WEBROOT = Path("/var/www/bbotpat_live")
+WEBROOT.mkdir(parents=True, exist_ok=True)
+
+HMI_PATH = WEBROOT / "hmi_latest.json"
+PRICES_PATH = WEBROOT / "prices_latest.json"
+
+KC3_LATEST_OUT = WEBROOT / "kc3_latest.json"
+KC3_TRADES_OUT = WEBROOT / "kc3_trades.json"
+
+STATE_DIR = Path("/root/bbotpat_live/data")
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+STATE_PATH = STATE_DIR / "kc3_state.json"
+
+# Match your site token universe; exclude stables and BTC from selection.
+STABLE_HINTS = ("USD",)
+
+THRESHOLD = 0.1  # you confirmed: 0.1, not 0.99
+START_EQUITY = 100.0
+
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def read_json(path: Path) -> Optional[dict]:
+    try:
+        if not path.exists():
+            return None
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def write_json(path: Path, obj: dict):
+    path.write_text(json.dumps(obj, indent=2))
+
+
+def parse_range_to_low_high(range_str: str) -> Optional[Tuple[float, float]]:
+    if not range_str:
+        return None
+    s = str(range_str)
+    # handles "73.1–90.1%" or "73.1-90.1%" etc.
+    s = s.replace("%", "").replace("—", "-").replace("–", "-")
+    parts = [p.strip() for p in s.split("-") if p.strip()]
+    if len(parts) < 2:
+        return None
+    try:
+        low = float(parts[0])
+        high = float(parts[1])
+        if high > low:
+            return low, high
+    except Exception:
+        return None
+    return None
+
+
+def compute_neutral_high(low: float, high: float) -> float:
+    # same as your frontend: neutralHigh = low + 0.60*(high-low)
+    return low + 0.60 * (high - low)
+
+
+def compute_potential_roi(row: Dict[str, Any], btc_mc: float) -> Optional[float]:
+    """
+    Mirrors the logic you already have in the frontend:
+    - Requires range, price, mc, btc_mc
+    - Uses neutralHigh as dominance target to derive target price
+    """
+    token = (row.get("token") or "").upper()
+    if not token or token == "BTC" or any(x in token for x in STABLE_HINTS):
+        return None
+
+    rng = parse_range_to_low_high(row.get("range") or "")
+    if not rng:
+        return None
+    low, high = rng
+
+    price_now = row.get("price")
+    mc_now = row.get("mc")
+    try:
+        price_now = float(price_now)
+        mc_now = float(mc_now)
+        btc_mc = float(btc_mc)
+    except Exception:
+        return None
+
+    if price_now <= 0 or mc_now <= 0 or btc_mc <= 0:
+        return None
+
+    neutral_high = compute_neutral_high(low, high)
+    dom_target = neutral_high / 100.0
+    if not (0 < dom_target < 1):
+        return None
+
+    # dom = B / (B+S)  ->  S = (1-dom)/dom * B
+    s_target = (1.0 - dom_target) / dom_target * btc_mc
+
+    supply_est = mc_now / price_now
+    if supply_est <= 0:
+        return None
+
+    target_price = s_target / supply_est
+    if target_price <= 0:
+        return None
+
+    roi_frac = target_price / price_now - 1.0
+    return roi_frac
+
+
+@dataclass
+class Position:
+    side: str  # "LONG" or "SHORT"
+    token: str
+    qty: float
+    entry_price: float
+    opened_at: str
+
+
+@dataclass
+class State:
+    equity_usd: float
+    last_hmi: Optional[float]
+    pos: Optional[Position]
+
+
+def load_state() -> State:
+    js = read_json(STATE_PATH)
+    if not js:
+        return State(equity_usd=START_EQUITY, last_hmi=None, pos=None)
+
+    pos = None
+    if js.get("pos"):
+        p = js["pos"]
+        pos = Position(
+            side=p["side"],
+            token=p["token"],
+            qty=float(p["qty"]),
+            entry_price=float(p["entry_price"]),
+            opened_at=p["opened_at"],
+        )
+
+    return State(
+        equity_usd=float(js.get("equity_usd", START_EQUITY)),
+        last_hmi=js.get("last_hmi", None),
+        pos=pos,
+    )
+
+
+def save_state(st: State):
+    obj = {
+        "equity_usd": st.equity_usd,
+        "last_hmi": st.last_hmi,
+        "pos": asdict(st.pos) if st.pos else None,
+        "saved_at": utc_now_iso(),
+    }
+    write_json(STATE_PATH, obj)
+
+
+def load_trades() -> List[dict]:
+    js = read_json(KC3_TRADES_OUT)
+    if isinstance(js, list):
+        return js
+    return []
+
+
+def append_trade(trades: List[dict], trade: dict):
+    trades.append(trade)
+    KC3_TRADES_OUT.write_text(json.dumps(trades, indent=2))
+
+
+def mark_to_market_equity(st: State, price_map: Dict[str, float]) -> float:
+    """
+    Full-balance paper position:
+    - LONG: equity = qty * current_price
+    - SHORT: equity = equity_at_entry + (entry - current) * qty
+      We model short as: you sold borrowed qty at entry, proceeds held in cash.
+      So equity changes by PnL = (entry - current)*qty.
+    """
+    if not st.pos:
+        return st.equity_usd
+
+    token = st.pos.token
+    cur = price_map.get(token)
+    if not cur or cur <= 0:
+        return st.equity_usd
+
+    if st.pos.side == "LONG":
+        return st.pos.qty * cur
+
+    # SHORT
+    pnl = (st.pos.entry_price - cur) * st.pos.qty
+    return st.equity_usd + pnl
+
+
+def close_position(st: State, price_map: Dict[str, float]) -> Optional[dict]:
+    if not st.pos:
+        return None
+
+    token = st.pos.token
+    cur = price_map.get(token)
+    if not cur or cur <= 0:
+        return None
+
+    # Realize equity -> becomes cash equity
+    if st.pos.side == "LONG":
+        new_equity = st.pos.qty * cur
+        pnl = new_equity - st.equity_usd
+    else:
+        pnl = (st.pos.entry_price - cur) * st.pos.qty
+        new_equity = st.equity_usd + pnl
+
+    trade = {
+        "ts": utc_now_iso(),
+        "event": "CLOSE",
+        "side": st.pos.side,
+        "token": token,
+        "entry_price": st.pos.entry_price,
+        "exit_price": cur,
+        "qty": st.pos.qty,
+        "pnl_usd": pnl,
+        "equity_usd": new_equity,
+        "opened_at": st.pos.opened_at,
+    }
+
+    st.equity_usd = new_equity
+    st.pos = None
+    return trade
+
+
+def open_position(st: State, side: str, token: str, price_map: Dict[str, float]) -> Optional[dict]:
+    cur = price_map.get(token)
+    if not cur or cur <= 0:
+        return None
+
+    # Use full equity as notional
+    qty = st.equity_usd / cur
+
+    st.pos = Position(
+        side=side,
+        token=token,
+        qty=qty,
+        entry_price=cur,
+        opened_at=utc_now_iso(),
+    )
+
+    trade = {
+        "ts": utc_now_iso(),
+        "event": "OPEN",
+        "side": side,
+        "token": token,
+        "entry_price": cur,
+        "qty": qty,
+        "equity_usd": st.equity_usd,
+    }
+    return trade
+
+
+def choose_best_token_by_potro(rows: List[dict]) -> Optional[str]:
+    btc_mc = 0.0
+    for r in rows:
+        if (r.get("token") or "").upper() == "BTC":
+            try:
+                btc_mc = float(r.get("mc") or 0.0)
+            except Exception:
+                btc_mc = 0.0
+            break
+    if btc_mc <= 0:
+        return None
+
+    best_tok = None
+    best_roi = None
+    for r in rows:
+        tok = (r.get("token") or "").upper()
+        if not tok or tok == "BTC" or any(x in tok for x in STABLE_HINTS):
+            continue
+        roi = compute_potential_roi(r, btc_mc)
+        if roi is None:
+            continue
+        if best_roi is None or roi > best_roi:
+            best_roi = roi
+            best_tok = tok
+
+    return best_tok
+
+
+def main_loop():
+    st = load_state()
+    trades = load_trades()
+
+    while True:
+        hmi_js = read_json(HMI_PATH)
+        prices_js = read_json(PRICES_PATH)
+
+        if not hmi_js or not prices_js:
+            time.sleep(1)
+            continue
+
+        try:
+            hmi = float(hmi_js.get("hmi"))
+        except Exception:
+            time.sleep(1)
+            continue
+
+        rows = prices_js.get("rows") or []
+        if not isinstance(rows, list) or not rows:
+            time.sleep(1)
+            continue
+
+        # Build price map
+        price_map = {}
+        for r in rows:
+            tok = (r.get("token") or "").upper()
+            try:
+                price_map[tok] = float(r.get("price"))
+            except Exception:
+                pass
+
+        # Mark-to-market for display (does not change cash equity unless we close)
+        mtm_equity = mark_to_market_equity(st, price_map)
+
+        # Determine signal only when we have a last_hmi
+        signal_side = None
+        if st.last_hmi is not None:
+            delta = hmi - float(st.last_hmi)
+            if delta >= THRESHOLD:
+                signal_side = "LONG"
+            else:
+                signal_side = "SHORT"
+
+        # First-ever trade: as soon as we have last_hmi and a signal
+        best_token = choose_best_token_by_potro(rows)
+
+        executed = False
+        if signal_side and best_token:
+            if st.pos:
+                # If we already have same side AND same token -> do nothing
+                if st.pos.side == signal_side and st.pos.token == best_token:
+                    pass
+                else:
+                    # close and flip to new token/side
+                    close_trade = close_position(st, price_map)
+                    if close_trade:
+                        append_trade(trades, close_trade)
+                    open_trade = open_position(st, signal_side, best_token, price_map)
+                    if open_trade:
+                        append_trade(trades, open_trade)
+                        executed = True
+            else:
+                # open first position
+                open_trade = open_position(st, signal_side, best_token, price_map)
+                if open_trade:
+                    append_trade(trades, open_trade)
+                    executed = True
+
+        # Update last_hmi after processing
+        st.last_hmi = hmi
+
+        # Persist state
+        save_state(st)
+
+        # Write latest output for site display
+        out = {
+            "timestamp": utc_now_iso(),
+            "equity_usd": mtm_equity,
+            "roi_frac": (mtm_equity / START_EQUITY) - 1.0,
+            "hmi": hmi,
+            "best_token": best_token,
+            "signal_side": signal_side,
+            "position": None,
+        }
+        if st.pos:
+            curp = price_map.get(st.pos.token)
+            out["position"] = {
+                "side": st.pos.side,
+                "token": st.pos.token,
+                "entry_price": st.pos.entry_price,
+                "current_price": curp,
+                "opened_at": st.pos.opened_at,
+            }
+
+        write_json(KC3_LATEST_OUT, out)
+
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    main_loop()
+

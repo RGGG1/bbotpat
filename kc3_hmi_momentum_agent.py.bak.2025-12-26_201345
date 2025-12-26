@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+import json
+import time
+from pathlib import Path
+from datetime import datetime, timezone
+
+# Reads (already produced by your live collector)
+HMI_IN = Path("/var/www/bbotpat_live/hmi_latest.json")
+PRICES_IN = Path("/var/www/bbotpat_live/prices_latest.json")
+
+# Writes
+STATE_DIR = Path("/root/bbotpat_live/data")
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+STATE_PATH = STATE_DIR / "kc3_state.json"
+
+OUT_LATEST = Path("/var/www/bbotpat_live/kc3_latest.json")
+OUT_TRADES = Path("/var/www/bbotpat_live/kc3_trades.json")
+
+# Config
+START_EQUITY_USD = 100.0     # start with $100 USDC
+THRESH = 0.10                # trade when HMI changes by >= 0.1
+LOOP_SEC = 1.0               # every second
+
+# Pot-ROI token selection: choose highest pot ROI among non-BTC/non-stables
+EXCLUDE = {"BTC", "USDT", "USDC", "USDTC"}
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def safe_read_json(path: Path):
+    try:
+        if not path.exists():
+            return None
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+def safe_write_json(path: Path, obj):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2))
+    tmp.replace(path)
+
+def load_state():
+    st = safe_read_json(STATE_PATH)
+    if not isinstance(st, dict):
+        st = {}
+    # initialize defaults
+    st.setdefault("equity_usd", START_EQUITY_USD)
+    st.setdefault("position", None)  # dict: {side, token, entry_price, qty}
+    st.setdefault("last_hmi", None)
+    st.setdefault("last_token", None)
+    st.setdefault("started_at", utc_now_iso())
+    return st
+
+def append_trade(event: dict):
+    arr = safe_read_json(OUT_TRADES)
+    if not isinstance(arr, list):
+        arr = []
+    arr.append(event)
+    safe_write_json(OUT_TRADES, arr)
+
+def pick_best_pot_roi_token(prices_doc):
+    # expects rows with fields: token, price, btc_dom, range and (ideally) pot_roi or potential roi in doc
+    # Your live collector may store pot ROI under "pot_roi" or "potential_roi" or not at all.
+    # We compute a fallback if not present by reading row["pot_roi"] if exists; otherwise skip.
+    rows = prices_doc.get("rows") if isinstance(prices_doc, dict) else None
+    if not isinstance(rows, list):
+        return None
+
+    best = None
+    best_val = None
+
+    for r in rows:
+        tok = str(r.get("token","")).upper()
+        if not tok or tok in EXCLUDE or "USD" in tok:
+            continue
+        # look for pot ROI fields (support a few common names)
+        val = r.get("pot_roi", None)
+        if val is None:
+            val = r.get("pot_roi_frac", None)
+        if val is None:
+            val = r.get("potential_roi", None)
+        if val is None:
+            val = r.get("potential_roi_frac", None)
+
+        # allow strings
+        try:
+            if val is None:
+                continue
+            val_f = float(val)
+        except Exception:
+            continue
+
+        if best is None or val_f > best_val:
+            best = tok
+            best_val = val_f
+
+    return best
+
+def get_price(prices_doc, token: str):
+    rows = prices_doc.get("rows") if isinstance(prices_doc, dict) else None
+    if not isinstance(rows, list):
+        return None
+    token = token.upper()
+    for r in rows:
+        if str(r.get("token","")).upper() == token:
+            try:
+                return float(r.get("price"))
+            except Exception:
+                return None
+    return None
+
+def close_position(st, prices_doc, reason="flip"):
+    pos = st.get("position")
+    if not isinstance(pos, dict):
+        return st
+
+    token = pos.get("token")
+    side = pos.get("side")
+    entry = pos.get("entry_price")
+    qty = pos.get("qty")
+
+    px = get_price(prices_doc, token) if token else None
+    if px is None:
+        return st  # can't close without a price
+
+    pnl = 0.0
+    if side == "LONG":
+        pnl = (px - entry) * qty
+    elif side == "SHORT":
+        pnl = (entry - px) * qty
+
+    st["equity_usd"] = float(st["equity_usd"]) + pnl
+
+    evt = {
+        "ts": utc_now_iso(),
+        "event": "CLOSE",
+        "side": side,
+        "token": token,
+        "entry_price": entry,
+        "exit_price": px,
+        "qty": qty,
+        "pnl_usd": pnl,
+        "equity_usd": st["equity_usd"],
+        "reason": reason,
+    }
+    append_trade(evt)
+
+    st["position"] = None
+    return st
+
+def open_position(st, prices_doc, side: str, token: str, reason="signal"):
+    px = get_price(prices_doc, token)
+    if px is None or px <= 0:
+        return st
+
+    equity = float(st["equity_usd"])
+    # full balance notionally
+    qty = equity / px
+
+    st["position"] = {
+        "side": side,
+        "token": token,
+        "entry_price": px,
+        "qty": qty,
+        "opened_at": utc_now_iso(),
+    }
+    st["last_token"] = token
+
+    evt = {
+        "ts": utc_now_iso(),
+        "event": "OPEN",
+        "side": side,
+        "token": token,
+        "entry_price": px,
+        "exit_price": None,
+        "qty": qty,
+        "pnl_usd": None,
+        "equity_usd": st["equity_usd"],
+        "reason": reason,
+    }
+    append_trade(evt)
+
+    return st
+
+def mark_to_market(st, prices_doc):
+    pos = st.get("position")
+    if not isinstance(pos, dict):
+        return {"pnl_usd": 0.0, "roi_frac": (float(st["equity_usd"]) / START_EQUITY_USD) - 1.0}
+
+    token = pos.get("token")
+    side = pos.get("side")
+    entry = float(pos.get("entry_price", 0.0))
+    qty = float(pos.get("qty", 0.0))
+    px = get_price(prices_doc, token) if token else None
+    if px is None:
+        return {"pnl_usd": 0.0, "roi_frac": (float(st["equity_usd"]) / START_EQUITY_USD) - 1.0}
+
+    mtm = 0.0
+    if side == "LONG":
+        mtm = (px - entry) * qty
+    elif side == "SHORT":
+        mtm = (entry - px) * qty
+
+    total = float(st["equity_usd"]) + mtm
+    roi = (total / START_EQUITY_USD) - 1.0
+    return {"pnl_usd": mtm, "roi_frac": roi, "current_price": px, "total_equity_usd": total}
+
+def decide_and_trade(st, hmi_now: float, prices_doc):
+    last = st.get("last_hmi")
+    if last is None:
+        st["last_hmi"] = hmi_now
+        return st
+
+    delta = hmi_now - float(last)
+
+    # no change big enough -> do nothing (hold)
+    if abs(delta) < THRESH:
+        st["last_hmi"] = hmi_now
+        return st
+
+    desired_side = "LONG" if delta > 0 else "SHORT"
+    best_token = pick_best_pot_roi_token(prices_doc)
+    if not best_token:
+        st["last_hmi"] = hmi_now
+        return st
+
+    pos = st.get("position")
+    if isinstance(pos, dict):
+        # if already in same side AND same token, keep position
+        if pos.get("side") == desired_side and str(pos.get("token","")).upper() == best_token:
+            st["last_hmi"] = hmi_now
+            return st
+
+        # otherwise close & reopen
+        st = close_position(st, prices_doc, reason="flip_or_token_change")
+
+    st = open_position(st, prices_doc, desired_side, best_token, reason=f"hmi_delta_{delta:+.2f}")
+    st["last_hmi"] = hmi_now
+    return st
+
+def write_latest(st, hmi_doc, prices_doc):
+    hmi_val = None
+    if isinstance(hmi_doc, dict):
+        try:
+            hmi_val = float(hmi_doc.get("hmi"))
+        except Exception:
+            hmi_val = None
+
+    mtm = mark_to_market(st, prices_doc)
+
+    out = {
+        "timestamp": utc_now_iso(),
+        "hmi": hmi_val,
+        "equity_usd": float(st["equity_usd"]),
+        "position": st.get("position"),
+        "mtm_pnl_usd": mtm.get("pnl_usd"),
+        "roi_frac": mtm.get("roi_frac"),
+        "total_equity_usd": mtm.get("total_equity_usd", float(st["equity_usd"])),
+    }
+    safe_write_json(OUT_LATEST, out)
+
+def ensure_trades_file():
+    if not OUT_TRADES.exists():
+        safe_write_json(OUT_TRADES, [])
+
+def main_loop():
+    ensure_trades_file()
+    st = load_state()
+
+    while True:
+        hmi_doc = safe_read_json(HMI_IN)
+        prices_doc = safe_read_json(PRICES_IN)
+
+        if isinstance(hmi_doc, dict) and isinstance(prices_doc, dict):
+            try:
+                hmi_now = float(hmi_doc.get("hmi"))
+            except Exception:
+                hmi_now = None
+
+            if hmi_now is not None:
+                st = decide_and_trade(st, hmi_now, prices_doc)
+
+        # write state + latest
+        safe_write_json(STATE_PATH, st)
+        if isinstance(hmi_doc, dict) and isinstance(prices_doc, dict):
+            write_latest(st, hmi_doc, prices_doc)
+
+        time.sleep(LOOP_SEC)
+
+if __name__ == "__main__":
+    main_loop()
