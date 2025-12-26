@@ -6,670 +6,576 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
-    :root {
-      --bg: #000000;
-      --panel: #0b0d10;
-      --panel2: #0a0b0d;
-      --border: rgba(255, 255, 255, 0.08);
-      --border2: rgba(255, 255, 255, 0.12);
+    :root{
+      --bg:#000;
+      --text:#f5f5f7;
+      --muted:#8b8d98;
 
-      --text: #f5f5f7;
-      --muted: #8c90a3;
+      /* Binance-ish */
+      --y:#f0b90b;        /* Binance yellow */
+      --y2:#ffd35a;       /* lighter yellow */
+      --deep:#0b0b0b;
 
-      /* Binance-ish yellow */
-      --yellow: #f0b90b;
-      --yellow-soft: rgba(240, 185, 11, 0.18);
+      --red:#b0121a;
+      --orange:#c85f12;
+      --gray:#2a2a2a;
 
-      --green: #16c784;
-      --red: #ea3943;
+      --card: rgba(255,255,255,0.02);
+      --line: rgba(255,255,255,0.08);
 
-      --font: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", sans-serif;
+      --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      background:var(--bg);
+      color:var(--text);
+      font-family:var(--font);
+      min-height:100vh;
+      display:flex;
+      justify-content:center;
+      padding:18px 14px;
+    }
+    .wrap{width:100%;max-width:1040px}
 
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font);
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-      padding: 22px 14px;
+    header{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:14px;
+      padding-bottom:10px;
+      border-bottom:1px solid var(--line);
+      margin-bottom:10px;
     }
 
-    .shell {
-      width: 100%;
-      max-width: 1120px;
+    .brand{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+    }
+    .brand-title{
+      font-size:22px;
+      font-weight:700;
+      letter-spacing:.02em;
+      line-height:1;
+      color:var(--y);
+    }
+    .brand-tag{
+      font-size:12px;
+      color:var(--muted);
+      font-style:italic;
     }
 
-    /* Header */
-    header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 14px;
-      margin-bottom: 10px;
+    .meta{
+      text-align:right;
+      font-size:11px;
+      color:var(--muted);
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      align-items:flex-end;
+      padding-top:2px;
     }
-
-    .brand {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      min-width: 240px;
+    .meta a{
+      color:var(--muted);
+      text-decoration:none;
+      font-size:10px;
+      letter-spacing:.08em;
+      text-transform:uppercase;
     }
-
-    .brand-title {
-      display: inline-flex;
-      align-items: baseline;
-      gap: 10px;
-      font-weight: 650;
-      letter-spacing: 0.04em;
-      text-transform: none;
-      font-size: 22px;
-      line-height: 1.1;
-    }
-
-    .brand-title .hive {
-      color: var(--yellow);
-    }
-
-    .brand-tagline {
-      font-size: 12px;
-      color: var(--muted);
-      font-style: italic;
-      letter-spacing: 0.02em;
-    }
-
-    .meta {
-      text-align: right;
-      font-size: 11px;
-      color: var(--muted);
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      align-items: flex-end;
-      padding-top: 2px;
-    }
-
-    .meta a {
-      text-decoration: none;
-      font-size: 10px;
-      letter-spacing: 0.10em;
-      text-transform: uppercase;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-
-    .meta a:hover { color: var(--yellow); }
+    .meta a:hover{color:var(--y)}
 
     /* Sections */
-    main {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
+    .section{
+      padding:12px 0;
+      border-bottom:1px solid var(--line);
+    }
+    .section:last-child{border-bottom:none}
+
+    .title-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin-bottom:8px;
+    }
+    .section-title{
+      color:#fff;
+      font-size:12px;
+      font-weight:700;
+      letter-spacing:.10em;
+      text-transform:uppercase;
     }
 
-    .section {
-      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 14px 14px;
-      box-shadow: 0 16px 50px rgba(0,0,0,0.55);
-    }
-
-    .section-title {
-      font-size: 12px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      font-weight: 600;
-      color: var(--yellow);
-      margin-bottom: 10px;
-    }
-
-    /* HMI block */
-    .hmi-wrap {
-      display: grid;
+    /* HMI */
+    .hmi-grid{
+      display:grid;
       grid-template-columns: 1fr;
-      gap: 10px;
+      gap:10px;
+    }
+    @media(min-width:760px){
+      .hmi-grid{
+        grid-template-columns: 1.2fr .8fr;
+        align-items:center;
+      }
     }
 
-    .hmi-topline {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-      align-items: end;
+    .hmi-left{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .hmi-topline{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .hmi-name{
+      color:#fff;
+      font-weight:700;
+      font-size:14px;
+      letter-spacing:.04em;
     }
 
-    .hmi-score {
-      text-align: right;
-      font-weight: 800;
-      font-size: 68px;
-      line-height: 0.95;
-      letter-spacing: 0.01em;
+    .hmi-score{
+      text-align:center;
+      font-size:64px;
+      font-weight:800;
+      line-height:1;
+      margin-top:2px;
+    }
+    @media(max-width:480px){
+      .hmi-score{font-size:60px}
     }
 
-    /* ===== NEW HMI GRAPHIC (exponential bar chart, red->orange->yellow fill, grey remainder) ===== */
-    .hmi-bars-wrap {
-      display: flex;
-      align-items: flex-end;
-      gap: 0;
-      height: 54px;
-      border-radius: 10px;
-      padding: 8px 10px 6px;
-      background: rgba(255,255,255,0.02);
-      border: 1px solid rgba(255,255,255,0.08);
-      overflow: hidden;
-      position: relative;
+    /* Fear->Greed underline bar under score (kept) */
+    .hmi-bar{
+      width:100%;
+      height:10px;
+      border-radius:999px;
+      background:linear-gradient(90deg, var(--red), var(--orange), var(--y2), var(--y));
+      position:relative;
+      overflow:hidden;
+      margin-top:8px;
+    }
+    .hmi-bar-mask{
+      position:absolute;
+      right:0; top:0; bottom:0;
+      background:#1a1a1a;
+      opacity:.85;
     }
 
-    .hmi-bars {
-      display: grid;
-      grid-template-columns: repeat(24, 1fr);
-      gap: 6px;
-      align-items: end;
-      width: 100%;
-      height: 100%;
+    .hmi-labels{
+      display:flex;
+      justify-content:space-between;
+      color:var(--muted);
+      font-size:11px;
+      margin-top:6px;
     }
 
-    .hmi-barcol {
-      width: 100%;
-      border-radius: 6px 6px 4px 4px;
-      background: #2a2c31; /* inactive grey */
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
-      transition: background 220ms ease, opacity 220ms ease, transform 220ms ease;
+    .hmi-status{
+      text-align:center;
+      font-size:14px;
+      color:#fff;
+      opacity:.95;
+      margin-top:2px;
     }
 
-    .hmi-barcol.active {
-      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35), 0 8px 18px rgba(0,0,0,0.35);
+    .hmi-tracking{
+      display:flex;
+      justify-content:center;
+      gap:12px;
+      flex-wrap:wrap;
+      color:var(--muted);
+      font-size:11px;
+      margin-top:8px;
     }
-
-    /* subtle “trend” feel */
-    .hmi-barcol.active { transform: translateY(-0.5px); }
-    /* ===== END NEW HMI GRAPHIC ===== */
-
-    .hmi-status {
-      text-align: center;
-      font-size: 18px;
-      font-weight: 600;
-      color: var(--text);
-      margin-top: 2px;
-    }
-
-    .hmi-legend {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 2px;
-    }
-
-    .hmi-legend span:nth-child(1) { text-align: left; }
-    .hmi-legend span:nth-child(2) { text-align: center; }
-    .hmi-legend span:nth-child(3) { text-align: right; }
-
-    .hmi-tracking {
-      display: inline-flex;
-      gap: 12px;
-      align-items: center;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-top: 8px;
-      font-size: 11px;
-      color: var(--muted);
-    }
-
-    .dot {
-      width: 6px; height: 6px;
-      border-radius: 999px;
-      background: var(--yellow);
-      box-shadow: 0 0 10px rgba(240,185,11,0.35);
-      display: inline-block;
-      margin-right: 6px;
-      transform: translateY(-1px);
+    .dot{
+      width:6px;height:6px;border-radius:999px;
+      background:var(--y);
+      box-shadow:none;
+      display:inline-block;
+      margin-right:6px;
+      transform:translateY(-1px);
     }
 
     /* ACTION */
-    .action-line {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 10px;
+    .action-row{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      align-items:center;
+      text-align:center;
+    }
+    .action-title{
+      width:100%;
+      display:flex;
+      justify-content:flex-start;
+      gap:8px;
+      color:#fff;
+      font-size:12px;
+      font-weight:800;
+      letter-spacing:.10em;
+      text-transform:uppercase;
+    }
+    .action-title .verb{color:var(--y); font-weight:900;}
+    .action-token{
+      font-size:64px;
+      font-weight:900;
+      line-height:1;
+      color:var(--y);
+    }
+    .action-sub{
+      font-size:12px;
+      color:#fff;
+      opacity:.9;
     }
 
-    .action-title {
-      color: var(--yellow);
-      font-size: 12px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      font-weight: 650;
+    /* AGENTS (table style) */
+    .agents{
+      width:100%;
+      border-collapse:collapse;
+      font-size:12px;
+      margin-top:8px;
+    }
+    .agents th{
+      text-align:left;
+      color:var(--muted);
+      font-size:10px;
+      letter-spacing:.10em;
+      text-transform:uppercase;
+      font-weight:700;
+      padding:8px 0;
+      border-bottom:1px solid var(--line);
+    }
+    .agents td{
+      padding:10px 0;
+      border-bottom:1px solid rgba(255,255,255,0.05);
+    }
+    .agents tr:last-child td{border-bottom:none}
+    .agents .c{text-align:center}
+    .pos{color:#2bd67b}
+    .neg{color:#ff4b5c}
+
+    /* DOM tool (reuse your v1 dropdown logic, but style) */
+    .dom-head{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:flex-start;
+      flex-wrap:wrap;
+      margin-bottom:10px;
+    }
+    .dom-pills{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .pill-wrap{position:relative}
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:6px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(240,185,11,0.25);
+      background:rgba(240,185,11,0.06);
+      cursor:pointer;
+      min-width:110px;
+      font-size:11px;
+      color:#fff;
+    }
+    .pill .label{
+      max-width:120px;
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:ellipsis;
+    }
+    .pill .arr{opacity:.8;font-size:9px}
+    .vs{
+      font-size:11px;
+      letter-spacing:.12em;
+      text-transform:uppercase;
+      color:var(--muted);
     }
 
-    .action-kind {
-      font-size: 12px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      font-weight: 650;
-      color: var(--yellow);
+    .menu{
+      position:absolute;
+      top:calc(100% + 6px);
+      left:0;
+      z-index:50;
+      background:#050505;
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:12px;
+      box-shadow:0 18px 50px rgba(0,0,0,0.75);
+      padding:8px;
+      min-width:190px;
+      max-height:280px;
+      overflow:auto;
+      display:none;
     }
-
-    .action-token {
-      text-align: center;
-      font-size: 72px;
-      line-height: 0.95;
-      font-weight: 850;
-      letter-spacing: 0.01em;
-      color: var(--yellow);
-      margin-top: 2px;
+    .menu.open{display:block}
+    .opt{
+      display:flex; align-items:center; gap:8px;
+      padding:6px 8px;
+      border-radius:8px;
+      cursor:pointer;
+      font-size:11px;
+      color:#cfcfcf;
     }
-
-    .action-sub {
-      text-align: center;
-      font-size: 14px;
-      color: var(--text);
-      margin-top: 8px;
-      opacity: 0.95;
+    .opt:hover{background:rgba(255,255,255,0.06)}
+    .opt.selected{color:var(--y)}
+    .box{
+      width:14px;height:14px;border-radius:4px;
+      border:1px solid rgba(255,255,255,0.25);
+      display:flex;align-items:center;justify-content:center;
+      font-size:10px;color:var(--y);
     }
-
-    .divider {
-      height: 1px;
-      background: rgba(255,255,255,0.08);
-      margin: 14px 0;
+    .tick{display:none}
+    .opt.selected .tick{display:block}
+    .clear{
+      margin-top:8px;
+      padding:6px 8px;
+      border-top:1px solid rgba(255,255,255,0.08);
+      text-align:right;
+      font-size:10px;
+      color:var(--muted);
+      cursor:pointer;
     }
+    .clear:hover{color:#fff}
 
-    /* Agents table */
-    .agents-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 2px;
-      font-size: 13px;
+    .dom-main{
+      font-size:16px;
+      font-weight:600;
+      margin-top:6px;
     }
-
-    .agents-table thead th {
-      text-align: left;
-      font-size: 10px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      font-weight: 650;
-      color: var(--muted);
-      padding: 8px 6px;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
+    .dom-main .val{
+      font-size:40px;
+      font-weight:900;
+      margin-right:8px;
+      color:var(--y);
     }
-
-    .agents-table tbody td {
-      padding: 10px 6px;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
+    .dom-sub{
+      color:var(--muted);
+      font-size:13px;
+      margin-top:6px;
     }
+    .dom-sub span{color:#fff}
 
-    .agents-table tbody tr:last-child td { border-bottom: none; }
-
-    .right { text-align: right; }
-    .center { text-align: center; }
-
-    /* Dominance section (reuse v1 dropdown logic but v2-ish styling) */
-    .oracle-header-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 10px;
+    /* TOKENS */
+    .tokens{
+      width:100%;
+      border-collapse:collapse;
+      font-size:12px;
+      margin-top:8px;
     }
-
-    .oracle-header-right {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: nowrap;
-      margin-left: auto;
+    .tokens thead th{
+      color:var(--muted);
+      font-size:10px;
+      letter-spacing:.10em;
+      text-transform:uppercase;
+      font-weight:700;
+      padding:8px 0;
+      border-bottom:1px solid var(--line);
     }
-
-    .oracle-pill-wrapper { position: relative; }
-
-    .oracle-pill {
-      display: inline-flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(255,255,255,0.03);
-      cursor: pointer;
-      min-width: 110px;
-      font-size: 12px;
-      color: var(--text);
+    .tokens td{
+      padding:9px 0;
+      border-bottom:1px solid rgba(255,255,255,0.05);
     }
-
-    .oracle-pill-label {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    .tokens tr:last-child td{border-bottom:none}
+    .tokens .token{
+      text-align:left;
+      font-weight:700;
     }
+    .tokens .c{text-align:center}
 
-    .oracle-pill-arrow {
-      font-size: 10px;
-      opacity: 0.85;
-      color: var(--muted);
-    }
-
-    .oracle-vs {
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.10em;
-      color: var(--muted);
-    }
-
-    .oracle-dropdown {
-      position: absolute;
-      top: calc(100% + 6px);
-      left: 0;
-      z-index: 20;
-      background: #050608;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: 0 14px 50px rgba(0,0,0,0.75);
-      padding: 6px 6px 6px;
-      min-width: 180px;
-      max-height: 280px;
-      overflow-y: auto;
-      display: none;
-    }
-
-    .oracle-dropdown.open { display: block; }
-
-    .oracle-option {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 8px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--muted);
-    }
-
-    .oracle-option:hover { background: rgba(255,255,255,0.06); }
-
-    .oracle-option.selected { color: var(--yellow); }
-
-    .oracle-option-box {
-      width: 14px;
-      height: 14px;
-      border-radius: 4px;
-      border: 1px solid rgba(255,255,255,0.18);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10px;
-      color: var(--yellow);
-    }
-
-    .oracle-option.selected .oracle-option-box {
-      background: rgba(240,185,11,0.10);
-      border-color: rgba(240,185,11,0.35);
-    }
-
-    .oracle-option-tick { display: none; }
-    .oracle-option.selected .oracle-option-tick { display: block; }
-
-    .oracle-clear {
-      margin-top: 6px;
-      padding: 6px 8px;
-      text-align: right;
-      font-size: 10px;
-      color: var(--muted);
-      border-top: 1px solid rgba(255,255,255,0.10);
-      cursor: pointer;
-    }
-
-    .oracle-clear:hover { color: var(--yellow); }
-
-    .oracle-main-line {
-      font-size: 16px;
-      font-weight: 650;
-      margin-bottom: 6px;
-    }
-
-    .oracle-main-line .dom-value {
-      font-size: 38px;
-      font-weight: 850;
-      margin-right: 8px;
-      color: var(--text);
-    }
-
-    .oracle-main-line .dom-label {
-      font-size: 13px;
-      color: var(--muted);
-      font-weight: 600;
-    }
-
-    .oracle-sub-line,
-    .oracle-range-line {
-      font-size: 13px;
-      color: var(--muted);
-      margin-top: 3px;
-    }
-
-    .oracle-sub-line span,
-    .oracle-range-line span { color: var(--text); }
-
-    .oracle-error {
-      font-size: 12px;
-      color: var(--red);
-      margin-top: 6px;
-    }
-
-    /* Tokens table */
-    .prices-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12.5px;
-      margin-top: 8px;
-    }
-
-    .prices-table thead {
-      border-bottom: 1px solid rgba(255,255,255,0.10);
-    }
-
-    .prices-table th,
-    .prices-table td { padding: 10px 6px; }
-
-    .prices-table th {
-      font-weight: 650;
-      text-transform: uppercase;
-      letter-spacing: 0.10em;
-      font-size: 10px;
-      color: var(--muted);
-    }
-
-    .prices-table th.token-col,
-    .prices-table td.token-col { text-align: left; }
-
-    .prices-table th.center,
-    .prices-table td.center { text-align: center; }
-
-    .prices-table tbody tr { border-bottom: 1px solid rgba(255,255,255,0.06); }
-    .prices-table tbody tr:last-child { border-bottom: none; }
-
-    @media (max-width: 700px) {
-      body { padding: 14px 10px; }
-      .hmi-score { font-size: 64px; }
-      .action-token { font-size: 64px; }
-      header { margin-bottom: 8px; }
-      .hmi-bars-wrap { height: 50px; }
-      .hmi-bars { gap: 5px; }
+    /* hide-on-small helpers */
+    @media(max-width:520px){
+      .dom-main .val{font-size:34px}
     }
   </style>
 </head>
 
 <body>
-  <div class="shell">
+  <div class="wrap">
     <header>
       <div class="brand">
-        <div class="brand-title">
-          <span class="hive">HiveAI</span>
-        </div>
-        <div class="brand-tagline">All signal, no noise</div>
+        <div class="brand-title">HiveAI</div>
+        <div class="brand-tag">All signal, no noise</div>
       </div>
-
       <div class="meta">
         <div>Updated: <span id="meta-date">--/--/-- --:--</span></div>
         <a href="/oracle.html">HiveAI Oracle →</a>
       </div>
     </header>
 
-    <main>
-      <!-- HMI -->
-      <section class="section" id="hmi-section">
+    <!-- HMI -->
+    <section class="section">
+      <div class="title-row">
         <div class="section-title">Hive Mind Index</div>
+      </div>
 
-        <div class="hmi-wrap">
+      <div class="hmi-grid">
+        <div class="hmi-left">
           <div class="hmi-topline">
-            <div>
-              <!-- NEW HMI BAR CHART -->
-              <div class="hmi-bars-wrap" aria-hidden="true">
-                <div class="hmi-bars" id="hmi-bars"></div>
-              </div>
-
-              <div class="hmi-tracking" style="margin-top:10px;">
-                <span><span class="dot"></span>Open interest</span>
-                <span><span class="dot"></span>Perps vs spot</span>
-                <span><span class="dot"></span>Volatility</span>
-              </div>
-            </div>
-
-            <div class="hmi-score" id="hmi-value">--</div>
+            <div class="hmi-name" style="opacity:.9"></div>
           </div>
 
-          <div class="hmi-status" id="hmi-status">–</div>
+          <div class="hmi-score" id="hmi-value">--.-</div>
 
-          <div class="hmi-legend">
+          <div class="hmi-bar" aria-hidden="true">
+            <div class="hmi-bar-mask" id="hmi-bar-mask" style="width:100%"></div>
+          </div>
+
+          <div class="hmi-labels">
             <span>Fear</span>
             <span>Neutral</span>
             <span>Greed</span>
           </div>
-        </div>
-      </section>
 
-      <!-- ACTION -->
-      <section class="section" id="action-section">
-        <div class="action-line">
-          <div class="action-title" id="action-title">ACTION</div>
-          <div class="action-kind" id="action-kind">BUY</div>
-        </div>
+          <div class="hmi-status" id="hmi-status">–</div>
 
-        <div class="action-token" id="action-token">$--</div>
-        <div class="action-sub" id="action-sub">Entry: -- | Target: --</div>
-      </section>
-
-      <!-- AGENTS -->
-      <section class="section" id="agents-section">
-        <div class="section-title">Agents</div>
-        <table class="agents-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th class="right">Balance</th>
-              <th class="right">ROI</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>BTC buy and hold</td>
-              <td class="right" id="agent-btc-balance">$--</td>
-              <td class="right" id="agent-btc-roi">--%</td>
-            </tr>
-            <tr>
-              <td>Index Rebalancer</td>
-              <td class="right" id="agent-kc1-balance">$--</td>
-              <td class="right" id="agent-kc1-roi">--%</td>
-            </tr>
-            <tr>
-              <td>Knifecatcher</td>
-              <td class="right" id="agent-kc2-balance">$--</td>
-              <td class="right" id="agent-kc2-roi">--%</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <!-- DOMINANCE -->
-      <section class="section" id="dom-section">
-        <div class="oracle-header-row">
-          <div class="section-title" style="margin:0;">Dominance</div>
-
-          <div class="oracle-header-right">
-            <div class="oracle-pill-wrapper">
-              <div class="oracle-pill" id="oracle-x-pill">
-                <span class="oracle-pill-label" id="oracle-x-label">Select</span>
-                <span class="oracle-pill-arrow">▾</span>
-              </div>
-              <div class="oracle-dropdown" id="oracle-x-menu"></div>
-            </div>
-
-            <span class="oracle-vs">vs</span>
-
-            <div class="oracle-pill-wrapper">
-              <div class="oracle-pill" id="oracle-y-pill">
-                <span class="oracle-pill-label" id="oracle-y-label">Select</span>
-                <span class="oracle-pill-arrow">▾</span>
-              </div>
-              <div class="oracle-dropdown" id="oracle-y-menu"></div>
-            </div>
+          <div class="hmi-tracking">
+            <span><span class="dot"></span>Open interest</span>
+            <span><span class="dot"></span>Perps vs spot</span>
+            <span><span class="dot"></span>Volatility</span>
           </div>
         </div>
 
-        <div class="oracle-main-line" id="oracle-main-line">
-          <span class="dom-value">--</span>
-          <span class="dom-label">Select X and Y</span>
+        <!-- ACTION -->
+        <div class="action-row">
+          <div class="action-title">
+            <span>Action</span>
+            <span class="verb" id="action-verb">BUY</span>
+          </div>
+
+          <div class="action-token" id="action-token">$---</div>
+
+          <div class="action-sub" id="action-prices">Entry: $--.-- | Target: $--.--</div>
         </div>
+      </div>
+    </section>
 
-        <div class="oracle-sub-line" id="oracle-sub-line">
-          Market caps: <span>–</span>
+    <!-- AGENTS -->
+    <section class="section">
+      <div class="title-row">
+        <div class="section-title">Agents</div>
+      </div>
+
+      <table class="agents">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th class="c">Balance</th>
+            <th class="c">ROI</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>BTC buy and hold</td>
+            <td class="c" id="agent-btc-bal">$--.--</td>
+            <td class="c" id="agent-btc-roi">--.--%</td>
+          </tr>
+          <tr>
+            <td>Index Rebalancer</td>
+            <td class="c" id="agent-kc1-bal">$--.--</td>
+            <td class="c" id="agent-kc1-roi">--.--%</td>
+          </tr>
+          <tr>
+            <td>Knifecatcher</td>
+            <td class="c" id="agent-kc2-bal">$--.--</td>
+            <td class="c" id="agent-kc2-roi">--.--%</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- DOMINANCE TOOL -->
+    <section class="section">
+      <div class="dom-head">
+        <div class="dom-pills">
+          <div class="pill-wrap">
+            <div class="pill" id="oracle-x-pill">
+              <span class="label" id="oracle-x-label">Select</span>
+              <span class="arr">▾</span>
+            </div>
+            <div class="menu" id="oracle-x-menu"></div>
+          </div>
+
+          <span class="vs">vs</span>
+
+          <div class="pill-wrap">
+            <div class="pill" id="oracle-y-pill">
+              <span class="label" id="oracle-y-label">Select</span>
+              <span class="arr">▾</span>
+            </div>
+            <div class="menu" id="oracle-y-menu"></div>
+          </div>
         </div>
+      </div>
 
-        <div class="oracle-range-line" id="oracle-range-line">
-          Range: <span>–</span>
-        </div>
+      <div class="dom-main" id="oracle-main-line">
+        <span class="val">--</span><span>Select X and Y</span>
+      </div>
+      <div class="dom-sub" id="oracle-sub-line">Market caps: <span>–</span></div>
+      <div class="dom-sub" id="oracle-range-line">Range: <span>–</span></div>
+      <div class="dom-sub" id="oracle-error" style="color:#ff4b5c"></div>
+    </section>
 
-        <div class="oracle-error" id="oracle-error"></div>
-      </section>
-
-      <!-- TOKENS -->
-      <section class="section" id="tokens-section">
+    <!-- TOKENS -->
+    <section class="section">
+      <div class="title-row">
         <div class="section-title">Tokens</div>
-        <table class="prices-table">
-          <thead>
-            <tr>
-              <th class="token-col">Token</th>
-              <th class="center">Price</th>
-              <th class="center">Dom</th>
-              <th class="center">Range</th>
-              <th class="center">Action</th>
-              <th class="center">Pot. ROI</th>
-            </tr>
-          </thead>
-          <tbody id="prices-tbody"></tbody>
-        </table>
-      </section>
-    </main>
+      </div>
+
+      <table class="tokens">
+        <thead>
+          <tr>
+            <th style="text-align:left">Token</th>
+            <th class="c">Price</th>
+            <th class="c">Dom</th>
+            <th class="c">Range</th>
+            <th class="c">Action</th>
+            <th class="c">Pot. ROI</th>
+          </tr>
+        </thead>
+        <tbody id="prices-tbody"></tbody>
+      </table>
+    </section>
+
+    <!-- ORACLES NOTES (bottom) -->
+    <section class="section">
+      <div class="title-row">
+        <div class="section-title">Oracles</div>
+      </div>
+      <div style="color:var(--muted);font-size:12px;line-height:1.6">
+        USDTC = USDT and USDC combined. Additional token listing available on request.
+      </div>
+    </section>
   </div>
 
   <script>
+    // ===== IMPORTANT: ABSOLUTE PATHS so /v2 works =====
+    const URL_HMI      = "/hmi_latest.json";
+    const URL_PRICES   = "/prices_latest.json";
+    const URL_BANDS    = "/dom_bands_latest.json";
+    const URL_HIST     = "/dom_history_latest.json";
+    const URL_KC1      = "/knifecatcher_latest.json";
+    const URL_KC2      = "/dom_signals_hourly.json";
+
     const HMI_NEUTRAL_LOW = 40;
     const HMI_NEUTRAL_HIGH = 60;
 
     const ORACLE_TOKENS = ["BTC","ETH","BNB","SOL","DOGE","TON","SUI","UNI"];
 
     let pricesRowsGlobal = [];
-    let suppliesGlobal = null;
     let oracleHistories = {};
     let domBandsGlobal = null;
 
-    let oracleSelectedX = ["BTC"];   // default
-    let oracleSelectedY = ["ALTS"];  // default: all alts (not BTC)
+    let oracleSelectedX = ["BTC"];
+    let oracleSelectedY = ["ALTS"];
 
     function formatDateTime(ts) {
       if (!ts) return "--/--/-- --:--";
@@ -682,16 +588,6 @@
       return `${dd}/${mm}/${yy} ${hh}:${mi}`;
     }
 
-    function formatMC(v) {
-      if (!v || v <= 0) return "$0";
-      if (v >= 1e12) return `$${(v / 1e12).toFixed(1)}T`;
-      if (v >= 1e9) return `$${Math.round(v / 1e9)}B`;
-      if (v >= 1e6) return `$${Math.round(v / 1e6)}M`;
-      return `$${Math.round(v).toLocaleString()}`;
-    }
-
-    function clamp01(x) { return Math.max(0, Math.min(1, x)); }
-
     function hmiBandLabel(hmi) {
       if (hmi < 10) return "Zombie Apocalypse";
       if (hmi < 25) return "McDonald's Applications in high demand";
@@ -703,681 +599,484 @@
       return "It's the future of finance";
     }
 
-    /* ===== NEW HMI RENDERER: exponential bars, fill to score, red->orange->yellow; remainder grey ===== */
-    function lerp(a, b, t) { return a + (b - a) * t; }
-    function lerpColor(c1, c2, t) {
-      return {
-        r: Math.round(lerp(c1.r, c2.r, t)),
-        g: Math.round(lerp(c1.g, c2.g, t)),
-        b: Math.round(lerp(c1.b, c2.b, t)),
-      };
-    }
-    function rgbToCss(c) { return `rgb(${c.r}, ${c.g}, ${c.b})`; }
-
-    function gradientRedOrangeYellow(t) {
-      // 0..1 mapped into two segments:
-      // deep red (#6b0f0f) -> orange (#d55a14) -> bright yellow (#f0b90b)
-      const red = { r: 107, g: 15, b: 15 };
-      const orange = { r: 213, g: 90, b: 20 };
-      const yellow = { r: 240, g: 185, b: 11 };
-
-      if (t <= 0.55) {
-        const tt = t / 0.55;
-        return lerpColor(red, orange, tt);
-      } else {
-        const tt = (t - 0.55) / 0.45;
-        return lerpColor(orange, yellow, tt);
-      }
+    function setHmiBar(hmi){
+      const mask = document.getElementById("hmi-bar-mask");
+      if(!mask) return;
+      // mask width = remaining portion (100-hmi)
+      const clamped = Math.max(0, Math.min(100, hmi));
+      const remain = 100 - clamped;
+      mask.style.width = remain + "%";
     }
 
-    function renderHmiBars(hmi) {
-      const barsEl = document.getElementById("hmi-bars");
-      if (!barsEl) return;
-
-      const N = 24;
-      const fillCount = Math.round(clamp01(hmi / 100) * N);
-
-      // exponential profile B/C style (more steep near the end)
-      const exp = 2.25; // “B and C exponential” feel
-
-      // build once per update (simple + robust)
-      barsEl.innerHTML = "";
-
-      for (let i = 1; i <= N; i++) {
-        const col = document.createElement("div");
-        col.className = "hmi-barcol";
-
-        const x = i / N; // 0..1
-        const h = Math.max(0.08, Math.pow(x, exp)); // 0.08..1
-        col.style.height = (h * 100).toFixed(2) + "%";
-
-        if (i <= fillCount) {
-          col.classList.add("active");
-          const c = gradientRedOrangeYellow(x);
-          col.style.background = rgbToCss(c);
-          col.style.opacity = "1";
-        } else {
-          col.style.background = "#2a2c31";
-          col.style.opacity = "0.9";
-        }
-
-        barsEl.appendChild(col);
-      }
+    function fmtPct(frac){
+      if(frac==null || Number.isNaN(frac)) return "--.--%";
+      const pct = frac*100;
+      const sign = pct>0 ? "+" : "";
+      return sign + pct.toFixed(1) + "%";
     }
-    /* ===== END NEW HMI RENDERER ===== */
+    function fmtUsd(v){
+      if(v==null || Number.isNaN(v)) return "$--.--";
+      return "$" + Number(v).toFixed(2);
+    }
 
-    async function fetchHMI() {
-      try {
-        const resp = await fetch("/hmi_latest.json", { cache: "no-store" });
-        if (!resp.ok) throw new Error("HMI fetch failed");
+    async function fetchHMI(){
+      try{
+        const resp = await fetch(URL_HMI, {cache:"no-store"});
+        if(!resp.ok) throw new Error("HMI fetch failed");
         const data = await resp.json();
-
-        const hmiRaw = (typeof data.hmi === "number") ? data.hmi : parseFloat(data.hmi);
-        const hmi = Number.isNaN(hmiRaw) ? null : hmiRaw;
-        if (hmi === null) throw new Error("Invalid HMI");
-
-        const hmiEl = document.getElementById("hmi-value");
-        const statusEl = document.getElementById("hmi-status");
-
-        if (hmiEl) hmiEl.textContent = Math.round(hmi).toString();
-        if (statusEl) statusEl.textContent = hmiBandLabel(hmi);
-
-        // NEW: render exponential bars filled to score
-        renderHmiBars(hmi);
-      } catch (err) {
-        console.error("HMI error:", err);
+        const hmiRaw = (typeof data.hmi==="number") ? data.hmi : parseFloat(data.hmi);
+        if(!Number.isFinite(hmiRaw)) throw new Error("invalid hmi");
+        document.getElementById("hmi-value").textContent = hmiRaw.toFixed(1);
+        document.getElementById("hmi-status").textContent = hmiBandLabel(hmiRaw);
+        setHmiBar(hmiRaw);
+      }catch(e){
+        console.error(e);
+        document.getElementById("hmi-value").textContent="--.-";
+        document.getElementById("hmi-status").textContent="unavailable";
+        setHmiBar(0);
       }
     }
 
-    async function fetchSupplies() {
-      try {
-        const resp = await fetch("/supplies_latest.json", { cache: "no-store" });
-        if (!resp.ok) throw new Error("supplies fetch failed");
-        const data = await resp.json();
-        suppliesGlobal = data && data.supplies ? data.supplies : null;
-      } catch (err) {
-        console.error("Supplies error:", err);
-        suppliesGlobal = null;
-      }
+    function formatMC(v) {
+      if (!v || v <= 0) return "$0";
+      if (v >= 1e12) return `$${(v/1e12).toFixed(1)}T`;
+      if (v >= 1e9)  return `$${Math.round(v/1e9)}B`;
+      if (v >= 1e6)  return `$${Math.round(v/1e6)}M`;
+      return `$${Math.round(v).toLocaleString()}`;
     }
 
-    async function fetchOracleHistory() {
-      try {
-        const resp = await fetch("/dom_history_latest.json", { cache: "no-store" });
-        if (!resp.ok) {
+    async function fetchOracleHistory(){
+      try{
+        const resp = await fetch(URL_HIST, {cache:"no-store"});
+        if(!resp.ok){
           oracleHistories = {};
           return;
         }
         const data = await resp.json();
-        oracleHistories = data && data.series ? data.series : {};
-      } catch (err) {
-        console.error("Oracle history error:", err);
+        oracleHistories = (data && data.series) ? data.series : {};
+      }catch(e){
         oracleHistories = {};
       }
     }
 
-    async function fetchDomBands() {
-      try {
-        const resp = await fetch("/dom_bands_latest.json", { cache: "no-store" });
-        if (!resp.ok) throw new Error("dom bands fetch failed");
+    async function fetchDomBands(){
+      try{
+        const resp = await fetch(URL_BANDS, {cache:"no-store"});
+        if(!resp.ok) throw new Error("bands failed");
         domBandsGlobal = await resp.json();
-      } catch (err) {
-        console.error("Dom bands error:", err);
+      }catch(e){
         domBandsGlobal = null;
       }
     }
 
-    // ---- Potential ROI helpers ----
-
-    function parseRangeToLowHigh(rangeStr) {
-      if (!rangeStr) return null;
-      const m = String(rangeStr).match(/(\d+(?:\.\d+)?)\D+(\d+(?:\.\d+)?)/);
-      if (!m) return null;
-      const low = parseFloat(m[1]);
-      const high = parseFloat(m[2]);
-      if (!(high > low)) return null;
-      return { low, high };
+    function getLiveMC(token){
+      const row = pricesRowsGlobal.find(r => (r.token||"").toUpperCase()===token);
+      if(!row) return 0;
+      const v = row.mc;
+      if(typeof v==="number") return v;
+      const f = parseFloat(v||"0");
+      return Number.isNaN(f)?0:f;
     }
 
-    function computeNeutralHigh(low, high) {
-      const width = high - low;
-      return low + 0.60 * width;
+    function getHistorySeries(key){
+      return oracleHistories ? (oracleHistories[key] || null) : null;
     }
 
-    function computePotentialRoi(row, btcMcRaw) {
-      const token = (row.token || "").toUpperCase();
-      if (!token || token === "BTC" || token.includes("USD")) return null;
-
-      const rangeInfo = parseRangeToLowHigh(row.range || "");
-      if (!rangeInfo) return null;
-      const { low, high } = rangeInfo;
-
-      const btcMc = (typeof btcMcRaw === "number") ? btcMcRaw : parseFloat(btcMcRaw || "0");
-      const altMc = (typeof row.mc === "number") ? row.mc : parseFloat(row.mc || "0");
-      const priceNow = (typeof row.price === "number") ? row.price : parseFloat(row.price || "0");
-
-      if (!(btcMc > 0 && altMc > 0 && priceNow > 0)) return null;
-
-      const neutralHigh = computeNeutralHigh(low, high);
-      const domTarget = neutralHigh / 100.0;
-      if (!(domTarget > 0 && domTarget < 1)) return null;
-
-      const sTarget = (1.0 - domTarget) / domTarget * btcMc;
-      const supplyEst = altMc / priceNow;
-      if (!(supplyEst > 0)) return null;
-
-      const targetPrice = sTarget / supplyEst;
-      if (!(targetPrice > 0)) return null;
-
-      return (targetPrice / priceNow) - 1.0;
-    }
-
-    function computeActionForRow(row) {
-      const token = row.token;
-      if (!token) return "–";
-      const upToken = String(token).toUpperCase();
-
-      if (upToken === "BTC" || upToken.includes("USD")) return "–";
-
-      const domRaw = (typeof row.btc_dom === "number")
-        ? row.btc_dom
-        : parseFloat(row.btc_dom ?? "NaN");
-      if (!Number.isFinite(domRaw)) return "–";
-
-      const rangeStr = row.range || "";
-      const m = rangeStr.match(/(\d+(?:\.\d+)?)\D+(\d+(?:\.\d+)?)%?/);
-      if (!m) return "–";
-
-      const minPct = parseFloat(m[1]);
-      const maxPct = parseFloat(m[2]);
-      if (!Number.isFinite(minPct) || !Number.isFinite(maxPct) || maxPct <= minPct) return "–";
-
-      let pos = (domRaw - minPct) / (maxPct - minPct);
-      if (!Number.isFinite(pos)) return "–";
-      pos = Math.max(0, Math.min(1, pos));
-
-      if (pos >= 0.4 && pos <= 0.6) return "Stables";
-
-      let altPct, btcPct;
-      if (pos < 0.4) {
-        const t = pos / 0.4;
-        btcPct = 100 - Math.round(t * 50);
-        altPct = 100 - btcPct;
-      } else {
-        const t = (pos - 0.6) / 0.4;
-        altPct = 50 + Math.round(t * 50);
-        btcPct = 100 - altPct;
-      }
-
-      altPct = Math.max(0, Math.min(100, Math.round(altPct)));
-      btcPct = 100 - altPct;
-      return `${altPct}/${btcPct}`;
-    }
-
-    function formatRangeTwoDecimals(rangeStr) {
-      if (!rangeStr) return "–";
-      const m = String(rangeStr).match(/(\d+(?:\.\d+)?)[^\d]+(\d+(?:\.\d+)?)/);
-      if (!m) return rangeStr;
-      const low = parseFloat(m[1]);
-      const high = parseFloat(m[2]);
-      return low.toFixed(2) + "% – " + high.toFixed(2) + "%";
-    }
-
-    async function fetchPrices() {
-      try {
-        const resp = await fetch("/prices_latest.json", { cache: "no-store" });
-        if (!resp.ok) throw new Error("prices fetch failed");
-        const data = await resp.json();
-
-        const metaEl = document.getElementById("meta-date");
-        if (metaEl && data && data.timestamp) metaEl.textContent = formatDateTime(data.timestamp);
-
-        const tbody = document.getElementById("prices-tbody");
-        tbody.innerHTML = "";
-
-        const rows = Array.isArray(data.rows) ? data.rows : [];
-        pricesRowsGlobal = rows;
-
-        let btcMc = 0;
-        for (const r of rows) {
-          const tok = (r.token || "").toUpperCase();
-          if (tok === "BTC") {
-            const v = (typeof r.mc === "number") ? r.mc : parseFloat(r.mc || "0");
-            if (!Number.isNaN(v) && v > 0) btcMc = v;
-            break;
-          }
-        }
-
-        rows.forEach(row => {
-          const tr = document.createElement("tr");
-
-          const tdToken = document.createElement("td");
-          tdToken.className = "token-col";
-          tdToken.textContent = row.token || "";
-          tr.appendChild(tdToken);
-
-          const tdPrice = document.createElement("td");
-          tdPrice.className = "center";
-          const priceVal = typeof row.price === "number" ? row.price : parseFloat(row.price || "0");
-          if (!Number.isNaN(priceVal) && priceVal > 0) {
-            if (priceVal >= 1000) tdPrice.textContent = "$" + Math.round(priceVal).toLocaleString();
-            else if (priceVal >= 1) tdPrice.textContent = "$" + priceVal.toFixed(2);
-            else if (priceVal >= 0.01) tdPrice.textContent = "$" + priceVal.toFixed(3);
-            else tdPrice.textContent = "$" + priceVal.toFixed(6);
-          } else tdPrice.textContent = "–";
-          tr.appendChild(tdPrice);
-
-          const tdDom = document.createElement("td");
-          tdDom.className = "center";
-          const dom = (typeof row.btc_dom === "number") ? row.btc_dom : parseFloat(row.btc_dom ?? "NaN");
-          tdDom.textContent = Number.isFinite(dom) ? dom.toFixed(1) + "%" : "–";
-          tr.appendChild(tdDom);
-
-          const tdRange = document.createElement("td");
-          tdRange.className = "center";
-          tdRange.textContent = formatRangeTwoDecimals(row.range);
-          tr.appendChild(tdRange);
-
-          const tdAction = document.createElement("td");
-          tdAction.className = "center";
-          tdAction.textContent = computeActionForRow(row);
-          tr.appendChild(tdAction);
-
-          const tdRoi = document.createElement("td");
-          tdRoi.className = "center";
-          const roiFrac = computePotentialRoi(row, btcMc);
-          if (roiFrac == null || Number.isNaN(roiFrac)) tdRoi.textContent = "–";
-          else {
-            const pct = roiFrac * 100;
-            const sign = pct > 0 ? "+" : "";
-            tdRoi.textContent = sign + pct.toFixed(1) + "%";
-          }
-          tr.appendChild(tdRoi);
-
-          tbody.appendChild(tr);
-        });
-
-        buildOracleMenus();
-        updateOracle();
-      } catch (err) {
-        console.error("Prices error:", err);
-      }
-    }
-
-    async function fetchAgentsAndAction() {
-      // KC1 + BTC buy & hold from knifecatcher_latest.json
-      // KC2 + recommended trade from dom_signals_hourly.json
-      try {
-        const resp = await fetch("/knifecatcher_latest.json", { cache: "no-store" });
-        if (!resp.ok) throw new Error("knifecatcher fetch failed");
-        const data = await resp.json();
-
-        const base = typeof data.base_balance_usd === "number" ? data.base_balance_usd : parseFloat(data.base_balance_usd || "0");
-        const portVal = typeof data.portfolio_value === "number" ? data.portfolio_value : parseFloat(data.portfolio_value || "0");
-        const btcVal = typeof data.btc_value === "number" ? data.btc_value : parseFloat(data.btc_value || "0");
-
-        const kc1BalEl = document.getElementById("agent-kc1-balance");
-        const kc1RoiEl = document.getElementById("agent-kc1-roi");
-        const btcBalEl = document.getElementById("agent-btc-balance");
-        const btcRoiEl = document.getElementById("agent-btc-roi");
-
-        function fmtUsd(x) { return (Number.isFinite(x) ? "$" + x.toFixed(2) : "$--"); }
-        function fmtPct(x) {
-          if (!Number.isFinite(x)) return "--%";
-          const pct = x * 100;
-          const sign = pct > 0 ? "+" : "";
-          return sign + pct.toFixed(1) + "%";
-        }
-
-        if (Number.isFinite(portVal) && kc1BalEl) kc1BalEl.textContent = fmtUsd(portVal);
-        if (base > 0 && kc1RoiEl) kc1RoiEl.textContent = fmtPct((portVal / base) - 1);
-
-        if (base > 0 && btcRoiEl) btcRoiEl.textContent = fmtPct((btcVal / base) - 1);
-        // “Assume $100 originally” request: show BTC buy&hold balance as 100*(1+roi)
-        if (base > 0 && btcBalEl) {
-          const roi = (btcVal / base) - 1;
-          btcBalEl.textContent = fmtUsd(100 * (1 + roi));
-        }
-        // Similarly, KC1 balance as $100*(1+roi)
-        if (base > 0 && kc1BalEl) {
-          const roi = (portVal / base) - 1;
-          kc1BalEl.textContent = fmtUsd(100 * (1 + roi));
-        }
-      } catch (e) {
-        console.error("KC1/BTC agents error:", e);
-      }
-
-      try {
-        const resp2 = await fetch("/dom_signals_hourly.json", { cache: "no-store" });
-        if (!resp2.ok) throw new Error("dom_signals fetch failed");
-        const sig = await resp2.json();
-
-        const kc2BalEl = document.getElementById("agent-kc2-balance");
-        const kc2RoiEl = document.getElementById("agent-kc2-roi");
-
-        const actionKindEl = document.getElementById("action-kind");
-        const actionTokenEl = document.getElementById("action-token");
-        const actionSubEl = document.getElementById("action-sub");
-
-        function fmtUsd(x) { return (Number.isFinite(x) ? "$" + x.toFixed(2) : "$--"); }
-        function fmtPct(x) {
-          if (!Number.isFinite(x)) return "--%";
-          const pct = x * 100;
-          const sign = pct > 0 ? "+" : "";
-          return sign + pct.toFixed(1) + "%";
-        }
-
-        const equityUsd = (typeof sig.equity_usd === "number") ? sig.equity_usd : parseFloat(sig.equity_usd || "NaN");
-        const roiFrac = (typeof sig.roi_frac === "number") ? sig.roi_frac : parseFloat(sig.roi_frac || "NaN");
-
-        if (kc2BalEl && Number.isFinite(equityUsd)) {
-          // “Assume $100 originally”: use ROI to compute balance
-          if (Number.isFinite(roiFrac)) kc2BalEl.textContent = fmtUsd(100 * (1 + roiFrac));
-          else kc2BalEl.textContent = fmtUsd(equityUsd);
-        }
-        if (kc2RoiEl) kc2RoiEl.textContent = fmtPct(roiFrac);
-
-        // Action box from KC2 position (always “A always green” per your latest instruction set)
-        const pos = sig && sig.position ? sig.position : null;
-        if (!pos) return;
-
-        const token = (pos.token || "STABLES").toString().toUpperCase();
-        const entry = (typeof pos.entry_price === "number") ? pos.entry_price : parseFloat(pos.entry_price || "NaN");
-        const target = (typeof pos.target_price === "number") ? pos.target_price : parseFloat(pos.target_price || "NaN");
-
-        // If in stables, show STABLES; otherwise show token.
-        if (actionKindEl) actionKindEl.textContent = "BUY";
-        if (actionTokenEl) actionTokenEl.textContent = token === "NONE" ? "STABLES" : "$" + token;
-
-        let sub = "Entry: -- | Target: --";
-        if (Number.isFinite(entry) && Number.isFinite(target)) {
-          sub = `Entry: $${entry.toFixed(2)} | Target: $${target.toFixed(2)}`;
-        }
-        if (actionSubEl) actionSubEl.textContent = sub;
-      } catch (e2) {
-        console.error("KC2/action error:", e2);
-      }
-    }
-
-    // -------- Oracle helpers --------
-    function formatTokenLabel(token) {
-      if (token === "ALTS") return "Alts";
+    function formatTokenLabel(token){
+      if(token==="ALTS") return "Alts";
       const lower = token.toLowerCase();
       return lower.charAt(0).toUpperCase() + lower.slice(1);
     }
 
-    function formatTokenSetLabel(tokens) {
-      if (tokens.length === 0) return "Select";
-      if (tokens.includes("ALTS")) return "Alts";
-      if (tokens.length === 1) return formatTokenLabel(tokens[0]);
+    function formatTokenSetLabel(tokens){
+      if(tokens.length===0) return "Select";
+      if(tokens.includes("ALTS")) return "Alts";
+      if(tokens.length===1) return formatTokenLabel(tokens[0]);
       return tokens.map(formatTokenLabel).join("");
     }
 
-    function getLiveMC(token) {
-      const row = pricesRowsGlobal.find(r => r.token === token);
-      if (!row) return 0;
-      const v = row.mc;
-      if (typeof v === "number") return v;
-      const f = parseFloat(v || "0");
-      return Number.isNaN(f) ? 0 : f;
-    }
+    function computeOracleDomAndRange(xTokens,yTokens){
+      if(!xTokens?.length || !yTokens?.length) return {ok:false, reason:"Select both sides"};
 
-    function getHistorySeries(key) {
-      if (!oracleHistories) return null;
-      return oracleHistories[key] || null;
-    }
+      const expand = (arr)=>{
+        if(arr.includes("ALTS")) return ORACLE_TOKENS.filter(t=>t!=="BTC");
+        return arr;
+      };
+      const xSet = new Set(expand(xTokens));
+      const ySet = new Set(expand(yTokens));
+      if(xSet.size===0 || ySet.size===0) return {ok:false, reason:"Both sides need tokens"};
 
-    function sortTokensByMC(tokens) {
-      const arr = [...tokens];
-      arr.sort((a, b) => {
-        const aMC = getLiveMC(a);
-        const bMC = getLiveMC(b);
-        if (aMC > bMC) return -1;
-        if (aMC < bMC) return 1;
-        return a.localeCompare(b);
-      });
-      return arr;
-    }
+      const mcX = Array.from(xSet).reduce((a,t)=>a+getLiveMC(t),0);
+      const mcY = Array.from(ySet).reduce((a,t)=>a+getLiveMC(t),0);
+      const tot = mcX+mcY;
+      if(tot<=0) return {ok:false, reason:"No market cap data"};
+      const domNow = (mcX/tot)*100;
 
-    function computeOracleDomAndRange(xTokens, yTokens) {
-      if (!Array.isArray(xTokens) || !Array.isArray(yTokens)) return { ok: false, reason: "Missing selections" };
-      if (xTokens.length === 0 || yTokens.length === 0) return { ok: false, reason: "Select both sides" };
-
-      const expandSide = (tokens) => tokens.includes("ALTS") ? ORACLE_TOKENS.filter(t => t !== "BTC") : tokens;
-      const xSet = expandSide(xTokens);
-      const ySet = expandSide(yTokens);
-
-      const fullX = new Set(xSet);
-      const fullY = new Set(ySet);
-
-      if (fullX.size === 0 || fullY.size === 0) return { ok: false, reason: "Both sides need tokens" };
-
-      const mcX = Array.from(fullX).reduce((acc, t) => acc + getLiveMC(t), 0);
-      const mcY = Array.from(fullY).reduce((acc, t) => acc + getLiveMC(t), 0);
-      const totalNow = mcX + mcY;
-      if (totalNow <= 0) return { ok: false, reason: "No market cap data" };
-
-      const domNow = (mcX / totalNow) * 100;
-
-      const key = `${Array.from(fullX).sort().join("+")}__${Array.from(fullY).sort().join("+")}`;
+      const key = `${Array.from(xSet).sort().join("+")}__${Array.from(ySet).sort().join("+")}`;
       const hist = getHistorySeries(key);
-      let domMin = null, domMax = null, days = 0;
 
-      if (hist && Array.isArray(hist.values) && hist.values.length > 0) {
+      let domMin=null, domMax=null, days=0;
+      if(hist?.values?.length){
         days = hist.values.length;
         domMin = Math.min(...hist.values);
         domMax = Math.max(...hist.values);
-      } else {
-        const xIsBTCOnly = (xTokens.length === 1 && xTokens[0] === "BTC");
-        const yIsAltsOnly = (yTokens.length === 1 && yTokens[0] === "ALTS");
-        if (xIsBTCOnly && yIsAltsOnly && domBandsGlobal) {
+      }else{
+        const xIsBTCOnly = (xTokens.length===1 && xTokens[0]==="BTC");
+        const yIsAltsOnly = (yTokens.length===1 && yTokens[0]==="ALTS");
+        if(xIsBTCOnly && yIsAltsOnly && domBandsGlobal){
           const mn = parseFloat(domBandsGlobal.min_pct);
           const mx = parseFloat(domBandsGlobal.max_pct);
-          if (!Number.isNaN(mn) && !Number.isNaN(mx)) {
-            domMin = mn; domMax = mx; days = domBandsGlobal.days || 0;
+          if(Number.isFinite(mn)&&Number.isFinite(mx)){
+            domMin=mn; domMax=mx; days=domBandsGlobal.days||0;
           }
         }
       }
 
-      const prettyName = (tokens) => {
-        if (tokens.includes("ALTS")) return "Alts";
-        const sorted = sortTokensByMC(tokens);
-        return sorted.map(formatTokenLabel).join("");
-      };
-
       return {
-        ok: true,
-        domNow,
-        domMin,
-        domMax,
-        days,
-        mcX,
-        mcY,
-        labelX: prettyName(xTokens),
-        labelY: prettyName(yTokens),
+        ok:true,
+        domNow, domMin, domMax, days, mcX, mcY,
+        labelX: formatTokenSetLabel(xTokens),
+        labelY: formatTokenSetLabel(yTokens)
       };
     }
 
-    function buildOracleMenus() {
-      const xMenu = document.getElementById("oracle-x-menu");
-      const yMenu = document.getElementById("oracle-y-menu");
-      const xLabel = document.getElementById("oracle-x-label");
-      const yLabel = document.getElementById("oracle-y-label");
-      const xPill = document.getElementById("oracle-x-pill");
-      const yPill = document.getElementById("oracle-y-pill");
+    function buildOracleMenus(){
+      const xMenu=document.getElementById("oracle-x-menu");
+      const yMenu=document.getElementById("oracle-y-menu");
+      const xLabel=document.getElementById("oracle-x-label");
+      const yLabel=document.getElementById("oracle-y-label");
+      const xPill=document.getElementById("oracle-x-pill");
+      const yPill=document.getElementById("oracle-y-pill");
+      if(!xMenu||!yMenu||!xLabel||!yLabel||!xPill||!yPill) return;
 
-      if (!xMenu || !yMenu || !xLabel || !yLabel || !xPill || !yPill) return;
+      const xOrder=["BTC",...ORACLE_TOKENS.filter(t=>t!=="BTC")];
+      const yOrder=["ALTS","BTC",...ORACLE_TOKENS.filter(t=>t!=="BTC")];
+      const xIsPureBTC=(oracleSelectedX.length===1 && oracleSelectedX[0]==="BTC");
 
-      const xOrder = ["BTC", ...ORACLE_TOKENS.filter(t => t !== "BTC")];
-      const yOrder = ["ALTS", "BTC", ...ORACLE_TOKENS.filter(t => t !== "BTC")];
+      xMenu.innerHTML=""; yMenu.innerHTML="";
 
-      const xIsPureBTC = (oracleSelectedX.length === 1 && oracleSelectedX[0] === "BTC");
+      const makeOpt = (tok, side)=>{
+        const div=document.createElement("div");
+        div.className="opt";
+        div.dataset.token=tok;
 
-      xMenu.innerHTML = "";
-      yMenu.innerHTML = "";
-
-      xOrder.forEach(tok => {
-        const div = document.createElement("div");
-        div.className = "oracle-option";
-        div.dataset.token = tok;
-
-        const box = document.createElement("div");
-        box.className = "oracle-option-box";
-
-        const tick = document.createElement("span");
-        tick.className = "oracle-option-tick";
-        tick.textContent = "✓";
-
-        const label = document.createElement("span");
-        label.className = "oracle-option-label";
-        label.textContent = formatTokenLabel(tok);
-
+        const box=document.createElement("div");
+        box.className="box";
+        const tick=document.createElement("span");
+        tick.className="tick";
+        tick.textContent="✓";
         box.appendChild(tick);
+
+        const label=document.createElement("span");
+        label.textContent=formatTokenLabel(tok);
+
         div.appendChild(box);
         div.appendChild(label);
 
-        if (oracleSelectedX.includes(tok)) div.classList.add("selected");
+        const selected = (side==="x" ? oracleSelectedX.includes(tok) : oracleSelectedY.includes(tok));
+        if(selected) div.classList.add("selected");
 
-        div.addEventListener("click", (e) => {
+        div.addEventListener("click",(e)=>{
           e.stopPropagation();
-          if (tok === "BTC") {
-            oracleSelectedX = oracleSelectedX.includes("BTC") ? oracleSelectedX.filter(t => t !== "BTC") : ["BTC"];
-          } else {
-            oracleSelectedX = oracleSelectedX.filter(t => t !== "BTC");
-            oracleSelectedX = oracleSelectedX.includes(tok) ? oracleSelectedX.filter(t => t !== tok) : [...oracleSelectedX, tok];
+          if(side==="x"){
+            if(tok==="BTC"){
+              oracleSelectedX = oracleSelectedX.includes("BTC") ? oracleSelectedX.filter(t=>t!=="BTC") : ["BTC"];
+            }else{
+              oracleSelectedX = oracleSelectedX.filter(t=>t!=="BTC");
+              oracleSelectedX = oracleSelectedX.includes(tok) ? oracleSelectedX.filter(t=>t!==tok) : [...oracleSelectedX, tok];
+            }
+          }else{
+            if(tok==="ALTS"){
+              oracleSelectedY=["ALTS"];
+            }else{
+              oracleSelectedY = oracleSelectedY.filter(t=>t!=="ALTS");
+              oracleSelectedY = oracleSelectedY.includes(tok) ? oracleSelectedY.filter(t=>t!==tok) : [...oracleSelectedY, tok];
+            }
           }
-          xLabel.textContent = formatTokenSetLabel(oracleSelectedX);
           buildOracleMenus();
           updateOracle();
         });
 
-        xMenu.appendChild(div);
-      });
+        return div;
+      };
 
-      const xClear = document.createElement("div");
-      xClear.className = "oracle-clear";
-      xClear.textContent = "Clear";
-      xClear.addEventListener("click", (e) => {
-        e.stopPropagation();
-        oracleSelectedX = [];
-        xLabel.textContent = "Select";
-        buildOracleMenus();
-        updateOracle();
+      xOrder.forEach(tok=>{
+        if(tok==="ALTS") return;
+        xMenu.appendChild(makeOpt(tok,"x"));
       });
+      const xClear=document.createElement("div");
+      xClear.className="clear";
+      xClear.textContent="Clear";
+      xClear.onclick=(e)=>{e.stopPropagation(); oracleSelectedX=[]; buildOracleMenus(); updateOracle();};
       xMenu.appendChild(xClear);
 
-      yOrder.forEach(tok => {
-        if (tok === "ALTS" && !xIsPureBTC) return;
-
-        const div = document.createElement("div");
-        div.className = "oracle-option";
-        div.dataset.token = tok;
-
-        const box = document.createElement("div");
-        box.className = "oracle-option-box";
-
-        const tick = document.createElement("span");
-        tick.className = "oracle-option-tick";
-        tick.textContent = "✓";
-
-        const label = document.createElement("span");
-        label.className = "oracle-option-label";
-        label.textContent = formatTokenLabel(tok);
-
-        box.appendChild(tick);
-        div.appendChild(box);
-        div.appendChild(label);
-
-        if (oracleSelectedY.includes(tok)) div.classList.add("selected");
-
-        div.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (tok === "ALTS") {
-            oracleSelectedY = ["ALTS"];
-          } else {
-            oracleSelectedY = oracleSelectedY.filter(t => t !== "ALTS");
-            oracleSelectedY = oracleSelectedY.includes(tok) ? oracleSelectedY.filter(t => t !== tok) : [...oracleSelectedY, tok];
-          }
-          yLabel.textContent = formatTokenSetLabel(oracleSelectedY);
-          buildOracleMenus();
-          updateOracle();
-        });
-
-        yMenu.appendChild(div);
+      yOrder.forEach(tok=>{
+        if(tok==="ALTS" && !xIsPureBTC) return;
+        yMenu.appendChild(makeOpt(tok,"y"));
       });
-
-      const yClear = document.createElement("div");
-      yClear.className = "oracle-clear";
-      yClear.textContent = "Clear";
-      yClear.addEventListener("click", (e) => {
-        e.stopPropagation();
-        oracleSelectedY = [];
-        yLabel.textContent = "Select";
-        buildOracleMenus();
-        updateOracle();
-      });
+      const yClear=document.createElement("div");
+      yClear.className="clear";
+      yClear.textContent="Clear";
+      yClear.onclick=(e)=>{e.stopPropagation(); oracleSelectedY=[]; buildOracleMenus(); updateOracle();};
       yMenu.appendChild(yClear);
 
-      xLabel.textContent = formatTokenSetLabel(oracleSelectedX);
-      yLabel.textContent = formatTokenSetLabel(oracleSelectedY);
+      xLabel.textContent=formatTokenSetLabel(oracleSelectedX);
+      yLabel.textContent=formatTokenSetLabel(oracleSelectedY);
 
-      function closeAll() {
-        xMenu.classList.remove("open");
-        yMenu.classList.remove("open");
-      }
-
-      xPill.onclick = (e) => {
-        e.stopPropagation();
-        const isOpen = xMenu.classList.contains("open");
-        closeAll();
-        if (!isOpen) xMenu.classList.add("open");
-      };
-      yPill.onclick = (e) => {
-        e.stopPropagation();
-        const isOpen = yMenu.classList.contains("open");
-        closeAll();
-        if (!isOpen) yMenu.classList.add("open");
-      };
-
+      function closeAll(){xMenu.classList.remove("open"); yMenu.classList.remove("open");}
+      xPill.onclick=(e)=>{e.stopPropagation(); const open=xMenu.classList.contains("open"); closeAll(); if(!open) xMenu.classList.add("open");};
+      yPill.onclick=(e)=>{e.stopPropagation(); const open=yMenu.classList.contains("open"); closeAll(); if(!open) yMenu.classList.add("open");};
       document.addEventListener("click", closeAll);
-      xMenu.addEventListener("click", (e) => e.stopPropagation());
-      yMenu.addEventListener("click", (e) => e.stopPropagation());
     }
 
-    async function updateOracle() {
-      const mainEl = document.getElementById("oracle-main-line");
-      const subEl = document.getElementById("oracle-sub-line");
-      const rangeEl = document.getElementById("oracle-range-line");
-      const errEl = document.getElementById("oracle-error");
+    function updateOracle(){
+      const main=document.getElementById("oracle-main-line");
+      const sub=document.getElementById("oracle-sub-line");
+      const rng=document.getElementById("oracle-range-line");
+      const err=document.getElementById("oracle-error");
+      if(!main||!sub||!rng||!err) return;
 
-      if (!mainEl || !subEl || !rangeEl || !errEl) return;
-
-      const res = computeOracleDomAndRange(oracleSelectedX, oracleSelectedY);
-      if (!res.ok) {
-        mainEl.innerHTML = '<span class="dom-value">--</span><span class="dom-label">Select X and Y</span>';
-        subEl.innerHTML = 'Market caps: <span>–</span>';
-        rangeEl.innerHTML = 'Range: <span>–</span>';
-        errEl.textContent = res.reason || "";
+      const res=computeOracleDomAndRange(oracleSelectedX, oracleSelectedY);
+      if(!res.ok){
+        main.innerHTML='<span class="val">--</span><span>Select X and Y</span>';
+        sub.innerHTML='Market caps: <span>–</span>';
+        rng.innerHTML='Range: <span>–</span>';
+        err.textContent=res.reason||"";
         return;
       }
+      err.textContent="";
 
-      errEl.textContent = "";
       const domStr = Number.isFinite(res.domNow) ? res.domNow.toFixed(1) : "--";
-      mainEl.innerHTML = `<span class="dom-value">${domStr}</span><span class="dom-label">${res.labelX} vs ${res.labelY}</span>`;
+      main.innerHTML = `<span class="val">${domStr}</span><span>${res.labelX} vs ${res.labelY}</span>`;
 
-      subEl.innerHTML = `Market caps: <span>${formatMC(res.mcX || 0)} vs ${formatMC(res.mcY || 0)}</span>`;
+      sub.innerHTML = `Market caps: <span>${formatMC(res.mcX)} vs ${formatMC(res.mcY)}</span>`;
 
-      let rangeSpan = "–";
-      if (res.domMin != null && res.domMax != null && res.domMax > res.domMin) {
+      let rangeSpan="–";
+      if(res.domMin!=null && res.domMax!=null && res.domMax>res.domMin){
         rangeSpan = `${Math.round(res.domMin)}%–${Math.round(res.domMax)}%`;
       }
-      rangeEl.innerHTML = `Range: <span>${rangeSpan}</span>`;
+      rng.innerHTML = `Range: <span>${rangeSpan}</span>`;
     }
 
-    (function init() {
+    function parseRangeToLowHigh(rangeStr){
+      if(!rangeStr) return null;
+      const m=String(rangeStr).match(/(\d+(?:\.\d+)?)[^\d]+(\d+(?:\.\d+)?)/);
+      if(!m) return null;
+      const low=parseFloat(m[1]), high=parseFloat(m[2]);
+      if(!(high>low)) return null;
+      return {low,high};
+    }
+    function computeNeutralHigh(low,high){
+      const width=high-low;
+      return low + 0.60*width;
+    }
+    function computePotentialRoi(row, btcMc){
+      const token=(row.token||"").toUpperCase();
+      if(!token || token==="BTC" || token.includes("USD")) return null;
+
+      const rangeInfo=parseRangeToLowHigh(row.range||"");
+      if(!rangeInfo) return null;
+      const {low,high}=rangeInfo;
+
+      const altMc = (typeof row.mc==="number") ? row.mc : parseFloat(row.mc||"0");
+      const priceNow = (typeof row.price==="number") ? row.price : parseFloat(row.price||"0");
+      if(!(btcMc>0 && altMc>0 && priceNow>0)) return null;
+
+      const neutralHigh = computeNeutralHigh(low,high);
+      const domTarget = neutralHigh/100.0;
+      if(!(domTarget>0 && domTarget<1)) return null;
+
+      const sTarget = (1-domTarget)/domTarget * btcMc;
+      const supplyEst = altMc/priceNow;
+      if(!(supplyEst>0)) return null;
+
+      const targetPrice = sTarget/supplyEst;
+      if(!(targetPrice>0)) return null;
+
+      return (targetPrice/priceNow)-1;
+    }
+
+    function formatRangeTwoDecimals(rangeStr){
+      if(!rangeStr) return "–";
+      const m=String(rangeStr).match(/(\d+(?:\.\d+)?)[^\d]+(\d+(?:\.\d+)?)/);
+      if(!m) return rangeStr;
+      const low=parseFloat(m[1]), high=parseFloat(m[2]);
+      if(!Number.isFinite(low)||!Number.isFinite(high)) return rangeStr;
+      return low.toFixed(2) + "% – " + high.toFixed(2) + "%";
+    }
+
+    function computeActionForRow(row){
+      const token = row.token;
+      if(!token) return "–";
+      const up=String(token).toUpperCase();
+      if(up==="BTC" || up.includes("USD")) return "–";
+
+      const domRaw = (typeof row.btc_dom==="number") ? row.btc_dom : parseFloat(row.btc_dom ?? "NaN");
+      if(!Number.isFinite(domRaw)) return "–";
+
+      const info = parseRangeToLowHigh(row.range||"");
+      if(!info) return "–";
+      const {low,high}=info;
+
+      let pos=(domRaw-low)/(high-low);
+      if(!Number.isFinite(pos)) return "–";
+      pos=Math.max(0,Math.min(1,pos));
+
+      if(pos>=0.4 && pos<=0.6) return "Stables";
+
+      let altPct, btcPct;
+      if(pos<0.4){
+        const t=pos/0.4;
+        btcPct = 100 - Math.round(t*50);
+        altPct = 100 - btcPct;
+      }else{
+        const t=(pos-0.6)/0.4;
+        altPct = 50 + Math.round(t*50);
+        btcPct = 100 - altPct;
+      }
+      altPct=Math.max(0,Math.min(100,Math.round(altPct)));
+      btcPct=100-altPct;
+      return `${altPct}/${btcPct}`;
+    }
+
+    async function fetchPrices(){
+      try{
+        const resp=await fetch(URL_PRICES,{cache:"no-store"});
+        if(!resp.ok) throw new Error("prices failed");
+        const data=await resp.json();
+
+        if(data?.timestamp){
+          document.getElementById("meta-date").textContent = formatDateTime(data.timestamp);
+        }
+
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        pricesRowsGlobal = rows;
+
+        // BTC mc for Pot ROI
+        let btcMc=0;
+        for(const r of rows){
+          if((r.token||"").toUpperCase()==="BTC"){
+            const v=(typeof r.mc==="number") ? r.mc : parseFloat(r.mc||"0");
+            if(Number.isFinite(v)&&v>0) btcMc=v;
+          }
+        }
+
+        const tbody=document.getElementById("prices-tbody");
+        tbody.innerHTML="";
+
+        for(const row of rows){
+          const tr=document.createElement("tr");
+
+          const tdT=document.createElement("td");
+          tdT.className="token";
+          tdT.textContent=row.token||"";
+          tr.appendChild(tdT);
+
+          const tdP=document.createElement("td");
+          tdP.className="c";
+          const priceVal = (typeof row.price==="number") ? row.price : parseFloat(row.price||"0");
+          if(Number.isFinite(priceVal) && priceVal>0){
+            if(priceVal>=1000) tdP.textContent="$"+Math.round(priceVal).toLocaleString();
+            else if(priceVal>=1) tdP.textContent="$"+priceVal.toFixed(2);
+            else if(priceVal>=0.01) tdP.textContent="$"+priceVal.toFixed(3);
+            else tdP.textContent="$"+priceVal.toFixed(6);
+          }else tdP.textContent="–";
+          tr.appendChild(tdP);
+
+          const tdD=document.createElement("td");
+          tdD.className="c";
+          const domVal=(typeof row.btc_dom==="number") ? row.btc_dom : parseFloat(row.btc_dom||"NaN");
+          tdD.textContent = Number.isFinite(domVal) ? domVal.toFixed(1)+"%" : "–";
+          tr.appendChild(tdD);
+
+          const tdR=document.createElement("td");
+          tdR.className="c";
+          tdR.textContent = formatRangeTwoDecimals(row.range);
+          tr.appendChild(tdR);
+
+          const tdA=document.createElement("td");
+          tdA.className="c";
+          tdA.textContent = computeActionForRow(row);
+          tr.appendChild(tdA);
+
+          const tdROI=document.createElement("td");
+          tdROI.className="c";
+          const roiFrac=computePotentialRoi(row, btcMc);
+          if(roiFrac==null || Number.isNaN(roiFrac)) tdROI.textContent="–";
+          else{
+            const pct=roiFrac*100;
+            const sign=pct>0?"+":"";
+            tdROI.textContent=sign + pct.toFixed(1) + "%";
+          }
+          tr.appendChild(tdROI);
+
+          tbody.appendChild(tr);
+        }
+
+        buildOracleMenus();
+        updateOracle();
+      }catch(e){
+        console.error(e);
+      }
+    }
+
+    async function fetchAgentsAndAction(){
+      try{
+        // KC1 (Index rebalancer) + BTC baseline
+        const r1=await fetch(URL_KC1,{cache:"no-store"});
+        if(!r1.ok) throw new Error("kc1 failed");
+        const kc1=await r1.json();
+
+        const base = (typeof kc1.base_balance_usd==="number") ? kc1.base_balance_usd : parseFloat(kc1.base_balance_usd||"0");
+        const portVal = (typeof kc1.portfolio_value==="number") ? kc1.portfolio_value : parseFloat(kc1.portfolio_value||"NaN");
+        const btcVal  = (typeof kc1.btc_value==="number") ? kc1.btc_value : parseFloat(kc1.btc_value||"NaN");
+
+        let kc1Roi=null, btcRoi=null;
+        if(base>0 && Number.isFinite(portVal) && Number.isFinite(btcVal)){
+          kc1Roi = (portVal/base)-1;
+          btcRoi = (btcVal/base)-1;
+        }
+
+        document.getElementById("agent-kc1-bal").textContent = Number.isFinite(portVal) ? fmtUsd(portVal) : "$--.--";
+        document.getElementById("agent-kc1-roi").textContent = fmtPct(kc1Roi);
+
+        // BTC buy & hold line: assume $100 start as you requested
+        const btcBal = 100 * (1 + (btcRoi||0));
+        document.getElementById("agent-btc-bal").textContent = Number.isFinite(btcBal) ? fmtUsd(btcBal) : "$--.--";
+        document.getElementById("agent-btc-roi").textContent = fmtPct(btcRoi);
+
+        // KC2 (Knifecatcher) + action section from KC2 position
+        const r2=await fetch(URL_KC2,{cache:"no-store"});
+        if(!r2.ok) throw new Error("kc2 failed");
+        const kc2=await r2.json();
+
+        const eq = (typeof kc2.equity_usd==="number") ? kc2.equity_usd : parseFloat(kc2.equity_usd||"NaN");
+        const kc2Roi = (typeof kc2.roi_frac==="number") ? kc2.roi_frac : parseFloat(kc2.roi_frac||"NaN");
+
+        document.getElementById("agent-kc2-bal").textContent = Number.isFinite(eq) ? fmtUsd(eq) : "$--.--";
+        document.getElementById("agent-kc2-roi").textContent = fmtPct(kc2Roi);
+
+        // ACTION: always green/yellow BUY format (your latest instruction)
+        const pos = kc2.position || {};
+        const token = (pos.token || "STABLES").toString().toUpperCase();
+        const entry = (typeof pos.entry_price==="number") ? pos.entry_price : parseFloat(pos.entry_price||"NaN");
+        const target= (typeof pos.target_price==="number") ? pos.target_price : parseFloat(pos.target_price||"NaN");
+
+        document.getElementById("action-verb").textContent = "BUY";
+        document.getElementById("action-token").textContent = "$" + token;
+
+        const entryStr = Number.isFinite(entry) ? entry.toFixed(2) : "--.--";
+        const targetStr= Number.isFinite(target) ? target.toFixed(2) : "--.--";
+        document.getElementById("action-prices").textContent = `Entry: $${entryStr} | Target: $${targetStr}`;
+
+      }catch(e){
+        console.error(e);
+      }
+    }
+
+    (function init(){
       fetchHMI();
-      fetchSupplies()
-        .then(fetchOracleHistory)
+      fetchOracleHistory()
         .then(fetchDomBands)
         .then(fetchPrices)
         .then(fetchAgentsAndAction);
