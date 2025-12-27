@@ -1,0 +1,12 @@
+{
+  "cum_roi_frac": 0.0,
+  "last_action_key": "UNIUSDT:SHORT",
+  "last_trade_roi_frac": 0.0,
+  "last_trade_ts": 1766874566.1404324,
+  "open_entry_price": 5.957,
+  "open_qty": 15.0,
+  "open_side": "SHORT",
+  "open_symbol": "UNIUSDT",
+  "open_token": "UNI",
+  "open_ts": "2025-12-27T22:29:28.136893Z"
+}

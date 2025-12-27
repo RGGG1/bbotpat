@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""
+KC3 Futures Executor (USDⓈ-M)
+
+- Reads the "desired" KC3 position from /var/www/bbotpat_live/kc3_latest.json
+- Ensures Binance Futures position matches it (one-way mode assumed)
+- Uses full available balance *notional* sizing (simple + aggressive)
+
+IMPORTANT:
+- This places REAL orders when LIVE_TRADING_KC3=1
+- Start with LIVE_TRADING_KC3=0 to test safely.
+"""
+
+import os
+import json
+import time
+import hmac
+import math
+import hashlib
+import urllib.parse
+from pathlib import Path
+from datetime import datetime, timezone
+
+import requests
+
+
+KC3_LATEST = Path("/var/www/bbotpat_live/kc3_latest.json")
+
+BASE_URL = os.getenv("BINANCE_FUTURES_BASE_URL", "https://fapi.binance.com")  # USDⓈ-M futures
+API_KEY = os.getenv("BINANCE_API_KEY", "")
+API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+
+# Toggle for *KC3* execution specifically
+LIVE_TRADING_KC3 = os.getenv("LIVE_TRADING_KC3", "0") == "1"
+
+# Trading config
+QUOTE_ASSET = os.getenv("KC3_QUOTE_ASSET", "USDT")  # Most USD-M perps are ...USDT
+SYMBOL_SUFFIX = os.getenv("KC3_SYMBOL_SUFFIX", "USDT")
+LEVERAGE = int(os.getenv("KC3_LEVERAGE", "1"))      # keep 1 by default
+LOOP_SEC = float(os.getenv("KC3_LOOP_SEC", "1.0"))
+
+# Use full available balance (simple). You can cap with KC3_MAX_NOTIONAL if you want.
+MAX_NOTIONAL = float(os.getenv("KC3_MAX_NOTIONAL", "0"))  # 0 => no cap
+
+# Logging
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def log(msg: str):
+    print(f"[{utc_now_iso()}] {msg}", flush=True)
+
+def safe_read_json(path: Path):
+    try:
+        if not path.exists():
+            return None
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+def _sign(params: dict) -> str:
+    qs = urllib.parse.urlencode(params, doseq=True)
+    return hmac.new(API_SECRET.encode(), qs.encode(), hashlib.sha256).hexdigest()
+
+def _request(method: str, path: str, params: dict | None = None, signed: bool = False):
+    if not API_KEY or not API_SECRET:
+        raise RuntimeError("BINANCE_API_KEY / BINANCE_API_SECRET not set")
+
+    params = params or {}
+    headers = {"X-MBX-APIKEY": API_KEY}
+
+    if signed:
+        params["timestamp"] = int(time.time() * 1000)
+        params["recvWindow"] = 5000
+        params["signature"] = _sign(params)
+
+    url = BASE_URL.rstrip("/") + path
+    r = requests.request(method, url, params=params, headers=headers, timeout=10)
+    if r.status_code >= 400:
+        raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+    return r.json()
+
+def symbol_from_token(token: str) -> str:
+    token = token.upper()
+    # KC3 token names are like "UNI", "SOL" etc.
+    return f"{token}{SYMBOL_SUFFIX}"
+
+def futures_exchange_info():
+    return _request("GET", "/fapi/v1/exchangeInfo", signed=False)
+
+def set_leverage(symbol: str, lev: int):
+    # POST /fapi/v1/leverage
+    params = {"symbol": symbol, "leverage": lev}
+    return _request("POST", "/fapi/v1/leverage", params=params, signed=True)
+
+def account_balance():
+    # GET /fapi/v2/balance
+    return _request("GET", "/fapi/v2/balance", signed=True)
+
+def position_risk():
+    # GET /fapi/v2/positionRisk
+    return _request("GET", "/fapi/v2/positionRisk", signed=True)
+
+def mark_price(symbol: str):
+    # GET /fapi/v1/premiumIndex
+    return _request("GET", "/fapi/v1/premiumIndex", params={"symbol": symbol}, signed=False)
+
+def place_market_order(symbol: str, side: str, qty: float, reduce_only: bool = False):
+    # POST /fapi/v1/order
+    params = {
+        "symbol": symbol,
+        "side": side,              # BUY or SELL
+        "type": "MARKET",
+        "quantity": f"{qty:.8f}",
+        "reduceOnly": "true" if reduce_only else "false",
+    }
+    return _request("POST", "/fapi/v1/order", params=params, signed=True)
+
+def get_available_quote_balance() -> float:
+    bal = account_balance()
+    # balance endpoint returns list of assets
+    for row in bal:
+        if row.get("asset") == QUOTE_ASSET:
+            # availableBalance is typical in futures balance objects
+            avail = row.get("availableBalance")
+            if avail is None:
+                avail = row.get("balance")
+            return float(avail)
+    return 0.0
+
+def get_current_position(symbol: str) -> float:
+    # returns positionAmt (positive long, negative short, 0 flat)
+    pos = position_risk()
+    for row in pos:
+        if row.get("symbol") == symbol:
+            return float(row.get("positionAmt", 0.0))
+    return 0.0
+
+def clamp_notional(notional: float) -> float:
+    if MAX_NOTIONAL and MAX_NOTIONAL > 0:
+        return min(notional, MAX_NOTIONAL)
+    return notional
+
+def compute_qty_from_notional(symbol: str, notional: float) -> float:
+    mp = mark_price(symbol)
+    px = float(mp.get("markPrice", 0.0))
+    if px <= 0:
+        raise RuntimeError(f"Bad mark price for {symbol}: {mp}")
+    return notional / px
+
+def main():
+    log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING_KC3}")
+    last_desired = None
+
+    # (Optional) best-effort set leverage for any symbol we trade
+    # We set it when we first see a new desired symbol.
+
+    while True:
+        doc = safe_read_json(KC3_LATEST)
+
+        if not isinstance(doc, dict):
+            time.sleep(LOOP_SEC)
+            continue
+
+        pos = doc.get("position")
+        if not isinstance(pos, dict):
+            # desired state = no position (flat)
+            desired = None
+        else:
+            desired = {
+                "side": str(pos.get("side", "")).upper(),   # LONG/SHORT (paper)
+                "token": str(pos.get("token", "")).upper(),
+            }
+            if desired["side"] not in ("LONG", "SHORT") or not desired["token"]:
+                desired = None
+
+        # only act if desired changed
+        if desired == last_desired:
+            time.sleep(LOOP_SEC)
+            continue
+
+        last_desired = desired
+
+        # Determine target symbol + direction
+        if desired is None:
+            log("Desired: FLAT (no position). Not forcing flatten automatically (safe).")
+            time.sleep(LOOP_SEC)
+            continue
+
+        symbol = symbol_from_token(desired["token"])
+        paper_side = desired["side"]
+
+        # One-way mode mapping:
+        # - LONG  => net positionAmt > 0
+        # - SHORT => net positionAmt < 0
+        target_sign = 1.0 if paper_side == "LONG" else -1.0
+
+        try:
+            # ensure leverage
+            try:
+                set_leverage(symbol, LEVERAGE)
+            except Exception as e:
+                log(f"Warn: leverage set failed for {symbol}: {e}")
+
+            cur_amt = get_current_position(symbol)
+
+            # If we are already correct direction (same sign), do nothing.
+            if cur_amt != 0 and math.copysign(1.0, cur_amt) == target_sign:
+                log(f"Already in {symbol} direction={paper_side} (amt={cur_amt}). No action.")
+                time.sleep(LOOP_SEC)
+                continue
+
+            # If we have opposite position, close it first with reduceOnly
+            if cur_amt != 0 and math.copysign(1.0, cur_amt) != target_sign:
+                close_side = "BUY" if cur_amt < 0 else "SELL"  # if short -> buy to close, if long -> sell to close
+                close_qty = abs(cur_amt)
+                log(f"Need flip. Closing {symbol} amt={cur_amt} via {close_side} qty={close_qty} reduceOnly")
+                if LIVE_TRADING_KC3:
+                    place_market_order(symbol, close_side, close_qty, reduce_only=True)
+                else:
+                    log("(paper) would place reduceOnly close order")
+
+            # Open new position using available balance notional
+            avail = get_available_quote_balance()
+            notional = clamp_notional(avail * LEVERAGE)
+            if notional <= 1.0:
+                log(f"Not enough available {QUOTE_ASSET} to open (avail={avail}).")
+                time.sleep(LOOP_SEC)
+                continue
+
+            qty = compute_qty_from_notional(symbol, notional)
+            open_side = "BUY" if paper_side == "LONG" else "SELL"
+            log(f"Opening {paper_side} {symbol} using notional~{notional:.2f} => qty~{qty:.6f}")
+
+            if LIVE_TRADING_KC3:
+                place_market_order(symbol, open_side, qty, reduce_only=False)
+            else:
+                log("(paper) would place open order")
+
+        except Exception as e:
+            log(f"ERROR: {e}")
+
+        time.sleep(LOOP_SEC)
+
+
+if __name__ == "__main__":
+    main()

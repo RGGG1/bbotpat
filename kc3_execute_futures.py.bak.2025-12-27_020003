@@ -1,0 +1,301 @@
+#!/usr/bin/env python3
+"""
+KC3 Futures Executor (USDⓈ-M)
+
+Key fixes:
+- Forced testing uses OVERRIDE file (not overwritten by paper agent):
+    /var/www/bbotpat_live/kc3_exec_desired.json
+  If override exists and contains {"position":{...}}, we use it.
+  Otherwise we fall back to /var/www/bbotpat_live/kc3_latest.json
+
+- Dry-run (LIVE_TRADING_KC3=0) will NOT spam opens every loop.
+  It will log only once per desired change.
+
+- Balance: try /fapi/v2/balance for QUOTE_ASSET; fallback to /fapi/v2/account.availableBalance
+
+- Telegram notifications supported (same env vars as before).
+"""
+
+import os, json, time, hmac, hashlib, urllib.parse
+from pathlib import Path
+from datetime import datetime, timezone
+import requests
+
+# Default desired inputs
+KC3_LATEST   = Path("/var/www/bbotpat_live/kc3_latest.json")
+KC3_OVERRIDE = Path("/var/www/bbotpat_live/kc3_exec_desired.json")  # <-- use this for forced tests
+
+STATE_DIR = Path("/root/bbotpat_live/data")
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+EXEC_STATE = STATE_DIR / "kc3_futures_exec_state.json"
+
+BASE_URL = os.getenv("BINANCE_FUTURES_BASE_URL", "https://fapi.binance.com").rstrip("/")
+API_KEY  = os.getenv("BINANCE_API_KEY", "").strip()
+API_SEC  = os.getenv("BINANCE_API_SECRET", "").strip()
+
+TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN", "").strip().strip('"').strip("'")
+TG_CHAT_ID   = os.getenv("TG_CHAT_ID", "").strip().strip('"').strip("'")
+
+LIVE_TRADING = os.getenv("LIVE_TRADING_KC3", "0").strip().lower() in ("1", "true", "yes")
+
+QUOTE_ASSET   = os.getenv("KC3_QUOTE_ASSET", "USDC").strip().upper()
+SYMBOL_SUFFIX = os.getenv("KC3_SYMBOL_SUFFIX", "USDC").strip().upper()
+
+LEVERAGE      = int(float(os.getenv("KC3_LEVERAGE", "1")))
+MAX_NOTIONAL  = float(os.getenv("KC3_MAX_NOTIONAL", "0"))  # 0 => full available
+POLL_SEC      = 2.0
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def log(msg: str):
+    print(f"[{utc_now_iso()}] {msg}", flush=True)
+
+def tg_send(text: str):
+    if not (TG_BOT_TOKEN and TG_CHAT_ID):
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": TG_CHAT_ID, "text": text}, timeout=10)
+    except Exception:
+        pass
+
+def require_creds():
+    if not API_KEY or not API_SEC:
+        raise RuntimeError("Missing BINANCE_API_KEY / BINANCE_API_SECRET in environment")
+
+def _sign(params: dict) -> dict:
+    params = dict(params)
+    qs = urllib.parse.urlencode(params)
+    sig = hmac.new(API_SEC.encode(), qs.encode(), hashlib.sha256).hexdigest()
+    params["signature"] = sig
+    return params
+
+def _request(method: str, path: str, params=None, signed=False):
+    params = params or {}
+    headers = {"X-MBX-APIKEY": API_KEY} if API_KEY else {}
+    if signed:
+        params["timestamp"] = int(time.time() * 1000)
+        params["recvWindow"] = 5000
+        params = _sign(params)
+    url = BASE_URL + path
+    r = requests.request(method, url, params=params, headers=headers, timeout=15)
+    if r.status_code >= 400:
+        raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+    return r.json()
+
+def account_info():
+    return _request("GET", "/fapi/v2/account", signed=True)
+
+def account_balance_list():
+    return _request("GET", "/fapi/v2/balance", signed=True)
+
+def position_risk():
+    return _request("GET", "/fapi/v2/positionRisk", signed=True)
+
+def mark_price(symbol: str):
+    return _request("GET", "/fapi/v1/premiumIndex", params={"symbol": symbol}, signed=False)
+
+def set_leverage(symbol: str, lev: int):
+    return _request("POST", "/fapi/v1/leverage", params={"symbol": symbol, "leverage": lev}, signed=True)
+
+def place_market_order(symbol: str, side: str, qty: float, reduce_only: bool = False):
+    params = {"symbol": symbol, "side": side, "type": "MARKET", "quantity": qty}
+    if reduce_only:
+        params["reduceOnly"] = "true"
+    return _request("POST", "/fapi/v1/order", params=params, signed=True)
+
+def symbol_from_token(token: str) -> str:
+    token = token.strip().upper()
+    return f"{token}{SYMBOL_SUFFIX}"
+
+def read_json(path: Path):
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+def write_json(path: Path, obj):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2))
+    tmp.replace(path)
+
+def load_exec_state():
+    st = read_json(EXEC_STATE)
+    if not isinstance(st, dict):
+        st = {}
+    st.setdefault("last_desired_key", None)  # "UNIUSDC|LONG"
+    st.setdefault("last_symbol_for_lev", None)
+    return st
+
+def save_exec_state(st: dict):
+    write_json(EXEC_STATE, st)
+
+def get_current_position_amt(symbol: str) -> float:
+    pr = position_risk()
+    if isinstance(pr, list):
+        for row in pr:
+            if str(row.get("symbol", "")).upper() == symbol.upper():
+                try:
+                    return float(row.get("positionAmt", 0.0))
+                except Exception:
+                    return 0.0
+    return 0.0
+
+def get_available_quote_balance() -> float:
+    # 1) try per-asset list
+    try:
+        bal = account_balance_list()
+        if isinstance(bal, list):
+            for row in bal:
+                if str(row.get("asset", "")).upper() == QUOTE_ASSET:
+                    for k in ("availableBalance", "balance"):
+                        vv = row.get(k)
+                        if vv is not None:
+                            try:
+                                v = float(vv)
+                                if v > 0:
+                                    return v
+                            except Exception:
+                                pass
+    except Exception as e:
+        log(f"Warn: /fapi/v2/balance failed: {e}")
+
+    # 2) fallback: account.availableBalance
+    try:
+        acc = account_info()
+        return float(acc.get("availableBalance", 0.0))
+    except Exception as e:
+        log(f"Warn: /fapi/v2/account failed: {e}")
+
+    return 0.0
+
+def compute_qty_from_notional(symbol: str, notional: float) -> float:
+    mp = mark_price(symbol)
+    px = float(mp.get("markPrice", 0.0))
+    if px <= 0:
+        raise RuntimeError(f"Bad mark price for {symbol}: {mp}")
+    qty = notional / px
+    if qty <= 0:
+        return 0.0
+    return float(f"{qty:.6f}")
+
+def parse_desired():
+    # Prefer override file if present
+    doc = read_json(KC3_OVERRIDE)
+    if not isinstance(doc, dict) or not isinstance(doc.get("position"), dict):
+        doc = read_json(KC3_LATEST)
+
+    if not isinstance(doc, dict):
+        return None
+    pos = doc.get("position")
+    if not isinstance(pos, dict):
+        return None
+
+    token = str(pos.get("token", "")).upper().strip()
+    side  = str(pos.get("side", "")).upper().strip()
+
+    if not token or side not in ("LONG", "SHORT"):
+        return None
+
+    symbol = symbol_from_token(token)
+    return {"symbol": symbol, "side": side}
+
+def main():
+    require_creds()
+    st = load_exec_state()
+
+    log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING}")
+    log(f"BASE_URL={BASE_URL} QUOTE_ASSET={QUOTE_ASSET} SYMBOL_SUFFIX={SYMBOL_SUFFIX} LEV={LEVERAGE} MAX_NOTIONAL={MAX_NOTIONAL}")
+    log(f"DESIRED override path: {KC3_OVERRIDE} (preferred), fallback: {KC3_LATEST}")
+    tg_send(f"KC3 futures executor started. LIVE={LIVE_TRADING} QUOTE={QUOTE_ASSET} SUFFIX={SYMBOL_SUFFIX}")
+
+    while True:
+        try:
+            desired = parse_desired()
+            if not desired:
+                time.sleep(POLL_SEC)
+                continue
+
+            symbol = desired["symbol"]
+            side   = desired["side"]
+            desired_is_long = (side == "LONG")
+            desired_key = f"{symbol}|{side}"
+
+            # dry-run: only log once per desired change (no spam)
+            if not LIVE_TRADING and desired_key == st.get("last_desired_key"):
+                time.sleep(POLL_SEC)
+                continue
+
+            # set leverage once per symbol
+            if symbol != st.get("last_symbol_for_lev"):
+                try:
+                    if LIVE_TRADING:
+                        set_leverage(symbol, LEVERAGE)
+                        log(f"Leverage set OK for {symbol} => {LEVERAGE}x")
+                    else:
+                        try:
+                            set_leverage(symbol, LEVERAGE)
+                            log(f"(dry-run) leverage set OK for {symbol} => {LEVERAGE}x")
+                        except Exception as e:
+                            log(f"(dry-run) leverage set failed for {symbol}: {e}")
+                except Exception as e:
+                    log(f"Warn: leverage set failed for {symbol}: {e}")
+                st["last_symbol_for_lev"] = symbol
+                save_exec_state(st)
+
+            # Only query real position when LIVE (otherwise it's always 0 and causes spam)
+            cur_amt = 0.0
+            if LIVE_TRADING:
+                cur_amt = get_current_position_amt(symbol)
+
+            cur_is_long  = (cur_amt > 0)
+            cur_is_short = (cur_amt < 0)
+
+            # If LIVE and opposite position exists -> close it
+            if LIVE_TRADING and cur_amt != 0.0 and (cur_is_long != desired_is_long):
+                close_side = "SELL" if cur_amt > 0 else "BUY"
+                close_qty  = abs(cur_amt)
+                msg = f"KC3 flip: closing {symbol} amt={cur_amt} via {close_side} qty={close_qty}"
+                log(msg); tg_send(msg)
+                place_market_order(symbol, close_side, close_qty, reduce_only=True)
+                log(f"Close sent OK (reduceOnly) {symbol}")
+
+            # Notional sizing
+            avail = get_available_quote_balance()
+            notional = avail if MAX_NOTIONAL <= 0 else min(avail, MAX_NOTIONAL)
+
+            if notional <= 0:
+                log(f"Not enough available balance to open (avail={avail}). QUOTE_ASSET={QUOTE_ASSET}")
+                st["last_desired_key"] = desired_key
+                save_exec_state(st)
+                time.sleep(POLL_SEC)
+                continue
+
+            qty = compute_qty_from_notional(symbol, notional)
+            if qty <= 0:
+                log(f"Computed qty=0 for {symbol} notional={notional}. Skipping.")
+                st["last_desired_key"] = desired_key
+                save_exec_state(st)
+                time.sleep(POLL_SEC)
+                continue
+
+            open_side = "BUY" if desired_is_long else "SELL"
+            msg = f"KC3 open: {side} {symbol} notional~{notional:.2f} qty~{qty:.6f} LIVE={LIVE_TRADING}"
+            log(msg); tg_send(msg)
+
+            if LIVE_TRADING:
+                place_market_order(symbol, open_side, qty, reduce_only=False)
+                log(f"Open sent OK {symbol} {side}")
+
+            st["last_desired_key"] = desired_key
+            save_exec_state(st)
+
+        except Exception as e:
+            emsg = f"KC3 futures ERROR: {e}"
+            log(emsg); tg_send(emsg)
+
+        time.sleep(POLL_SEC)
+
+if __name__ == "__main__":
+    main()

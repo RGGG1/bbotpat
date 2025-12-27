@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""
+KC3 Futures Executor (USDⓈ-M) — reads kc3_latest.json (paper signal) and mirrors to Binance futures.
+
+Key changes vs earlier:
+- Robust env loading via systemd EnvironmentFile
+- Uses KC3_QUOTE_ASSET / KC3_SYMBOL_SUFFIX (e.g. USDC) correctly
+- Quote balance lookup:
+    1) /fapi/v2/balance: match asset == QUOTE_ASSET, prefer availableBalance
+    2) fallback: /fapi/v2/account availableBalance (works on multi-asset margin)
+"""
+
+import os
+import json
+import time
+import math
+import hmac
+import hashlib
+import urllib.parse
+from pathlib import Path
+from datetime import datetime, timezone
+
+import requests
+
+# -------------------------
+# Config / Env
+# -------------------------
+BASE_URL = os.getenv("BINANCE_FUTURES_BASE_URL", "https://fapi.binance.com").rstrip("/")
+API_KEY  = os.getenv("BINANCE_API_KEY", "")
+API_SEC  = os.getenv("BINANCE_API_SECRET", "")
+
+LIVE_TRADING = os.getenv("LIVE_TRADING_KC3", "0").strip() == "1"
+
+QUOTE_ASSET   = os.getenv("KC3_QUOTE_ASSET", "USDT").strip().upper()
+SYMBOL_SUFFIX = os.getenv("KC3_SYMBOL_SUFFIX", "USDT").strip().upper()
+
+LEVERAGE = int(os.getenv("KC3_LEVERAGE", "1"))
+MAX_NOTIONAL = float(os.getenv("KC3_MAX_NOTIONAL", "0") or 0.0)  # 0 => no cap
+
+POLL_SEC = 5.0
+
+# Input signal (written by paper agent)
+KC3_LATEST = Path("/var/www/bbotpat_live/kc3_latest.json")
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def log(msg: str):
+    print(f"[{utc_now_iso()}] {msg}", flush=True)
+
+def require_creds():
+    if not API_KEY or not API_SEC:
+        raise RuntimeError("Missing BINANCE_API_KEY / BINANCE_API_SECRET. Check /root/bbotpat_live/.env format.")
+
+# -------------------------
+# Binance signing / request
+# -------------------------
+def _sign(params: dict) -> str:
+    qs = urllib.parse.urlencode(params, doseq=True)
+    return hmac.new(API_SEC.encode(), qs.encode(), hashlib.sha256).hexdigest()
+
+def _request(method: str, path: str, params=None, signed=False):
+    if params is None:
+        params = {}
+    headers = {}
+    if signed:
+        require_creds()
+        params["timestamp"] = int(time.time() * 1000)
+        params["recvWindow"] = 5000
+        params["signature"] = _sign(params)
+        headers["X-MBX-APIKEY"] = API_KEY
+    elif API_KEY:
+        # sometimes useful for higher limits; harmless
+        headers["X-MBX-APIKEY"] = API_KEY
+
+    url = BASE_URL + path
+    r = requests.request(method, url, params=params, headers=headers, timeout=15)
+    if r.status_code >= 400:
+        raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+    return r.json()
+
+# Endpoints
+def exchange_info():
+    return _request("GET", "/fapi/v1/exchangeInfo", signed=False)
+
+def set_leverage(symbol: str, lev: int):
+    return _request("POST", "/fapi/v1/leverage", params={"symbol": symbol, "leverage": lev}, signed=True)
+
+def fut_balance():
+    # list of assets: [{"accountAlias":..,"asset":"USDT","balance":"..","availableBalance":"..",...}, ...]
+    return _request("GET", "/fapi/v2/balance", signed=True)
+
+def fut_account():
+    # includes top-level availableBalance plus assets list
+    return _request("GET", "/fapi/v2/account", signed=True)
+
+def position_risk():
+    return _request("GET", "/fapi/v2/positionRisk", signed=True)
+
+def mark_price(symbol: str):
+    return _request("GET", "/fapi/v1/premiumIndex", params={"symbol": symbol}, signed=False)
+
+def place_market_order(symbol: str, side: str, qty: float, reduce_only: bool = False):
+    params = {
+        "symbol": symbol,
+        "side": side,              # BUY / SELL
+        "type": "MARKET",
+        "quantity": qty,
+    }
+    if reduce_only:
+        params["reduceOnly"] = "true"
+    return _request("POST", "/fapi/v1/order", params=params, signed=True)
+
+# -------------------------
+# Helpers
+# -------------------------
+def symbol_from_token(token: str) -> str:
+    token = token.strip().upper()
+    return f"{token}{SYMBOL_SUFFIX}"
+
+def read_kc3_latest():
+    try:
+        if not KC3_LATEST.exists():
+            return None
+        return json.loads(KC3_LATEST.read_text())
+    except Exception:
+        return None
+
+def get_available_quote_balance() -> float:
+    """
+    Your account (multi-asset margin) exposes the usable quote balance most reliably as
+    top-level `availableBalance` from /fapi/v2/account.
+
+    We treat that as the primary balance. Per-asset /fapi/v2/balance can show 0 for USDC
+    depending on account mode.
+    """
+    # 1) Primary: /fapi/v2/account top-level availableBalance
+    try:
+        acc = fut_account()
+        v = acc.get("availableBalance")
+        if v is not None:
+            return float(v)
+    except Exception as e:
+        log(f"Warn: /fapi/v2/account failed: {e}")
+
+    # 2) Secondary (best effort): /fapi/v2/balance per-asset
+    try:
+        bal = fut_balance()
+        if isinstance(bal, list):
+            for row in bal:
+                if str(row.get("asset", "")).upper() == QUOTE_ASSET:
+                    for k in ("availableBalance", "balance"):
+                        vv = row.get(k)
+                        if vv is not None:
+                            try:
+                                return float(vv)
+                            except Exception:
+                                pass
+    except Exception as e:
+        log(f"Warn: /fapi/v2/balance failed: {e}")
+
+    return 0.0
+
+
+def get_current_position_amt(symbol: str) -> float:
+    """
+    positionRisk returns list; 'positionAmt' is + for long, - for short.
+    """
+    pr = position_risk()
+    if isinstance(pr, list):
+        for row in pr:
+            if row.get("symbol") == symbol:
+                try:
+                    return float(row.get("positionAmt", 0.0))
+                except Exception:
+                    return 0.0
+    return 0.0
+
+def compute_qty_from_notional(symbol: str, notional: float) -> float:
+    mp = mark_price(symbol)
+    px = float(mp.get("markPrice", 0.0))
+    if px <= 0:
+        raise RuntimeError(f"Bad mark price for {symbol}: {mp}")
+    qty = notional / px
+    # keep sane precision; Binance will reject too many decimals sometimes
+    return float(f"{qty:.6f}")
+
+# -------------------------
+# Main loop
+# -------------------------
+def main():
+    log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING}")
+    log(f"BASE_URL={BASE_URL} QUOTE_ASSET={QUOTE_ASSET} SYMBOL_SUFFIX={SYMBOL_SUFFIX} LEV={LEVERAGE} MAX_NOTIONAL={MAX_NOTIONAL}")
+
+    # Best-effort: ensure creds exist for signed calls (even in dry-run we still query private endpoints)
+    require_creds()
+
+    last_symbol = None
+
+    while True:
+        try:
+            desired = read_kc3_latest()
+            if not isinstance(desired, dict):
+                time.sleep(POLL_SEC)
+                continue
+
+            pos = desired.get("position")
+            if not isinstance(pos, dict):
+                # no desired position yet (paper agent not in trade)
+                time.sleep(POLL_SEC)
+                continue
+
+            token = str(pos.get("token", "")).upper().strip()
+            side  = str(pos.get("side", "")).upper().strip()  # LONG / SHORT
+
+            if not token or side not in ("LONG", "SHORT"):
+                time.sleep(POLL_SEC)
+                continue
+
+            symbol = symbol_from_token(token)
+
+            # set leverage once per new symbol
+            if symbol != last_symbol:
+                try:
+                    if LIVE_TRADING:
+                        set_leverage(symbol, LEVERAGE)
+                        log(f"Leverage set OK for {symbol} => {LEVERAGE}x")
+                    else:
+                        # still try, but don't fail hard in dry-run
+                        try:
+                            set_leverage(symbol, LEVERAGE)
+                            log(f"(dry-run) leverage set OK for {symbol} => {LEVERAGE}x")
+                        except Exception as e:
+                            log(f"(dry-run) leverage set failed for {symbol}: {e}")
+                except Exception as e:
+                    log(f"Warn: leverage set failed for {symbol}: {e}")
+                last_symbol = symbol
+
+            # determine current position
+            cur_amt = get_current_position_amt(symbol)
+            desired_is_long = (side == "LONG")
+
+            if cur_amt != 0.0:
+                cur_is_long = (cur_amt > 0)
+                if cur_is_long == desired_is_long:
+                    log(f"Already in {symbol} direction={side} (amt={cur_amt}). No action.")
+                    time.sleep(POLL_SEC)
+                    continue
+
+                # flip: close current first
+                close_side = "SELL" if cur_amt > 0 else "BUY"
+                close_qty  = abs(cur_amt)
+                log(f"Need flip. Closing {symbol} amt={cur_amt} via {close_side} qty={close_qty} reduceOnly")
+                if LIVE_TRADING:
+                    place_market_order(symbol, close_side, close_qty, reduce_only=True)
+
+            # open new position using available balance notional
+            avail = get_available_quote_balance()
+            if avail <= 1e-9:
+                log(f"Not enough available {QUOTE_ASSET} to open (avail={avail}).")
+                time.sleep(POLL_SEC)
+                continue
+
+            notional = avail
+            if MAX_NOTIONAL > 0:
+                notional = min(notional, MAX_NOTIONAL)
+
+            qty = compute_qty_from_notional(symbol, notional)
+
+            open_side = "BUY" if desired_is_long else "SELL"
+            log(f"Opening {side} {symbol} using notional~{notional:.2f} {QUOTE_ASSET} => qty~{qty:.6f} (LIVE={LIVE_TRADING})")
+
+            if LIVE_TRADING:
+                place_market_order(symbol, open_side, qty, reduce_only=False)
+
+        except Exception as e:
+            log(f"ERROR: {e}")
+
+        time.sleep(POLL_SEC)
+
+if __name__ == "__main__":
+    main()

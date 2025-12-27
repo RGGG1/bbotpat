@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""
+KC3 Futures Executor (USDⓈ-M) — EU-friendly + robust.
+
+Fixes:
+- Uses margin asset QUOTE_ASSET (EU often uses BNFCR) for available balance.
+- Trades deep-liquidity USDT symbols via SYMBOL_SUFFIX=USDT (e.g. UNIUSDT).
+- Floors NOTIONAL to whole units (never rounds up).
+- Floors QTY to Binance stepSize (fixes -1111 precision errors).
+- Close-before-open on flips (prevents residual position).
+- No spam: only acts when desired position changes or mismatch detected.
+- Supports override file:
+    /var/www/bbotpat_live/kc3_exec_desired.json (preferred)
+  fallback:
+    /var/www/bbotpat_live/kc3_latest.json
+- Telegram notifications on real order submissions.
+"""
+
+import os, json, time, math, hmac, hashlib, urllib.parse
+from pathlib import Path
+from datetime import datetime, timezone
+import requests
+
+# Desired inputs
+KC3_LATEST   = Path("/var/www/bbotpat_live/kc3_latest.json")
+KC3_OVERRIDE = Path("/var/www/bbotpat_live/kc3_exec_desired.json")  # preferred for forcing tests
+
+# Executor state
+STATE_DIR  = Path("/root/bbotpat_live/data")
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+EXEC_STATE = STATE_DIR / "kc3_futures_exec_state.json"
+
+# Env / config
+BASE_URL = os.getenv("BINANCE_FUTURES_BASE_URL", "https://fapi.binance.com").rstrip("/")
+API_KEY  = os.getenv("BINANCE_API_KEY", "")
+API_SEC  = os.getenv("BINANCE_API_SECRET", "")
+
+QUOTE_ASSET   = os.getenv("KC3_QUOTE_ASSET", "BNFCR").upper().strip()  # EU often BNFCR
+SYMBOL_SUFFIX = os.getenv("KC3_SYMBOL_SUFFIX", "USDT").upper().strip() # trade *USDT* symbols for liquidity
+LEVERAGE      = int(float(os.getenv("KC3_LEVERAGE", "5")))
+MAX_NOTIONAL  = float(os.getenv("KC3_MAX_NOTIONAL", "0"))  # 0 = use full available (floored)
+POLL_SEC      = float(os.getenv("KC3_POLL_SEC", "2"))
+
+LIVE_TRADING  = str(os.getenv("LIVE_TRADING_KC3", "0")).strip() in ("1","true","TRUE","yes","YES")
+
+TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN","").strip().strip('"')
+TG_CHAT_ID   = os.getenv("TG_CHAT_ID","").strip().strip('"')
+
+# --- utils ----------------------------------------------------
+
+def utc_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+
+def log(msg: str):
+    print(f"[{utc_iso()}] {msg}", flush=True)
+
+def safe_read_json(p: Path):
+    try:
+        if not p.exists():
+            return None
+        return json.loads(p.read_text())
+    except Exception:
+        return None
+
+def safe_write_json(p: Path, obj):
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2, sort_keys=True))
+    tmp.replace(p)
+
+def require_creds():
+    if not API_KEY or not API_SEC:
+        raise RuntimeError("Missing BINANCE_API_KEY or BINANCE_API_SECRET in environment (systemd EnvironmentFile).")
+
+def _sign(params: dict) -> dict:
+    params = dict(params or {})
+    params["timestamp"] = int(time.time() * 1000)
+    qs = urllib.parse.urlencode(params)
+    sig = hmac.new(API_SEC.encode(), qs.encode(), hashlib.sha256).hexdigest()
+    params["signature"] = sig
+    return params
+
+def _request(method: str, path: str, params=None, signed=False):
+    url = BASE_URL + path
+    params = params or {}
+    headers = {}
+    if signed:
+        params = _sign(params)
+        headers["X-MBX-APIKEY"] = API_KEY
+    r = requests.request(method, url, params=params, headers=headers, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+    return r.json()
+
+def tg_send(text: str):
+    if not TG_BOT_TOKEN or not TG_CHAT_ID:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": TG_CHAT_ID, "text": text}, timeout=10)
+    except Exception as e:
+        log(f"TG warn: {e}")
+
+# --- binance endpoints ----------------------------------------
+
+def exchange_info():
+    return _request("GET", "/fapi/v1/exchangeInfo", signed=False)
+
+def set_leverage(symbol: str, lev: int):
+    return _request("POST", "/fapi/v1/leverage", params={"symbol": symbol, "leverage": lev}, signed=True)
+
+def balance_v2():
+    return _request("GET", "/fapi/v2/balance", signed=True)
+
+def account_v2():
+    return _request("GET", "/fapi/v2/account", signed=True)
+
+def position_risk():
+    return _request("GET", "/fapi/v2/positionRisk", signed=True)
+
+def mark_price(symbol: str):
+    return _request("GET", "/fapi/v1/premiumIndex", params={"symbol": symbol}, signed=False)
+
+def place_market_order(symbol: str, side: str, qty: float, reduce_only: bool):
+    # Binance expects string qty with correct precision; we’ll format conservatively
+    params = {
+        "symbol": symbol,
+        "side": side,              # BUY / SELL
+        "type": "MARKET",
+        "quantity": format(qty, "f"),
+        "reduceOnly": "true" if reduce_only else "false",
+        "newOrderRespType": "RESULT",
+    }
+    return _request("POST", "/fapi/v1/order", params=params, signed=True)
+
+# --- symbol/qty helpers ----------------------------------------
+
+_EXINFO_CACHE = None
+_FILTERS_CACHE = {}  # symbol -> dict(stepSize, minQty)
+
+def _parse_filters_for_symbol(sym: str):
+    global _EXINFO_CACHE
+    if _EXINFO_CACHE is None:
+        _EXINFO_CACHE = exchange_info()
+
+    symbols = _EXINFO_CACHE.get("symbols", [])
+    for s in symbols:
+        if s.get("symbol") != sym:
+            continue
+        step = None
+        minq = None
+        # Prefer MARKET_LOT_SIZE if present, else LOT_SIZE
+        for f in s.get("filters", []):
+            if f.get("filterType") in ("MARKET_LOT_SIZE", "LOT_SIZE"):
+                try:
+                    step = float(f.get("stepSize", "0"))
+                    minq = float(f.get("minQty", "0"))
+                except Exception:
+                    pass
+        if not step or step <= 0:
+            step = 0.001  # fallback, but usually parsed
+        if minq is None:
+            minq = 0.0
+        return {"stepSize": step, "minQty": minq}
+    # fallback
+    return {"stepSize": 0.001, "minQty": 0.0}
+
+def get_filters(sym: str):
+    if sym not in _FILTERS_CACHE:
+        _FILTERS_CACHE[sym] = _parse_filters_for_symbol(sym)
+    return _FILTERS_CACHE[sym]
+
+def floor_to_step(qty: float, step: float) -> float:
+    if step <= 0:
+        return qty
+    return math.floor(qty / step) * step
+
+def symbol_from_token(token: str) -> str:
+    return f"{token}{SYMBOL_SUFFIX}"
+
+# --- desired reading -------------------------------------------
+
+def read_desired():
+    # Override preferred for forcing tests
+    d = safe_read_json(KC3_OVERRIDE)
+    if isinstance(d, dict) and isinstance(d.get("position"), dict):
+        d["_source"] = str(KC3_OVERRIDE)
+        return d
+    d = safe_read_json(KC3_LATEST)
+    if isinstance(d, dict):
+        d["_source"] = str(KC3_LATEST)
+        return d
+    return None
+
+def desired_key(desired: dict):
+    pos = desired.get("position")
+    if not isinstance(pos, dict):
+        return None
+    token = str(pos.get("token","")).upper().strip()
+    side  = str(pos.get("side","")).upper().strip()
+    if not token or side not in ("LONG","SHORT"):
+        return None
+    return f"{side}:{token}"
+
+# --- balance / positions ---------------------------------------
+
+def get_available_quote_balance() -> float:
+    # Try /fapi/v2/balance asset list first (best)
+    try:
+        bal = balance_v2()
+        if isinstance(bal, list):
+            for row in bal:
+                if str(row.get("asset","")).upper() == QUOTE_ASSET:
+                    for k in ("availableBalance", "balance"):
+                        v = row.get(k)
+                        if v is not None:
+                            try:
+                                return float(v)
+                            except Exception:
+                                pass
+    except Exception as e:
+        log(f"Warn: /fapi/v2/balance failed: {e}")
+
+    # Fallback: /fapi/v2/account availableBalance (cross)
+    try:
+        acct = account_v2()
+        v = acct.get("availableBalance")
+        if v is not None:
+            return float(v)
+    except Exception as e:
+        log(f"Warn: /fapi/v2/account failed: {e}")
+
+    return 0.0
+
+def get_open_positions():
+    """
+    Returns list of dicts with non-zero positionAmt.
+    """
+    pr = position_risk()
+    out = []
+    if isinstance(pr, list):
+        for row in pr:
+            try:
+                amt = float(row.get("positionAmt", 0.0))
+            except Exception:
+                continue
+            if abs(amt) > 1e-12:
+                out.append({"symbol": row.get("symbol"), "amt": amt})
+    return out
+
+def wait_flat(symbol: str, timeout_sec: float = 6.0):
+    t0 = time.time()
+    while time.time() - t0 < timeout_sec:
+        pos = get_open_positions()
+        for p in pos:
+            if p["symbol"] == symbol and abs(p["amt"]) > 1e-12:
+                time.sleep(0.5)
+                break
+        else:
+            return True
+    return False
+
+# --- state ------------------------------------------------------
+
+def load_exec_state():
+    st = safe_read_json(EXEC_STATE)
+    if not isinstance(st, dict):
+        st = {}
+    st.setdefault("last_desired_key", None)
+    st.setdefault("last_action", None)
+    st.setdefault("last_symbol", None)
+    return st
+
+def save_exec_state(st: dict):
+    safe_write_json(EXEC_STATE, st)
+
+# --- trading logic ---------------------------------------------
+
+def compute_qty_from_notional(symbol: str, notional: float) -> float:
+    mp = mark_price(symbol)
+    px = float(mp.get("markPrice", 0.0))
+    if px <= 0:
+        raise RuntimeError(f"Bad mark price for {symbol}: {mp}")
+    raw_qty = notional / px
+    f = get_filters(symbol)
+    qty = floor_to_step(raw_qty, f["stepSize"])
+    if qty < f["minQty"]:
+        qty = 0.0
+    return qty
+
+def close_position(symbol: str, amt: float):
+    # amt>0 long => SELL to close, amt<0 short => BUY to close
+    side = "SELL" if amt > 0 else "BUY"
+    qty  = abs(amt)
+    log(f"KC3 close: {symbol} amt={amt} via {side} qty={qty} reduceOnly (LIVE={LIVE_TRADING})")
+    if LIVE_TRADING:
+        res = place_market_order(symbol, side, qty, reduce_only=True)
+        tg_send(f"KC3 CLOSE {symbol} {side} qty={qty}\norderId={res.get('orderId')}")
+    # Wait until flat to avoid residuals
+    ok = wait_flat(symbol)
+    if not ok:
+        log(f"Warn: close wait timeout for {symbol}")
+
+def open_position(symbol: str, side: str):
+    desired_is_long = (side == "LONG")
+    open_side = "BUY" if desired_is_long else "SELL"
+
+    avail = get_available_quote_balance()
+    if avail <= 1e-9:
+        raise RuntimeError(f"Not enough available {QUOTE_ASSET} to open (avail={avail}).")
+
+    # Floor to whole units so we never round up
+    notional = math.floor(avail)
+    if notional <= 0:
+        raise RuntimeError(f"Available {QUOTE_ASSET} too small after floor (avail={avail}).")
+
+    if MAX_NOTIONAL > 0:
+        notional = min(notional, MAX_NOTIONAL)
+
+    qty = compute_qty_from_notional(symbol, notional)
+    if qty <= 0:
+        raise RuntimeError(f"Computed qty=0 for {symbol} notional={notional}. Check stepSize/minQty.")
+
+    log(f"KC3 open: {side} {symbol} notional~{notional} {QUOTE_ASSET} qty~{qty} LIVE={LIVE_TRADING}")
+    if LIVE_TRADING:
+        res = place_market_order(symbol, open_side, qty, reduce_only=False)
+        tg_send(f"KC3 OPEN {side} {symbol}\nnotional~{notional} {QUOTE_ASSET} qty={qty}\norderId={res.get('orderId')}")
+
+def main():
+    require_creds()
+    st = load_exec_state()
+
+    log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING}")
+    log(f"BASE_URL={BASE_URL} QUOTE_ASSET={QUOTE_ASSET} SYMBOL_SUFFIX={SYMBOL_SUFFIX} LEV={LEVERAGE} MAX_NOTIONAL={MAX_NOTIONAL}")
+    log(f"DESIRED override: {KC3_OVERRIDE} (preferred) fallback: {KC3_LATEST}")
+
+    last_symbol_for_leverage = st.get("last_symbol")
+
+    while True:
+        try:
+            desired = read_desired()
+            dkey = desired_key(desired) if isinstance(desired, dict) else None
+            if not dkey:
+                time.sleep(POLL_SEC)
+                continue
+
+            side, token = dkey.split(":", 1)
+            symbol = symbol_from_token(token)
+
+            # Set leverage once per symbol
+            if symbol != last_symbol_for_leverage:
+                try:
+                    set_leverage(symbol, LEVERAGE)
+                    log(f"Leverage set OK for {symbol} => {LEVERAGE}x")
+                except Exception as e:
+                    log(f"Warn: leverage set failed for {symbol}: {e}")
+                last_symbol_for_leverage = symbol
+                st["last_symbol"] = symbol
+                save_exec_state(st)
+
+            # Determine current open positions (any symbol)
+            opens = get_open_positions()
+
+            # If there is any open position in a different symbol, close it first (clean slate)
+            for p in opens:
+                if p["symbol"] != symbol:
+                    close_position(p["symbol"], p["amt"])
+
+            # Re-read positions after cleanup
+            opens = get_open_positions()
+            cur_amt = 0.0
+            for p in opens:
+                if p["symbol"] == symbol:
+                    cur_amt = p["amt"]
+                    break
+
+            desired_is_long = (side == "LONG")
+            cur_is_long = (cur_amt > 0)
+
+            # If already correct direction, do nothing (and avoid spam)
+            if abs(cur_amt) > 1e-12 and (cur_is_long == desired_is_long):
+                # Only log once per desired change
+                if st.get("last_desired_key") != dkey:
+                    log(f"KC3: already in desired {side} {symbol} (amt={cur_amt}). No action.")
+                    st["last_desired_key"] = dkey
+                    st["last_action"] = utc_iso()
+                    save_exec_state(st)
+                time.sleep(POLL_SEC)
+                continue
+
+            # If we need to flip, close first
+            if abs(cur_amt) > 1e-12 and (cur_is_long != desired_is_long):
+                close_position(symbol, cur_amt)
+
+            # Only attempt open when desired changed OR we are flat but desire is non-flat
+            should_act = (st.get("last_desired_key") != dkey) or abs(cur_amt) <= 1e-12
+            if not should_act:
+                time.sleep(POLL_SEC)
+                continue
+
+            open_position(symbol, side)
+
+            st["last_desired_key"] = dkey
+            st["last_action"] = utc_iso()
+            save_exec_state(st)
+
+        except Exception as e:
+            log(f"KC3 futures ERROR: {e}")
+
+        time.sleep(POLL_SEC)
+
+if __name__ == "__main__":
+    main()
