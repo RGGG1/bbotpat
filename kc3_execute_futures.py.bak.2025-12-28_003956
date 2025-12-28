@@ -1,0 +1,411 @@
+#!/usr/bin/env python3
+"""
+KC3 Futures Executor (USDⓈ-M)
+
+Fixes in this version:
+- Uses MARKET_LOT_SIZE.stepSize for MARKET orders (prevents -1111 precision errors).
+- Falls back to LOT_SIZE.stepSize if MARKET_LOT_SIZE missing.
+- Floors qty DOWN to stepSize and formats using quantityPrecision.
+- Waits for a fresh signal file update after service start (prevents instant entry on boot).
+- Close-then-open flip flow.
+
+Desired:
+  override (authoritative if exists): /var/www/bbotpat_live/kc3_exec_desired.json
+  fallback:                          /var/www/bbotpat_live/kc3_latest.json
+
+State:
+  /root/bbotpat_live/data/kc3_futures_exec_state.json
+"""
+
+import os, json, time, math, hmac, hashlib, urllib.parse
+from pathlib import Path
+from datetime import datetime, timezone
+import requests
+
+VERSION = "2025-12-28-market-lot-size-fix"
+
+KC3_LATEST   = Path("/var/www/bbotpat_live/kc3_latest.json")
+KC3_OVERRIDE = Path("/var/www/bbotpat_live/kc3_exec_desired.json")
+STATE_PATH   = Path("/root/bbotpat_live/data/kc3_futures_exec_state.json")
+ENV_PATH     = Path("/root/bbotpat_live/.env")
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+def log(msg):
+    print(f"[{now_iso()}] {msg}", flush=True)
+
+def load_env_file(path: Path):
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        s=line.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        k,v=s.split("=",1)
+        k=k.strip(); v=v.strip()
+        if len(v)>=2 and v[0]==v[-1] and v[0] in ("'","\""):
+            v=v[1:-1]
+        if k and k not in os.environ:
+            os.environ[k]=v
+
+def env_bool(name, default=False):
+    v=os.getenv(name)
+    if v is None: return default
+    return str(v).strip().lower() in ("1","true","yes","y","on")
+
+def env_float(name, default):
+    v=os.getenv(name)
+    if v is None or str(v).strip()=="": return default
+    try: return float(v)
+    except: return default
+
+def env_int(name, default):
+    v=os.getenv(name)
+    if v is None or str(v).strip()=="": return default
+    try: return int(float(v))
+    except: return default
+
+load_env_file(ENV_PATH)
+
+BASE_URL      = os.getenv("KC3_BASE_URL", "https://fapi.binance.com").strip()
+QUOTE_ASSET   = os.getenv("KC3_QUOTE_ASSET", "USDC").strip().upper()
+SYMBOL_SUFFIX = os.getenv("KC3_SYMBOL_SUFFIX", "USDC").strip().upper()
+LEVERAGE      = env_int("KC3_LEVERAGE", 5)
+MAX_NOTIONAL  = env_float("KC3_MAX_NOTIONAL", 0.0)  # interpreted as margin cap in quote units
+POLL_SEC      = env_float("KC3_POLL_SEC", 2.0)
+LIVE_TRADING  = env_bool("LIVE_TRADING_KC3", False)
+
+API_KEY       = os.getenv("BINANCE_API_KEY","").strip()
+API_SECRET    = os.getenv("BINANCE_API_SECRET","").strip()
+
+TG_BOT_TOKEN  = os.getenv("TELEGRAM_BOT_TOKEN","").strip()
+TG_CHAT_ID    = os.getenv("TELEGRAM_CHAT_ID","").strip()
+
+S = requests.Session()
+S.headers.update({"User-Agent":"kc3-futures-executor/1.0"})
+
+SERVICE_START_TS = time.time()
+
+# symbol -> { step: float, prec: int }
+MARKET_STEP_CACHE = {}
+
+def require_creds():
+    if not API_KEY or not API_SECRET:
+        raise RuntimeError("Missing BINANCE_API_KEY / BINANCE_API_SECRET (env not loaded into service).")
+
+def _sign(params):
+    qs = urllib.parse.urlencode(params, doseq=True)
+    sig = hmac.new(API_SECRET.encode(), qs.encode(), hashlib.sha256).hexdigest()
+    return sig
+
+def _get(path, params=None, signed=False):
+    url=BASE_URL+path
+    p=dict(params or {})
+    hdr={}
+    if signed:
+        require_creds()
+        p["timestamp"]=int(time.time()*1000)
+        p["signature"]=_sign(p)
+        hdr["X-MBX-APIKEY"]=API_KEY
+    r=S.get(url, params=p, headers=hdr, timeout=10)
+    if r.status_code>=400:
+        raise RuntimeError(f"GET {path} failed {r.status_code}: {r.text}")
+    return r.json()
+
+def _post(path, params=None, signed=False):
+    url=BASE_URL+path
+    p=dict(params or {})
+    hdr={}
+    if signed:
+        require_creds()
+        p["timestamp"]=int(time.time()*1000)
+        p["signature"]=_sign(p)
+        hdr["X-MBX-APIKEY"]=API_KEY
+    r=S.post(url, params=p, headers=hdr, timeout=10)
+    if r.status_code>=400:
+        raise RuntimeError(f"POST {path} failed {r.status_code}: {r.text}")
+    return r.json()
+
+def exchange_info():
+    return _get("/fapi/v1/exchangeInfo")
+
+def mark_price(symbol):
+    return _get("/fapi/v1/premiumIndex", {"symbol":symbol})
+
+def futures_balance():
+    return _get("/fapi/v2/balance", signed=True)
+
+def position_risk():
+    return _get("/fapi/v2/positionRisk", signed=True)
+
+def set_leverage(symbol, lev):
+    return _post("/fapi/v1/leverage", {"symbol":symbol, "leverage":lev}, signed=True)
+
+def fmt_qty(qty, prec):
+    # Format to quantityPrecision; Binance is strict.
+    return f"{qty:.{prec}f}".rstrip("0").rstrip(".")
+
+def floor_to_step(qty, step):
+    return math.floor(qty/step)*step
+
+def refresh_market_step(symbol):
+    if symbol in MARKET_STEP_CACHE:
+        return
+    ei = exchange_info()
+    sym = None
+    for s2 in ei.get("symbols", []):
+        if s2.get("symbol")==symbol:
+            sym=s2
+            break
+    if not sym:
+        raise RuntimeError(f"Symbol not found in exchangeInfo: {symbol}")
+
+    qty_prec = int(sym.get("quantityPrecision", 8))
+
+    step = None
+    # Prefer MARKET_LOT_SIZE for MARKET orders
+    for f in sym.get("filters", []):
+        if f.get("filterType")=="MARKET_LOT_SIZE":
+            step = float(f.get("stepSize","0") or "0")
+            break
+    # Fallback to LOT_SIZE
+    if not step or step<=0:
+        for f in sym.get("filters", []):
+            if f.get("filterType")=="LOT_SIZE":
+                step = float(f.get("stepSize","0") or "0")
+                break
+    if not step or step<=0:
+        raise RuntimeError(f"No usable stepSize for {symbol} (MARKET_LOT_SIZE/LOT_SIZE missing)")
+
+    MARKET_STEP_CACHE[symbol] = {"step":step, "prec":qty_prec}
+
+def place_market(symbol, side, qty, reduce_only):
+    refresh_market_step(symbol)
+    prec = MARKET_STEP_CACHE[symbol]["prec"]
+    qstr = fmt_qty(qty, prec)
+    params={
+        "symbol":symbol,
+        "side":side,         # BUY/SELL
+        "type":"MARKET",
+        "quantity":qstr,
+        "reduceOnly":"true" if reduce_only else "false",
+        "newOrderRespType":"RESULT",
+    }
+    return _post("/fapi/v1/order", params, signed=True)
+
+def tg_send(text):
+    if not TG_BOT_TOKEN or not TG_CHAT_ID:
+        return
+    try:
+        url=f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+        S.post(url, data={"chat_id":TG_CHAT_ID, "text":text}, timeout=10)
+    except Exception as e:
+        log(f"Warn: telegram send failed: {e}")
+
+def symbol_from_token(token):
+    return f"{token}{SYMBOL_SUFFIX}"
+
+def read_json(path):
+    try:
+        if not path.exists():
+            return None
+        return json.loads(path.read_text())
+    except:
+        return None
+
+def desired_source_and_data():
+    if KC3_OVERRIDE.exists():
+        return str(KC3_OVERRIDE), read_json(KC3_OVERRIDE), KC3_OVERRIDE
+    return str(KC3_LATEST), read_json(KC3_LATEST), KC3_LATEST
+
+def is_fresh_signal(src_path):
+    try:
+        return src_path.stat().st_mtime >= SERVICE_START_TS
+    except:
+        return False
+
+def get_available_quote():
+    bal = futures_balance()
+    if isinstance(bal, list):
+        for row in bal:
+            if str(row.get("asset","")).upper()==QUOTE_ASSET:
+                try:
+                    return float(row.get("availableBalance", "0"))
+                except:
+                    return 0.0
+    return 0.0
+
+def get_position_amt(symbol):
+    pr = position_risk()
+    if isinstance(pr, list):
+        for row in pr:
+            if row.get("symbol")==symbol:
+                try:
+                    return float(row.get("positionAmt","0"))
+                except:
+                    return 0.0
+    return 0.0
+
+def load_state():
+    if not STATE_PATH.exists():
+        return {"cum_roi_frac":0.0,"last_trade_roi_frac":0.0,"open_symbol":"","open_side":"","open_qty":0.0,"open_entry_price":0.0}
+    try:
+        return json.loads(STATE_PATH.read_text())
+    except:
+        return {"cum_roi_frac":0.0,"last_trade_roi_frac":0.0,"open_symbol":"","open_side":"","open_qty":0.0,"open_entry_price":0.0}
+
+def save_state(st):
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(st, indent=2, sort_keys=True))
+    tmp.replace(STATE_PATH)
+
+def compute_est_roi(open_side, entry, exit_):
+    if entry<=0 or exit_<=0: return 0.0
+    if open_side=="LONG": return (exit_/entry)-1.0
+    if open_side=="SHORT": return (entry/exit_)-1.0
+    return 0.0
+
+def floor_margin_whole(x):
+    return float(math.floor(x))
+
+def compute_qty(symbol, margin, lev):
+    mp = mark_price(symbol)
+    px = float(mp.get("markPrice","0") or "0")
+    if px<=0:
+        raise RuntimeError(f"Bad mark price for {symbol}: {mp}")
+
+    refresh_market_step(symbol)
+    step = MARKET_STEP_CACHE[symbol]["step"]
+    prec = MARKET_STEP_CACHE[symbol]["prec"]
+
+    notional = margin * float(lev)
+    raw_qty = notional / px
+
+    flo = floor_to_step(raw_qty, step)
+    # normalize to precision (prevents '357.5000000002')
+    flo = float(fmt_qty(flo, prec) or "0")
+    return flo, px
+
+def main():
+    log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING} VERSION={VERSION}")
+    log(f"BASE_URL={BASE_URL} QUOTE_ASSET={QUOTE_ASSET} SYMBOL_SUFFIX={SYMBOL_SUFFIX} LEV={LEVERAGE} MAX_NOTIONAL={MAX_NOTIONAL}")
+    log(f"DESIRED override (authoritative if exists): {KC3_OVERRIDE} | fallback: {KC3_LATEST}")
+
+    require_creds()
+    st = load_state()
+    last_symbol=""
+
+    while True:
+        try:
+            src_name, desired, src_path = desired_source_and_data()
+
+            pos = desired.get("position") if isinstance(desired, dict) else None
+            if not isinstance(pos, dict):
+                time.sleep(POLL_SEC); continue
+
+            if not is_fresh_signal(src_path):
+                log("No fresh signal yet (signal file older than service start). Waiting...")
+                time.sleep(POLL_SEC); continue
+
+            token = str(pos.get("token","")).upper().strip()
+            side  = str(pos.get("side","")).upper().strip()
+            if not token or side not in ("LONG","SHORT"):
+                time.sleep(POLL_SEC); continue
+
+            symbol = symbol_from_token(token)
+            want_long = (side=="LONG")
+
+            if symbol != last_symbol:
+                try:
+                    set_leverage(symbol, LEVERAGE)
+                    log(f"Leverage set OK for {symbol} => {LEVERAGE}x")
+                except Exception as e:
+                    log(f"Warn: leverage set failed for {symbol}: {e}")
+                last_symbol = symbol
+
+            cur_amt = get_position_amt(symbol)
+
+            # If already correct direction, do nothing
+            if cur_amt != 0.0:
+                cur_long = cur_amt > 0
+                if cur_long == want_long:
+                    time.sleep(POLL_SEC); continue
+
+            # Close existing first
+            if cur_amt != 0.0:
+                close_side = "SELL" if cur_amt > 0 else "BUY"
+                close_qty = abs(cur_amt)
+                exit_px = float(mark_price(symbol).get("markPrice","0") or "0")
+                est_roi = 0.0
+                if st.get("open_symbol")==symbol and st.get("open_entry_price",0)>0:
+                    est_roi = compute_est_roi(st.get("open_side",""), float(st.get("open_entry_price")), exit_px)
+
+                log(f"KC3 flip: CLOSE {'LONG' if cur_amt>0 else 'SHORT'} {symbol} qty={close_qty} (est exit={exit_px} roi={est_roi*100:.3f}%) then OPEN {side} (LIVE={LIVE_TRADING})")
+
+                if LIVE_TRADING:
+                    try:
+                        place_market(symbol, close_side, close_qty, reduce_only=True)
+                    except Exception as e:
+                        log(f"KC3 CLOSE ERROR: {e}")
+                        time.sleep(max(POLL_SEC, 3.0)); continue
+
+                st["last_trade_roi_frac"]=float(est_roi)
+                st["cum_roi_frac"]=float(st.get("cum_roi_frac",0.0)+est_roi)
+                st["open_symbol"]=""; st["open_side"]=""; st["open_qty"]=0.0; st["open_entry_price"]=0.0
+                save_state(st)
+                time.sleep(0.2)
+
+            # Open desired
+            avail = get_available_quote()
+            margin = floor_margin_whole(avail)
+            if MAX_NOTIONAL and MAX_NOTIONAL>0:
+                margin = floor_margin_whole(min(margin, float(MAX_NOTIONAL)))
+
+            if margin <= 0:
+                log(f"KC3 futures ERROR: Not enough available {QUOTE_ASSET} to open (avail={avail}).")
+                time.sleep(POLL_SEC); continue
+
+            qty, entry_px = compute_qty(symbol, margin, LEVERAGE)
+            if qty <= 0:
+                log(f"KC3 futures ERROR: qty after step floor is 0 (margin={margin}, lev={LEVERAGE}).")
+                time.sleep(POLL_SEC); continue
+
+            open_side = "BUY" if want_long else "SELL"
+            log(f"KC3 open: {side} {symbol} margin~{margin:g} {QUOTE_ASSET} qty~{qty:g} LIVE={LIVE_TRADING} (src={src_name})")
+
+            if not LIVE_TRADING:
+                log("(dry-run) open order skipped")
+            else:
+                try:
+                    place_market(symbol, open_side, qty, reduce_only=False)
+                except Exception as e:
+                    log(f"KC3 OPEN ERROR: {e}")
+                    time.sleep(max(POLL_SEC, 3.0)); continue
+
+            st["open_symbol"]=symbol
+            st["open_side"]=side
+            st["open_qty"]=float(qty)
+            st["open_entry_price"]=float(entry_px)
+            save_state(st)
+
+            tg_send(
+                f"KC3 {side} OPEN\n"
+                f"Token: {token}\n"
+                f"Symbol: {symbol}\n"
+                f"Entry: {entry_px:.6f}\n"
+                f"Qty: {qty:g}\n"
+                f"Margin: {margin:g} {QUOTE_ASSET} (Lev {LEVERAGE}x)\n"
+                f"Prev ROI: {float(st.get('last_trade_roi_frac',0.0))*100:.3f}%\n"
+                f"Cum ROI: {float(st.get('cum_roi_frac',0.0))*100:.3f}%"
+            )
+
+        except Exception as e:
+            log(f"KC3 ERROR: {e}")
+            time.sleep(max(POLL_SEC, 3.0))
+
+        time.sleep(POLL_SEC)
+
+if __name__=="__main__":
+    main()

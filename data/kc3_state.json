@@ -1,14 +1,14 @@
 {
-  "equity_usd": 101.24926762851887,
+  "equity_usd": 102.42426843708618,
   "position": {
     "side": "LONG",
     "token": "UNI",
-    "entry_price": 5.959,
-    "qty": 16.990982988507948,
-    "opened_at": "2025-12-27T22:29:33.735469Z",
-    "trade_id": 116
+    "entry_price": 6.189,
+    "qty": 16.5494051441406,
+    "opened_at": "2025-12-28T18:17:31.240369Z",
+    "trade_id": 235
   },
-  "last_hmi": 60.2,
+  "last_hmi": 62.7,
   "started_at": "2025-12-26T22:04:01.882910Z",
-  "trade_id_seq": 116
+  "trade_id_seq": 235
 }
