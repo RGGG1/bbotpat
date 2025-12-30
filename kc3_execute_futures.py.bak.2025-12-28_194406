@@ -1,0 +1,503 @@
+#!/usr/bin/env python3
+"""
+KC3 Futures Executor (USDⓈ-M)
+
+Authoritative desired position (if exists):
+  /var/www/bbotpat_live/kc3_exec_desired.json
+Fallback signal:
+  /var/www/bbotpat_live/kc3_latest.json
+
+Key safety/behavior:
+- Wait for a *fresh* signal after service start before doing anything.
+- Only act when the desired side CHANGES (debounce), not every poll.
+- Flip is strictly sequential:
+    close existing position -> wait -> re-check balance -> size -> open new position
+- Quantity respects Binance LOT_SIZE stepSize + quantityPrecision (fixes -1111).
+- Sizing uses available QUOTE_ASSET balance as margin, with a safety buffer,
+  and always floors DOWN (never rounds up).
+- If available balance < KC3_MIN_BALANCE, exits and notifies Telegram.
+
+Env:
+  BINANCE_API_KEY, BINANCE_API_SECRET
+  LIVE_TRADING_KC3=0/1      (master live flag)
+  KC3_ARMED=0/1             (extra safety: must be 1 to actually send orders)
+  KC3_QUOTE_ASSET=BNFCR
+  KC3_SYMBOL_SUFFIX=USDT
+  KC3_LEVERAGE=5
+  KC3_MAX_NOTIONAL=0        (0 = no cap; interpreted as max margin to use)
+  KC3_POLL_SEC=5
+  KC3_WAIT_AFTER_CLOSE_SEC=2
+  KC3_MIN_BALANCE=5
+  KC3_MARGIN_BUFFER_FRAC=0.985  (use only this fraction of avail margin)
+  KC3_ERROR_BACKOFF_SEC=10
+  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+
+State:
+  /root/bbotpat_live/data/kc3_futures_exec_state.json
+"""
+
+from __future__ import annotations
+
+import os
+import json
+import time
+import math
+import hmac
+import hashlib
+import urllib.parse
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
+
+import requests
+
+BASE_URL = "https://fapi.binance.com"
+DESIRED_PATH = "/var/www/bbotpat_live/kc3_exec_desired.json"
+LATEST_PATH = "/var/www/bbotpat_live/kc3_latest.json"
+STATE_PATH = "/root/bbotpat_live/data/kc3_futures_exec_state.json"
+
+VERSION = "2025-12-28-sequential-debounce-v2"
+
+
+def utc_ts() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int((time.time()%1)*1000):03d}Z"
+
+
+def log(msg: str) -> None:
+    print(f"[{utc_ts()}] {msg}", flush=True)
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def env_float(name: str, default: float) -> float:
+    v = os.getenv(name)
+    if v is None or v.strip() == "":
+        return default
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
+def env_int(name: str, default: int) -> int:
+    v = os.getenv(name)
+    if v is None or v.strip() == "":
+        return default
+    try:
+        return int(float(v))
+    except Exception:
+        return default
+
+
+def tg_send(text: str) -> None:
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
+    except Exception:
+        pass
+
+
+class BinanceClient:
+    def __init__(self, api_key: str, api_secret: str, base_url: str = BASE_URL):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.base_url = base_url.rstrip("/")
+        self.session = requests.Session()
+        self.session.headers.update({"X-MBX-APIKEY": self.api_key})
+
+    def _sign(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        params = dict(params)
+        params["timestamp"] = int(time.time() * 1000)
+        qs = urllib.parse.urlencode(params, doseq=True)
+        sig = hmac.new(self.api_secret.encode(), qs.encode(), hashlib.sha256).hexdigest()
+        params["signature"] = sig
+        return params
+
+    def get(self, path: str, params: Optional[Dict[str, Any]] = None, signed: bool = False) -> Any:
+        params = params or {}
+        if signed:
+            params = self._sign(params)
+        r = self.session.get(self.base_url + path, params=params, timeout=15)
+        r.raise_for_status()
+        return r.json()
+
+    def post(self, path: str, params: Optional[Dict[str, Any]] = None, signed: bool = False) -> Any:
+        params = params or {}
+        if signed:
+            params = self._sign(params)
+        r = self.session.post(self.base_url + path, params=params, timeout=15)
+        if r.status_code >= 400:
+            raise RuntimeError(f"POST {path} failed {r.status_code}: {r.text}")
+        return r.json()
+
+
+@dataclass
+class SymbolRules:
+    step: float
+    min_qty: float
+    qty_precision: int
+
+
+def floor_to_step(x: float, step: float) -> float:
+    if step <= 0:
+        return x
+    return math.floor(x / step) * step
+
+
+def round_to_precision(x: float, prec: int) -> float:
+    if prec < 0:
+        return x
+    fmt = "{:0." + str(prec) + "f}"
+    return float(fmt.format(x))
+
+
+def load_json_safely(path: str) -> Tuple[Optional[dict], Optional[float]]:
+    try:
+        st = os.stat(path)
+        mtime = st.st_mtime
+    except FileNotFoundError:
+        return None, None
+    except Exception:
+        return None, None
+
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+        obj = json.loads(raw.decode("utf-8"))
+        return obj, mtime
+    except Exception:
+        return None, mtime
+
+
+def parse_desired(obj: dict) -> Optional[Tuple[str, str]]:
+    try:
+        pos = obj.get("position") or {}
+        side = (pos.get("side") or "").upper().strip()
+        token = (pos.get("token") or "").upper().strip()
+        if side not in ("LONG", "SHORT") or not token:
+            return None
+        return side, token
+    except Exception:
+        return None
+
+
+def load_state() -> dict:
+    try:
+        with open(STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_state(st: dict) -> None:
+    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+    tmp = STATE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(st, f, indent=2, sort_keys=True)
+    os.replace(tmp, STATE_PATH)
+
+
+class KC3Executor:
+    def __init__(self):
+        self.api_key = os.getenv("BINANCE_API_KEY", "").strip()
+        self.api_secret = os.getenv("BINANCE_API_SECRET", "").strip()
+        if not self.api_key or not self.api_secret:
+            raise RuntimeError("Missing BINANCE_API_KEY/BINANCE_API_SECRET in environment")
+
+        self.quote_asset = os.getenv("KC3_QUOTE_ASSET", "BNFCR").strip().upper()
+        self.symbol_suffix = os.getenv("KC3_SYMBOL_SUFFIX", "USDT").strip().upper()
+        self.leverage = env_int("KC3_LEVERAGE", 5)
+        self.max_notional = env_float("KC3_MAX_NOTIONAL", 0.0)  # margin cap
+        self.poll_sec = env_float("KC3_POLL_SEC", 5.0)
+        self.wait_after_close_sec = env_float("KC3_WAIT_AFTER_CLOSE_SEC", 2.0)
+        self.min_balance = env_float("KC3_MIN_BALANCE", 5.0)
+        self.margin_buffer = env_float("KC3_MARGIN_BUFFER_FRAC", 0.985)
+        self.error_backoff_sec = env_float("KC3_ERROR_BACKOFF_SEC", 10.0)
+
+        self.live_trading = env_bool("LIVE_TRADING_KC3", False) and env_bool("KC3_ARMED", False)
+
+        self.client = BinanceClient(self.api_key, self.api_secret, BASE_URL)
+        self.rules_cache: Dict[str, SymbolRules] = {}
+        self.start_time = time.time()
+
+        self.state = load_state()
+        self.last_signal_mtime = self.state.get("last_signal_mtime")
+        self.last_signal_side = self.state.get("last_signal_side")
+        self.last_signal_token = self.state.get("last_signal_token")
+        self.last_action_ts = float(self.state.get("last_action_ts", 0.0))
+        self.last_error_ts = float(self.state.get("last_error_ts", 0.0))
+
+    def _symbol(self, token: str) -> str:
+        return f"{token}{self.symbol_suffix}"
+
+    def get_rules(self, symbol: str) -> SymbolRules:
+        if symbol in self.rules_cache:
+            return self.rules_cache[symbol]
+
+        ei = requests.get(self.client.base_url + "/fapi/v1/exchangeInfo", timeout=15).json()
+        s = next(x for x in ei["symbols"] if x["symbol"] == symbol)
+
+        qty_prec = int(s.get("quantityPrecision", 0))
+        step = 0.0
+        min_qty = 0.0
+        for f in s.get("filters", []):
+            if f.get("filterType") == "LOT_SIZE":
+                step = float(f.get("stepSize", "0"))
+                min_qty = float(f.get("minQty", "0"))
+                break
+        if step <= 0:
+            step = 1.0
+
+        rules = SymbolRules(step=step, min_qty=min_qty, qty_precision=qty_prec)
+        self.rules_cache[symbol] = rules
+        log(f"Rules {symbol}: step={rules.step} prec={rules.qty_precision}")
+        return rules
+
+    def get_mark_price(self, symbol: str) -> float:
+        j = self.client.get("/fapi/v1/premiumIndex", params={"symbol": symbol}, signed=False)
+        return float(j["markPrice"])
+
+    def get_available_balance(self) -> float:
+        bals = self.client.get("/fapi/v2/balance", signed=True)
+        for b in bals:
+            if b.get("asset") == self.quote_asset:
+                return float(b.get("availableBalance", "0") or 0)
+        return 0.0
+
+    def get_position(self, symbol: str) -> Tuple[float, float]:
+        pr = self.client.get("/fapi/v2/positionRisk", signed=True)
+        row = next((x for x in pr if x.get("symbol") == symbol), None)
+        if not row:
+            return 0.0, 0.0
+        amt = float(row.get("positionAmt", "0") or 0)
+        entry = float(row.get("entryPrice", "0") or 0)
+        return amt, entry
+
+    def set_leverage(self, symbol: str) -> None:
+        self.client.post("/fapi/v1/leverage", params={"symbol": symbol, "leverage": self.leverage}, signed=True)
+        log(f"Leverage set OK for {symbol} => {self.leverage}x")
+
+    def market_order(self, symbol: str, side: str, qty: float, reduce_only: bool = False) -> Any:
+        params = {"symbol": symbol, "side": side, "type": "MARKET", "quantity": qty}
+        if reduce_only:
+            params["reduceOnly"] = "true"
+        return self.client.post("/fapi/v1/order", params=params, signed=True)
+
+    def compute_qty(self, symbol: str, margin_avail: float) -> Tuple[float, float]:
+        price = self.get_mark_price(symbol)
+        rules = self.get_rules(symbol)
+
+        margin_to_use = margin_avail * self.margin_buffer
+        if self.max_notional and self.max_notional > 0:
+            margin_to_use = min(margin_to_use, self.max_notional)
+
+        # floor margin to whole units
+        margin_to_use = math.floor(margin_to_use)
+        if margin_to_use <= 0:
+            return 0.0, 0.0
+
+        raw_qty = (margin_to_use * float(self.leverage)) / price
+        qty = floor_to_step(raw_qty, rules.step)
+        qty = round_to_precision(qty, rules.qty_precision)
+
+        if qty < rules.min_qty:
+            return 0.0, margin_to_use
+
+        return qty, margin_to_use
+
+    def wait_flat(self, symbol: str, timeout_sec: float = 10.0) -> bool:
+        t0 = time.time()
+        while time.time() - t0 < timeout_sec:
+            amt, _ = self.get_position(symbol)
+            if abs(amt) < 1e-9:
+                return True
+            time.sleep(0.5)
+        return False
+
+    def load_desired_signal(self) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[float]]:
+        obj, mtime = load_json_safely(DESIRED_PATH)
+        if obj is not None:
+            parsed = parse_desired(obj)
+            if parsed:
+                side, token = parsed
+                return side, token, DESIRED_PATH, mtime
+
+        obj2, mtime2 = load_json_safely(LATEST_PATH)
+        if obj2 is not None:
+            parsed2 = parse_desired(obj2)
+            if parsed2:
+                side, token = parsed2
+                return side, token, LATEST_PATH, mtime2
+
+        return None, None, None, None
+
+    def ensure_fresh_signal(self, mtime: Optional[float]) -> bool:
+        if mtime is None:
+            return False
+        return mtime >= self.start_time
+
+    def should_act_on_signal(self, side: str, token: str, mtime: Optional[float]) -> bool:
+        if mtime is None:
+            return False
+        if not self.ensure_fresh_signal(mtime):
+            return False
+
+        if (self.last_signal_mtime is None) or (mtime > float(self.last_signal_mtime) + 1e-6):
+            if side != self.last_signal_side or token != self.last_signal_token:
+                return True
+            self.last_signal_mtime = mtime
+            return False
+        return False
+
+    def record_signal(self, side: str, token: str, mtime: Optional[float]) -> None:
+        if mtime is not None:
+            self.last_signal_mtime = mtime
+        self.last_signal_side = side
+        self.last_signal_token = token
+        self.state.update({
+            "last_signal_mtime": self.last_signal_mtime,
+            "last_signal_side": self.last_signal_side,
+            "last_signal_token": self.last_signal_token,
+        })
+        save_state(self.state)
+
+    def backoff_if_needed(self) -> bool:
+        return bool(self.last_error_ts and (time.time() - self.last_error_ts) < self.error_backoff_sec)
+
+    def record_error(self, msg: str) -> None:
+        now = time.time()
+        self.last_error_ts = now
+        self.state["last_error_ts"] = now
+        self.state["last_error_msg"] = msg
+        save_state(self.state)
+
+    def record_action(self) -> None:
+        now = time.time()
+        self.last_action_ts = now
+        self.state["last_action_ts"] = now
+        save_state(self.state)
+
+    def close_position_if_any(self, symbol: str) -> None:
+        amt, _ = self.get_position(symbol)
+        if abs(amt) < 1e-9:
+            return
+
+        side = "BUY" if amt < 0 else "SELL"  # opposite to close
+        qty = abs(amt)
+
+        rules = self.get_rules(symbol)
+        qty = floor_to_step(qty, rules.step)
+        qty = round_to_precision(qty, rules.qty_precision)
+        if qty <= 0:
+            return
+
+        log(f"KC3 close: {symbol} qty={qty} reduceOnly=True LIVE={self.live_trading}")
+        if self.live_trading:
+            self.market_order(symbol, side=side, qty=qty, reduce_only=True)
+        else:
+            log("(dry-run) close order skipped")
+
+        if self.live_trading:
+            self.wait_flat(symbol, timeout_sec=10.0)
+
+    def open_position(self, symbol: str, desired_side: str, qty: float, margin_to_use: float, src: str) -> None:
+        side = "BUY" if desired_side == "LONG" else "SELL"
+        log(f"KC3 open: {desired_side} {symbol} margin~{margin_to_use} {self.quote_asset} qty~{qty} LIVE={self.live_trading} (src={src})")
+        if self.live_trading:
+            self.market_order(symbol, side=side, qty=qty, reduce_only=False)
+        else:
+            log("(dry-run) open order skipped")
+
+    def run_once(self) -> None:
+        side, token, src, mtime = self.load_desired_signal()
+
+        if not side or not token or not src:
+            log("No signal available yet. Waiting...")
+            return
+
+        if not self.ensure_fresh_signal(mtime):
+            log("No fresh signal yet (signal file older than service start). Waiting...")
+            return
+
+        if not self.should_act_on_signal(side, token, mtime):
+            return
+
+        self.record_signal(side, token, mtime)
+
+        if self.backoff_if_needed():
+            return
+
+        symbol = self._symbol(token)
+
+        avail = self.get_available_balance()
+        if avail < self.min_balance:
+            msg = f"KC3 STOP: available {self.quote_asset} balance too low ({avail:.4f} < {self.min_balance})."
+            log(msg)
+            tg_send(msg)
+            raise SystemExit(2)
+
+        try:
+            self.set_leverage(symbol)
+        except Exception as e:
+            log(f"WARNING: leverage set failed: {e}")
+
+        try:
+            self.close_position_if_any(symbol)
+            time.sleep(max(0.0, self.wait_after_close_sec))
+
+            avail2 = self.get_available_balance()
+            if avail2 < self.min_balance:
+                msg = f"KC3 STOP: balance too low after close ({avail2:.4f} < {self.min_balance})."
+                log(msg)
+                tg_send(msg)
+                raise SystemExit(2)
+
+            qty, margin_to_use = self.compute_qty(symbol, avail2)
+            if qty <= 0:
+                msg = f"KC3 ERROR: computed qty=0 for {symbol} with avail={avail2:.4f} {self.quote_asset}."
+                log(msg)
+                tg_send(msg)
+                self.record_error(msg)
+                return
+
+            self.open_position(symbol, side, qty, margin_to_use, src)
+            self.record_action()
+
+            if self.live_trading:
+                amt, entry = self.get_position(symbol)
+                log(f"KC3 post-open: positionAmt={amt} entryPrice={entry}")
+                tg_send(f"KC3 {side} {symbol} qty={qty} entry~{entry} (margin~{margin_to_use} {self.quote_asset})")
+
+        except SystemExit:
+            raise
+        except Exception as e:
+            msg = f"KC3 ERROR: {e}"
+            log(msg)
+            self.record_error(msg)
+            tg_send(msg)
+
+    def run_forever(self) -> None:
+        log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={env_bool('LIVE_TRADING_KC3', False)} KC3_ARMED={env_bool('KC3_ARMED', False)} LIVE={self.live_trading} VERSION={VERSION}")
+        log(f"BASE_URL={BASE_URL} QUOTE_ASSET={self.quote_asset} SYMBOL_SUFFIX={self.symbol_suffix} LEV={self.leverage} MAX_NOTIONAL={self.max_notional} POLL_SEC={self.poll_sec}")
+        log(f"DESIRED override (authoritative if exists): {DESIRED_PATH} | fallback: {LATEST_PATH}")
+
+        while True:
+            self.run_once()
+            time.sleep(max(0.5, float(self.poll_sec)))
+
+
+def main() -> None:
+    ex = KC3Executor()
+    ex.run_forever()
+
+
+if __name__ == "__main__":
+    main()

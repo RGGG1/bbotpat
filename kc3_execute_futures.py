@@ -1,485 +1,402 @@
 #!/usr/bin/env python3
 """
-KC3 Futures Executor (USDⓈ-M) — SAFE SEQUENTIAL VERSION
+KC3 Futures Executor (USDⓈ-M) - Debounced Sequential Executor
 
-Key safety rules:
-- Will NOT trade until kc3_latest.json (or override) is *fresh after service start*.
-- Live trading requires BOTH:
-    LIVE_TRADING_KC3=1  AND  KC3_ARMED=1
-  If KC3_ARMED!=1, it will log what it would do but never place orders.
+Reads desired position from:
+  1) /var/www/bbotpat_live/kc3_exec_desired.json (if exists)  [manual override]
+  2) /var/www/bbotpat_live/kc3_latest.json (fallback)
 
-- Flip flow is strictly:
-    CLOSE -> wait flat -> refresh balance -> compute qty -> OPEN
-  Never "close+open" in one combined action.
+Key properties:
+- Acts ONLY on stable signal (same token+side seen N consecutive polls).
+- Enforces minimum hold time to prevent instant flip-flop.
+- Flip is SEQUENTIAL: close -> wait -> verify flat -> size -> open.
+- Quantity is floored to LOT_SIZE stepSize and quantityPrecision.
+- LIVE trading requires BOTH LIVE_TRADING_KC3=1 and KC3_ARMED=1.
+- If balance < KC3_MIN_BALANCE (default $5), stops + logs.
 
-- On any live order error (4xx / Binance error codes), it aborts the cycle and
-  enters a cooldown to prevent spam.
-
-- Quantity is floored to step size and precision from exchangeInfo (fixes -1111).
-  UNIUSDT has quantityPrecision=0 so orders must be whole integers.
-
-- Writes trade history JSONL to:
-    /var/www/bbotpat_live/kc3_trades.jsonl
-
-State file:
-  /root/bbotpat_live/data/kc3_futures_exec_state.json
+Also tolerates partial/empty JSON reads (non-atomic writer).
 """
 
-import os, json, time, hmac, hashlib, urllib.parse, math
-from pathlib import Path
+import os, time, json, hmac, hashlib, urllib.parse
 from datetime import datetime, timezone
 import requests
 
-VERSION = "2025-12-28-safe-sequential-v1"
+VERSION = "2025-12-30-debounce-minhold-v1"
 
-# Paths
-KC3_LATEST   = Path("/var/www/bbotpat_live/kc3_latest.json")
-KC3_OVERRIDE = Path("/var/www/bbotpat_live/kc3_exec_desired.json")
-STATE_PATH   = Path("/root/bbotpat_live/data/kc3_futures_exec_state.json")
-TRADES_JSONL = Path("/var/www/bbotpat_live/kc3_trades.jsonl")
+BASE_URL = "https://fapi.binance.com"
 
-# Env
-BASE_URL        = os.getenv("KC3_BASE_URL", "https://fapi.binance.com").strip()
-SYMBOL_SUFFIX   = os.getenv("KC3_SYMBOL_SUFFIX", "USDT").strip()
-QUOTE_ASSET     = os.getenv("KC3_QUOTE_ASSET", "BNFCR").strip()
-LEV             = int(float(os.getenv("KC3_LEVERAGE", "5")))
-MAX_NOTIONAL    = float(os.getenv("KC3_MAX_NOTIONAL", "0"))
-POLL_SEC        = float(os.getenv("KC3_POLL_SEC", "5"))
-SIGNAL_MAX_AGE  = float(os.getenv("KC3_SIGNAL_MAX_AGE_SEC", "600"))  # ignore signals older than this
-MARGIN_BUFFER   = float(os.getenv("KC3_MARGIN_BUFFER", "0.70"))      # use only this fraction of available
-COOLDOWN_SEC    = float(os.getenv("KC3_COOLDOWN_SEC", "60"))         # after error, wait this long
-ARMED           = os.getenv("KC3_ARMED", "0").strip() == "1"
+def utc_now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-LIVE_TRADING_KC3 = os.getenv("LIVE_TRADING_KC3", "0").strip() == "1"
-LIVE = (LIVE_TRADING_KC3 and ARMED)
+def log(msg: str):
+    print(f"[{utc_now()}] {msg}", flush=True)
 
-API_KEY = os.getenv("BINANCE_API_KEY", "").strip()
-API_SEC = os.getenv("BINANCE_API_SECRET", "").strip()
+def env_bool(name: str, default=False):
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in ("1","true","yes","y","on")
 
-# Telegram (optional)
-TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TG_CHAT  = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-
-session = requests.Session()
-session.headers.update({"User-Agent":"kc3-exec/1.0"})
-
-def now_iso():
-    return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
-
-def log(msg):
-    print(f"[{now_iso()}] {msg}", flush=True)
-
-def tg_send(text):
-    if not TG_TOKEN or not TG_CHAT:
-        return
+def env_float(name: str, default: float):
     try:
-        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        session.post(url, json={"chat_id": TG_CHAT, "text": text}, timeout=10)
-    except Exception as e:
-        log(f"TG ERROR: {e}")
-
-def load_json(path: Path):
-    try:
-        return json.loads(path.read_text())
+        return float(os.getenv(name, str(default)))
     except Exception:
-        return None
+        return default
 
-def save_state(st):
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(st, indent=2, sort_keys=True))
-    tmp.replace(STATE_PATH)
+def env_int(name: str, default: int):
+    try:
+        return int(float(os.getenv(name, str(default))))
+    except Exception:
+        return default
+
+API_KEY = os.getenv("BINANCE_API_KEY", "")
+API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+
+LIVE_TRADING = env_bool("LIVE_TRADING_KC3", False)
+KC3_ARMED = env_bool("KC3_ARMED", False)
+LIVE = bool(LIVE_TRADING and KC3_ARMED)
+
+SYMBOL_SUFFIX = os.getenv("KC3_SYMBOL_SUFFIX", os.getenv("SYMBOL_SUFFIX", "USDT")).strip()
+QUOTE_ASSET = os.getenv("KC3_QUOTE_ASSET", "USDT").strip()
+LEV = env_int("KC3_LEVERAGE", 5)
+POLL_SEC = env_float("KC3_POLL_SEC", 2.0)
+WAIT_AFTER_CLOSE = env_float("KC3_WAIT_AFTER_CLOSE_SEC", 2.0)
+MIN_BALANCE = env_float("KC3_MIN_BALANCE", 5.0)
+
+# Debounce + min-hold protections (THIS is what stops 3-second LONGs)
+STABLE_POLLS = env_int("KC3_STABLE_POLLS", 3)          # require same signal N polls
+MIN_HOLD_SEC = env_float("KC3_MIN_HOLD_SEC", 60.0)    # minimum seconds to hold a position before flipping
+REQUIRE_CHANGE_ON_START = env_bool("KC3_REQUIRE_SIGNAL_CHANGE_ON_START", True)
+
+# Sizing
+MARGIN_FRAC = env_float("KC3_MARGIN_FRAC", 0.90)
+
+DESIRED_OVERRIDE = "/var/www/bbotpat_live/kc3_exec_desired.json"
+DESIRED_FALLBACK = "/var/www/bbotpat_live/kc3_latest.json"
+
+STATE_PATH = "/root/bbotpat_live/data/kc3_futures_exec_state.json"
+
+def ensure_dirs():
+    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
 
 def load_state():
-    st = load_json(STATE_PATH)
-    if not isinstance(st, dict):
-        st = {}
-    st.setdefault("cum_roi_frac", 0.0)
-    st.setdefault("last_trade_roi_frac", 0.0)
-    st.setdefault("last_signal_mtime", 0.0)
-    st.setdefault("cooldown_until", 0.0)
-    return st
+    ensure_dirs()
+    try:
+        with open(STATE_PATH, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-def sign(params: dict) -> dict:
+def save_state(st):
+    ensure_dirs()
+    tmp = STATE_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(st, f, indent=2, sort_keys=True)
+    os.replace(tmp, STATE_PATH)
+
+def sign_params(params: dict) -> dict:
     qs = urllib.parse.urlencode(params)
-    sig = hmac.new(API_SEC.encode(), qs.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(API_SECRET.encode(), qs.encode(), hashlib.sha256).hexdigest()
     params["signature"] = sig
     return params
 
-def req(method, path, params=None):
-    if not API_KEY or not API_SEC:
-        raise RuntimeError("Missing BINANCE_API_KEY / BINANCE_API_SECRET")
-    if params is None:
-        params = {}
+def private_req(method: str, path: str, params: dict):
+    if not API_KEY or not API_SECRET:
+        raise RuntimeError("Missing BINANCE_API_KEY/BINANCE_API_SECRET in environment.")
+    params = dict(params)
     params["timestamp"] = int(time.time() * 1000)
-    sign(params)
-    url = BASE_URL + path
-    r = session.request(method, url, params=params, headers={"X-MBX-APIKEY": API_KEY}, timeout=15)
-    return r
+    sign_params(params)
+    r = requests.request(method, BASE_URL + path, params=params,
+                         headers={"X-MBX-APIKEY": API_KEY}, timeout=10)
+    if r.status_code >= 400:
+        raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+    return r.json()
 
-def get_exchange_rules(symbol: str):
-    r = session.get(BASE_URL + "/fapi/v1/exchangeInfo", timeout=15)
-    r.raise_for_status()
-    data = r.json()
-    sym = None
-    for s in data.get("symbols", []):
-        if s.get("symbol") == symbol:
-            sym = s
-            break
-    if not sym:
-        raise RuntimeError(f"Symbol not found in exchangeInfo: {symbol}")
+def safe_read_json(path: str):
+    # tolerate empty/partial writes
+    try:
+        with open(path, "r") as f:
+            raw = f.read()
+        if not raw or not raw.strip():
+            raise ValueError("empty file")
+        return json.loads(raw)
+    except Exception as e:
+        raise RuntimeError(f"ERROR reading {path}: {e}")
 
-    qty_prec = int(sym.get("quantityPrecision", 0))
+def read_desired():
+    src = None
+    if os.path.exists(DESIRED_OVERRIDE):
+        src = DESIRED_OVERRIDE
+    else:
+        src = DESIRED_FALLBACK
+
+    data = safe_read_json(src)
+
+    # Support both formats:
+    #  - {"signal_side":"SHORT","best_token":"UNI","hmi":..., "hmi_delta":...}
+    #  - {"position":{"side":"LONG","token":"UNI",...}, ...}
+    side = ""
+    token = ""
+    if isinstance(data.get("signal_side"), str):
+        side = data.get("signal_side","")
+        token = data.get("best_token","") or data.get("token","")
+    elif isinstance(data.get("position"), dict):
+        side = data["position"].get("side","")
+        token = data["position"].get("token","")
+    side = str(side).strip().upper()
+    token = str(token).strip().upper()
+
+    hmi = data.get("hmi", None)
+    hmi_delta = data.get("hmi_delta", None)
+    ts = data.get("timestamp", None)
+
+    if side not in ("LONG","SHORT"):
+        raise RuntimeError(f"Desired side missing/invalid in {src}: got side={side!r}")
+
+    if not token:
+        raise RuntimeError(f"Desired token missing/invalid in {src}")
+
+    return {
+        "side": side,
+        "token": token,
+        "symbol": f"{token}{SYMBOL_SUFFIX}",
+        "hmi": hmi,
+        "hmi_delta": hmi_delta,
+        "timestamp": ts,
+        "src": src
+    }
+
+def get_position(symbol: str):
+    data = private_req("GET", "/fapi/v2/positionRisk", {})
+    for x in data:
+        if x.get("symbol") == symbol:
+            amt = float(x.get("positionAmt", "0") or "0")
+            entry = float(x.get("entryPrice", "0") or "0")
+            return {"amt": amt, "entry": entry}
+    return {"amt": 0.0, "entry": 0.0}
+
+def get_mark(symbol: str) -> float:
+    d = requests.get(BASE_URL + "/fapi/v1/premiumIndex", params={"symbol": symbol}, timeout=10).json()
+    return float(d["markPrice"])
+
+def get_rules(symbol: str):
+    ei = requests.get(BASE_URL + "/fapi/v1/exchangeInfo", timeout=10).json()
+    s = [x for x in ei["symbols"] if x["symbol"] == symbol][0]
     step = 1.0
-    min_qty = 0.0
-    for f in sym.get("filters", []):
+    minQty = 0.0
+    qtyPrec = int(s.get("quantityPrecision", 0) or 0)
+    for f in s.get("filters", []):
         if f.get("filterType") in ("LOT_SIZE","MARKET_LOT_SIZE"):
-            step = float(f.get("stepSize", "1"))
-            min_qty = float(f.get("minQty", "0"))
-    return {"qty_prec": qty_prec, "step": step, "min_qty": min_qty}
+            step = float(f.get("stepSize","1") or "1")
+            minQty = float(f.get("minQty","0") or "0")
+    return {"step": step, "minQty": minQty, "qtyPrec": qtyPrec}
 
-def floor_to_step(x: float, step: float, prec: int) -> float:
+def floor_step(qty: float, step: float, qtyPrec: int) -> float:
     if step <= 0:
-        return round(x, prec)
-    k = math.floor(x / step)
-    y = k * step
-    # apply precision
-    if prec <= 0:
-        return float(int(y))
-    return float(f"{y:.{prec}f}")
-
-def get_mark_price(symbol: str) -> float:
-    r = session.get(BASE_URL + "/fapi/v1/premiumIndex", params={"symbol": symbol}, timeout=10)
-    r.raise_for_status()
-    j = r.json()
-    return float(j["markPrice"])
-
-def get_available_balance(asset: str) -> float:
-    r = req("GET", "/fapi/v2/balance", {})
-    if r.status_code != 200:
-        raise RuntimeError(f"balance failed {r.status_code}: {r.text[:200]}")
-    arr = r.json()
-    for row in arr:
-        if row.get("asset") == asset:
-            return float(row.get("availableBalance", "0"))
-    return 0.0
-
-def get_position_amt(symbol: str) -> float:
-    r = req("GET", "/fapi/v2/positionRisk", {})
-    if r.status_code != 200:
-        raise RuntimeError(f"positionRisk failed {r.status_code}: {r.text[:200]}")
-    arr = r.json()
-    for row in arr:
-        if row.get("symbol") == symbol:
-            return float(row.get("positionAmt", "0"))
-    return 0.0
+        return round(qty, qtyPrec)
+    n = int(qty / step)
+    q = n * step
+    return float(f"{q:.{qtyPrec}f}") if qtyPrec >= 0 else float(q)
 
 def set_leverage(symbol: str, lev: int):
-    r = req("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": lev})
-    if r.status_code != 200:
-        raise RuntimeError(f"set leverage failed {r.status_code}: {r.text[:200]}")
-    return True
+    if lev <= 0:
+        raise RuntimeError(f"Leverage {lev} is not valid")
+    private_req("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": lev})
+    log(f"Leverage set OK for {symbol} => {lev}x")
+
+def avail_balance() -> float:
+    d = private_req("GET", "/fapi/v2/balance", {})
+    for x in d:
+        if x.get("asset") == QUOTE_ASSET:
+            return float(x.get("availableBalance","0") or "0")
+    return 0.0
 
 def place_market(symbol: str, side: str, qty: float, reduce_only: bool):
-    p = {"symbol": symbol, "side": side, "type": "MARKET", "quantity": qty}
-    if reduce_only:
-        p["reduceOnly"] = "true"
-    r = req("POST", "/fapi/v1/order", p)
-    return r
+    params = {
+        "symbol": symbol,
+        "side": side,            # BUY/SELL
+        "type": "MARKET",
+        "quantity": qty,
+        "reduceOnly": "true" if reduce_only else "false",
+        "newOrderRespType": "RESULT"
+    }
+    if not LIVE:
+        log(f"(dry-run) order skipped")
+        return None
+    return private_req("POST", "/fapi/v1/order", params)
 
-def write_trade_jsonl(obj: dict):
-    TRADES_JSONL.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(obj, separators=(",",":"), ensure_ascii=False)
-    with TRADES_JSONL.open("a") as f:
-        f.write(line + "\n")
+def close_position(symbol: str):
+    pos = get_position(symbol)
+    amt = pos["amt"]
+    if amt == 0.0:
+        return False
+    side = "SELL" if amt > 0 else "BUY"  # sell to close long, buy to close short
+    qty = abs(amt)
+    mark = get_mark(symbol)
+    log(f"KC3 CLOSE {'LONG' if amt>0 else 'SHORT'} {symbol} qty={qty} mark~{mark:.6g} LIVE={LIVE}")
+    place_market(symbol, side, qty, reduce_only=True)
+    return True
 
-def desired_from_files():
-    src = None
-    if KC3_OVERRIDE.exists():
-        src = KC3_OVERRIDE
-    elif KC3_LATEST.exists():
-        src = KC3_LATEST
-    else:
-        return None, None
+def open_position(symbol: str, desired_side: str, hmi=None, hmi_delta=None, src=None):
+    bal = avail_balance()
+    if bal < MIN_BALANCE:
+        log(f"BALANCE TOO LOW: available {QUOTE_ASSET}={bal:.6g} < {MIN_BALANCE}. Stopping executor.")
+        raise SystemExit(2)
 
-    j = load_json(src)
-    if not isinstance(j, dict):
-        return None, src
+    mark = get_mark(symbol)
+    notional = bal * LEV * MARGIN_FRAC
+    rules = get_rules(symbol)
+    qty_raw = (notional / mark) if mark > 0 else 0.0
+    qty = floor_step(qty_raw, rules["step"], rules["qtyPrec"])
 
-    pos = j.get("position") or {}
-    side = (pos.get("side") or "").upper().strip()
-    token = (pos.get("token") or "").upper().strip()
-    if side not in ("LONG","SHORT","FLAT"):
-        return None, src
-    if side != "FLAT" and not token:
-        return None, src
-    return {"side": side, "token": token}, src
+    if qty < rules["minQty"] or qty <= 0:
+        log(f"KC3 ERROR: Computed qty too small: qty={qty} minQty={rules['minQty']} mark={mark} notional={notional}")
+        return False
+
+    order_side = "BUY" if desired_side == "LONG" else "SELL"
+    hmi_s = f"hmi={hmi}" if hmi is not None else "hmi=?"
+    hd_s = f"hmi_delta={hmi_delta}" if hmi_delta is not None else "hmi_delta=?"
+    log(f"KC3 OPEN {desired_side} {symbol} ({hmi_s} {hd_s}) margin~{bal:.6g} {QUOTE_ASSET} notional~{notional:.6g} qty~{qty} mark~{mark:.6g} LIVE={LIVE} (src={src})")
+    place_market(symbol, order_side, qty, reduce_only=False)
+    return True
+
+def desired_key(sig: dict) -> str:
+    return f"{sig['token']}:{sig['side']}"
 
 def main():
-    service_start = time.time()
-    log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING_KC3} KC3_ARMED={'1' if ARMED else '0'} LIVE={LIVE} VERSION={VERSION}")
-    log(f"BASE_URL={BASE_URL} QUOTE_ASSET={QUOTE_ASSET} SYMBOL_SUFFIX={SYMBOL_SUFFIX} LEV={LEV} MAX_NOTIONAL={MAX_NOTIONAL} POLL_SEC={POLL_SEC}")
-    log(f"DESIRED override (authoritative if exists): {KC3_OVERRIDE} | fallback: {KC3_LATEST}")
-
     st = load_state()
-    rules_cache = {}
+    process_start = time.time()
+
+    log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING} KC3_ARMED={int(KC3_ARMED)} LIVE={LIVE} VERSION={VERSION}")
+    log(f"BASE_URL={BASE_URL} QUOTE_ASSET={QUOTE_ASSET} SYMBOL_SUFFIX={SYMBOL_SUFFIX} LEV={LEV} POLL_SEC={POLL_SEC}")
+    log(f"DESIRED override: {DESIRED_OVERRIDE} | fallback: {DESIRED_FALLBACK}")
+    log(f"Debounce: KC3_STABLE_POLLS={STABLE_POLLS}  MinHold: KC3_MIN_HOLD_SEC={MIN_HOLD_SEC}")
+
+    stable_count = 0
+    last_seen_key = st.get("last_seen_key")
+    last_acted_key = st.get("last_acted_key")
+    last_open_ts = float(st.get("last_open_ts", 0.0))
+
+    baseline_key = None
+    if REQUIRE_CHANGE_ON_START:
+        try:
+            sig0 = read_desired()
+            baseline_key = desired_key(sig0)
+            log(f"Startup baseline desired key={baseline_key} (src={sig0['src']}). Waiting for change...")
+        except Exception as e:
+            log(str(e))
+            log("No valid signal at startup; waiting...")
+        st["baseline_key"] = baseline_key
+        save_state(st)
+
+    # set leverage once at start (and again if symbol changes later)
+    current_symbol_for_lev = None
 
     while True:
         try:
-            st = load_state()
+            sig = read_desired()
+        except Exception as e:
+            log(str(e))
+            time.sleep(POLL_SEC)
+            continue
 
-            # cooldown protection
-            if time.time() < float(st.get("cooldown_until", 0.0)):
-                time.sleep(POLL_SEC)
-                continue
+        key = desired_key(sig)
 
-            desired, src = desired_from_files()
-            if not desired:
-                log("No desired position yet (no file or invalid JSON). Waiting...")
-                time.sleep(POLL_SEC)
-                continue
+        # Startup gate: require key to change once after boot to avoid immediate entry
+        if REQUIRE_CHANGE_ON_START and baseline_key and key == baseline_key and not os.path.exists(DESIRED_OVERRIDE):
+            time.sleep(POLL_SEC)
+            continue
 
-            # freshness gate: do not act on stale file after start
-            mtime = src.stat().st_mtime
-            age = time.time() - mtime
-            if mtime < service_start:
-                log("No fresh signal yet (signal file older than service start). Waiting...")
-                time.sleep(POLL_SEC)
-                continue
-            if age > SIGNAL_MAX_AGE:
-                log(f"Signal too old (age={age:.1f}s > {SIGNAL_MAX_AGE}s). Waiting...")
-                time.sleep(POLL_SEC)
-                continue
+        # Debounce stability count
+        if key == last_seen_key:
+            stable_count += 1
+        else:
+            stable_count = 1
+            last_seen_key = key
 
-            # De-dupe: act only when signal file changed
-            last_m = float(st.get("last_signal_mtime", 0.0))
-            if mtime <= last_m:
-                time.sleep(POLL_SEC)
-                continue
+        st["last_seen_key"] = last_seen_key
+        st["stable_count"] = stable_count
+        save_state(st)
 
-            side = desired["side"]
-            token = desired["token"]
-            symbol = f"{token}{SYMBOL_SUFFIX}" if side != "FLAT" else None
+        # Only act when stable enough AND different from last action
+        if stable_count < STABLE_POLLS:
+            time.sleep(POLL_SEC)
+            continue
 
-            # If FLAT requested, we close any UNI*? We only support closing current symbol based on last open.
-            if side == "FLAT":
-                # Best effort: if state knows open_symbol, close it.
-                open_symbol = st.get("open_symbol")
-                if not open_symbol:
-                    log("Desired FLAT but no open_symbol in state. Nothing to do.")
-                    st["last_signal_mtime"] = mtime
-                    save_state(st)
-                    time.sleep(POLL_SEC)
-                    continue
-                symbol = open_symbol
+        if key == last_acted_key:
+            time.sleep(POLL_SEC)
+            continue
 
-            # load rules
-            if symbol not in rules_cache:
-                rules_cache[symbol] = get_exchange_rules(symbol)
-                r = rules_cache[symbol]
-                log(f"Rules {symbol}: step={r['step']} prec={r['qty_prec']} minQty={r['min_qty']}")
+        symbol = sig["symbol"]
+        desired_side = sig["side"]
 
-            rls = rules_cache[symbol]
-            qty_prec = rls["qty_prec"]
-            step = rls["step"]
-            min_qty = rls["min_qty"]
-
-            # set leverage once per symbol when we first see it
+        # Ensure leverage set for this symbol
+        if current_symbol_for_lev != symbol:
             try:
                 set_leverage(symbol, LEV)
-                log(f"Leverage set OK for {symbol} => {LEV}x")
+                current_symbol_for_lev = symbol
             except Exception as e:
-                log(f"Leverage set ERROR for {symbol}: {e}")
-                st["cooldown_until"] = time.time() + COOLDOWN_SEC
-                save_state(st)
-                time.sleep(POLL_SEC)
-                continue
+                log(f"Leverage set FAILED for {symbol}: {e}")
+                # continue anyway (Binance may already have it, but don't block)
+                current_symbol_for_lev = symbol
 
-            # determine current position
-            pos_amt = get_position_amt(symbol)
-            cur_side = "FLAT"
-            if pos_amt > 0:
-                cur_side = "LONG"
-            elif pos_amt < 0:
-                cur_side = "SHORT"
+        # Determine current position side on Binance
+        pos = get_position(symbol)
+        amt = pos["amt"]
+        current_side = "FLAT"
+        if amt > 0:
+            current_side = "LONG"
+        elif amt < 0:
+            current_side = "SHORT"
 
-            desired_side = side if side != "FLAT" else "FLAT"
-
-            # Only act when desired differs from current.
-            if desired_side == cur_side:
-                log(f"No action: desired={desired_side} equals current={cur_side} for {symbol}.")
-                st["last_signal_mtime"] = mtime
-                save_state(st)
-                time.sleep(POLL_SEC)
-                continue
-
-            # ---- CLOSE if needed ----
-            if cur_side != "FLAT":
-                close_qty = abs(pos_amt)
-                close_qty = floor_to_step(close_qty, step, qty_prec)
-                if close_qty < min_qty:
-                    log(f"CLOSE abort: computed close_qty {close_qty} < minQty {min_qty}.")
-                    st["cooldown_until"] = time.time() + COOLDOWN_SEC
-                    save_state(st)
-                    time.sleep(POLL_SEC)
-                    continue
-
-                close_side = "SELL" if cur_side == "LONG" else "BUY"
-                mark = get_mark_price(symbol)
-                log(f"KC3 CLOSE {cur_side} {symbol} qty={close_qty} mark~{mark:.6g} LIVE={LIVE}")
-
-                if LIVE:
-                    resp = place_market(symbol, close_side, close_qty, reduce_only=True)
-                    if resp.status_code != 200:
-                        log(f"KC3 CLOSE ERROR: {resp.status_code} {resp.text[:500]}")
-                        tg_send(f"KC3 CLOSE ERROR {symbol} {cur_side} qty={close_qty}: {resp.text[:200]}")
-                        st["cooldown_until"] = time.time() + COOLDOWN_SEC
-                        save_state(st)
-                        time.sleep(POLL_SEC)
-                        continue
-                else:
-                    log("(dry-run) close order skipped")
-
-                # Wait until flat (hard requirement)
-                ok = False
-                for _ in range(30):  # up to ~15s
-                    time.sleep(0.5)
-                    pa = get_position_amt(symbol)
-                    if abs(pa) < 1e-9:
-                        ok = True
-                        break
-                if not ok:
-                    log("KC3 ERROR: Close submitted but position not flat after timeout. ABORTING.")
-                    tg_send(f"KC3 ERROR: {symbol} not flat after close timeout. Bot aborting cycle.")
-                    st["cooldown_until"] = time.time() + COOLDOWN_SEC
-                    save_state(st)
-                    time.sleep(POLL_SEC)
-                    continue
-
-                # Optional: record exit ROI estimate if we had entry price
-                entry = float(st.get("open_entry_price", 0.0) or 0.0)
-                open_side = st.get("open_side")
-                exit_price = mark
-                roi = 0.0
-                if entry > 0 and open_side in ("LONG","SHORT"):
-                    if open_side == "LONG":
-                        roi = (exit_price - entry) / entry
-                    else:
-                        roi = (entry - exit_price) / entry
-                st["last_trade_roi_frac"] = roi
-                st["cum_roi_frac"] = float(st.get("cum_roi_frac", 0.0)) + roi
-
-                write_trade_jsonl({
-                    "ts": now_iso(),
-                    "symbol": symbol,
-                    "side": open_side or cur_side,
-                    "qty": close_qty,
-                    "entry_price": entry if entry > 0 else None,
-                    "exit_price": exit_price,
-                    "roi_pct": round(roi * 100, 4),
-                    "cum_roi_pct": round(float(st.get("cum_roi_frac",0.0)) * 100, 4),
-                    "note": "CLOSE"
-                })
-
-                tg_send(f"KC3 CLOSE {symbol} {cur_side} qty={close_qty} exit~{exit_price:.6g} ROI={roi*100:.3f}% Cum={float(st.get('cum_roi_frac',0.0))*100:.3f}%")
-
-                # Clear open state
-                st["open_symbol"] = None
-                st["open_side"] = None
-                st["open_qty"] = None
-                st["open_entry_price"] = None
-                st["open_ts"] = None
-                save_state(st)
-
-                # Give Binance a moment to release margin
-                time.sleep(1.0)
-
-            # If desired is FLAT, stop after closing
-            if desired_side == "FLAT":
-                log("Desired FLAT achieved.")
-                st["last_signal_mtime"] = mtime
-                save_state(st)
-                time.sleep(POLL_SEC)
-                continue
-
-            # ---- OPEN desired ----
-            # Refresh balance after close
-            avail = get_available_balance(QUOTE_ASSET)
-            usable = math.floor(avail * MARGIN_BUFFER)  # whole units down
-            if usable <= 0:
-                log(f"KC3 OPEN abort: avail {QUOTE_ASSET}={avail:.8f} usable={usable} (buffer={MARGIN_BUFFER}).")
-                st["cooldown_until"] = time.time() + COOLDOWN_SEC
-                save_state(st)
-                time.sleep(POLL_SEC)
-                continue
-
-            # apply max notional if set
-            margin = float(usable)
-            notional = margin * LEV
-            if MAX_NOTIONAL and MAX_NOTIONAL > 0:
-                notional = min(notional, MAX_NOTIONAL)
-                # also ensure margin matches that notional
-                margin = math.floor(notional / LEV)
-
-            # compute qty from mark price
-            mark = get_mark_price(symbol)
-            raw_qty = notional / mark
-            qty = floor_to_step(raw_qty, step, qty_prec)
-
-            # enforce min qty
-            if qty < min_qty:
-                log(f"KC3 OPEN abort: qty {qty} < minQty {min_qty} (raw={raw_qty}).")
-                st["cooldown_until"] = time.time() + COOLDOWN_SEC
-                save_state(st)
-                time.sleep(POLL_SEC)
-                continue
-
-            open_side = "BUY" if desired_side == "LONG" else "SELL"
-            log(f"KC3 OPEN {desired_side} {symbol} margin~{margin:.0f} {QUOTE_ASSET} notional~{notional:.0f} qty~{qty} mark~{mark:.6g} LIVE={LIVE} (src={src})")
-
-            if LIVE:
-                resp = place_market(symbol, open_side, qty, reduce_only=False)
-                if resp.status_code != 200:
-                    log(f"KC3 OPEN ERROR: {resp.status_code} {resp.text[:500]}")
-                    tg_send(f"KC3 OPEN ERROR {symbol} {desired_side} qty={qty}: {resp.text[:200]}")
-                    # IMPORTANT: do NOT retry. Cooldown + wait for next fresh signal.
-                    st["cooldown_until"] = time.time() + COOLDOWN_SEC
-                    st["last_signal_mtime"] = mtime  # consume signal to avoid spam
-                    save_state(st)
-                    time.sleep(POLL_SEC)
-                    continue
-            else:
-                log("(dry-run) open order skipped")
-
-            # record open state
-            st["open_symbol"] = symbol
-            st["open_side"] = desired_side
-            st["open_qty"] = qty
-            st["open_entry_price"] = mark
-            st["open_ts"] = now_iso()
-            st["last_signal_mtime"] = mtime
+        # If already correct side, mark as acted and move on
+        if current_side == desired_side:
+            log(f"No action: desired={desired_side} equals current={current_side} for {symbol}. (hmi={sig.get('hmi')} delta={sig.get('hmi_delta')})")
+            last_acted_key = key
+            st["last_acted_key"] = last_acted_key
             save_state(st)
+            time.sleep(POLL_SEC)
+            continue
 
-            write_trade_jsonl({
-                "ts": now_iso(),
-                "symbol": symbol,
-                "side": desired_side,
-                "qty": qty,
-                "entry_price": mark,
-                "exit_price": None,
-                "roi_pct": None,
-                "cum_roi_pct": round(float(st.get("cum_roi_frac",0.0)) * 100, 4),
-                "note": "OPEN"
-            })
+        # MIN HOLD (skip noisy flips), unless manual override file exists
+        now = time.time()
+        if (now - last_open_ts) < MIN_HOLD_SEC and not os.path.exists(DESIRED_OVERRIDE) and current_side != "FLAT":
+            log(f"Min-hold active: opened {now-last_open_ts:.1f}s ago < {MIN_HOLD_SEC}s. Ignoring flip {current_side}->{desired_side} (hmi={sig.get('hmi')} delta={sig.get('hmi_delta')}).")
+            time.sleep(POLL_SEC)
+            continue
 
-            tg_send(f"KC3 OPEN {symbol} {desired_side} qty={qty} entry~{mark:.6g} (armed={ARMED})")
+        # Sequential flip
+        if current_side != "FLAT":
+            log(f"Signal change detected: {sig['token']} {current_side} → {desired_side}. (hmi={sig.get('hmi')} delta={sig.get('hmi_delta')})")
+            closed = close_position(symbol)
+            if closed:
+                log(f"Waiting {WAIT_AFTER_CLOSE:.1f}s after close...")
+                time.sleep(WAIT_AFTER_CLOSE)
 
-        except Exception as e:
-            log(f"KC3 FATAL LOOP ERROR: {e}")
-            # prevent rapid spam on exceptions
-            st = load_state()
-            st["cooldown_until"] = time.time() + COOLDOWN_SEC
-            save_state(st)
+            # verify flat (best-effort)
+            pos2 = get_position(symbol)
+            if abs(pos2["amt"]) > 0:
+                log(f"WARNING: position not flat after close attempt: amt={pos2['amt']}. Will retry next loop.")
+                time.sleep(POLL_SEC)
+                continue
+
+        log(f"Signal change => need OPEN {desired_side} {symbol} (src={sig['src']}, hmi={sig.get('hmi')}, delta={sig.get('hmi_delta')}).")
+        ok = open_position(symbol, desired_side, hmi=sig.get("hmi"), hmi_delta=sig.get("hmi_delta"), src=sig["src"])
+        if ok:
+            last_open_ts = time.time()
+            st["last_open_ts"] = last_open_ts
+
+        last_acted_key = key
+        st["last_acted_key"] = last_acted_key
+        save_state(st)
+
+        # Manual override is single-use: once acted, remove it to prevent repeated forcing
+        if os.path.exists(DESIRED_OVERRIDE):
+            try:
+                os.remove(DESIRED_OVERRIDE)
+                log("Removed kc3_exec_desired.json after acting (single-use override).")
+            except Exception as e:
+                log(f"Could not remove override file: {e}")
 
         time.sleep(POLL_SEC)
 

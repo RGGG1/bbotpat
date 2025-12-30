@@ -1,11 +1,22 @@
 {
-  "cooldown_until": 0.0,
-  "cum_roi_frac": 0.0001889322914447623,
-  "last_signal_mtime": 1766885971.3126283,
-  "last_trade_roi_frac": -0.0002986906580940105,
-  "open_entry_price": 5.995,
-  "open_qty": 12.0,
-  "open_side": "LONG",
-  "open_symbol": "UNIUSDT",
-  "open_ts": "2025-12-28T01:39:35.085075Z"
+  "baseline_key": "DOGE:SHORT",
+  "last_acted_key": "UNI:SHORT",
+  "last_open_ts": 1767115222.066704,
+  "last_processed_key": "UNI:LONG",
+  "last_seen_at": "2025-12-30T10:07:54.225Z",
+  "last_seen_key": "UNI:SHORT",
+  "retries": {
+    "DOGE:SHORT": 0,
+    "UNI:LONG": {
+      "count": 2,
+      "last_ts": 1766973144.1251712
+    },
+    "UNI:SHORT": {
+      "count": 1,
+      "last_ts": 1766972546.5451937
+    }
+  },
+  "stable_count": 1282,
+  "started_after_change": true,
+  "startup_baseline_key": "DOGE:SHORT"
 }

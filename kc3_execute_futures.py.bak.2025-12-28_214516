@@ -1,0 +1,431 @@
+#!/usr/bin/env python3
+"""
+KC3 Futures Executor (USDⓈ-M) - Safe Sequential Executor
+
+Reads desired position from:
+  1) /var/www/bbotpat_live/kc3_exec_desired.json (if exists)
+  2) /var/www/bbotpat_live/kc3_latest.json (fallback)
+
+Signal format expected (kc3_latest.json):
+{
+  "timestamp": "...Z",
+  "hmi": 62.7,
+  "position": {"side":"LONG","token":"UNI", "trade_id":239, ...}
+}
+
+Key safety properties:
+- Waits for a FRESH signal newer than process start (prevents immediate entry on boot).
+- Only acts when the signal CHANGES (trade_id preferred, else timestamp) AND desired side differs from Binance.
+- Flip is SEQUENTIAL: close -> wait -> verify flat -> check balance -> size -> open.
+- Quantity is floored to LOT_SIZE stepSize and quantityPrecision (UNIUSDT is prec=0, step=1).
+- Has KC3_ARMED gate: LIVE_TRADING_KC3 can be 1, but if KC3_ARMED=0, no real orders.
+- Stops the program if available balance < KC3_MIN_BALANCE (default $5) and sends Telegram alert.
+- Per-signal retry limit to avoid spam loops on errors.
+
+State:
+  /root/bbotpat_live/data/kc3_futures_exec_state.json
+"""
+
+import os
+import json
+import time
+import hmac
+import math
+import hashlib
+import urllib.parse
+from datetime import datetime, timezone
+
+import requests
+
+STATE_PATH = "/root/bbotpat_live/data/kc3_futures_exec_state.json"
+DESIRED_OVERRIDE_PATH = "/var/www/bbotpat_live/kc3_exec_desired.json"
+LATEST_PATH = "/var/www/bbotpat_live/kc3_latest.json"
+
+BASE_URL = os.getenv("KC3_BASE_URL", "https://fapi.binance.com")
+API_KEY = os.getenv("BINANCE_API_KEY", "")
+API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+
+SYMBOL_SUFFIX = os.getenv("KC3_SYMBOL_SUFFIX", "USDT").strip()
+QUOTE_ASSET = os.getenv("KC3_QUOTE_ASSET", "BNFCR").strip()
+LEV = int(float(os.getenv("KC3_LEVERAGE", "5")))
+MAX_NOTIONAL = float(os.getenv("KC3_MAX_NOTIONAL", "0") or "0")
+
+POLL_SEC = float(os.getenv("KC3_POLL_SEC", "2.0"))
+CLOSE_SETTLE_SEC = float(os.getenv("KC3_CLOSE_SETTLE_SEC", "2.0"))
+
+MIN_BAL = float(os.getenv("KC3_MIN_BALANCE", "5") or "5")
+MARGIN_FRAC = float(os.getenv("KC3_MARGIN_FRAC", "0.90") or "0.90")
+MAX_RETRIES = int(float(os.getenv("KC3_MAX_RETRIES", "3") or "3"))
+
+LIVE_TRADING = str(os.getenv("LIVE_TRADING_KC3", "0")).strip() in ("1", "true", "True", "YES", "yes")
+KC3_ARMED = str(os.getenv("KC3_ARMED", "0")).strip() in ("1", "true", "True", "YES", "yes")
+LIVE = LIVE_TRADING and KC3_ARMED
+
+TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+
+VERSION = "2025-12-28-safe-sequential-v2"
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def log(msg: str) -> None:
+    print(f"[{utc_now_iso()}] {msg}", flush=True)
+
+
+def tg_send(text: str) -> None:
+    if not (TG_TOKEN and TG_CHAT_ID):
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": TG_CHAT_ID, "text": text}, timeout=10)
+    except Exception:
+        pass
+
+
+def load_state() -> dict:
+    try:
+        with open(STATE_PATH, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_state(st: dict) -> None:
+    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+    tmp = STATE_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(st, f, indent=2, sort_keys=True)
+    os.replace(tmp, STATE_PATH)
+
+
+def _sign(params: dict) -> str:
+    qs = urllib.parse.urlencode(params)
+    return hmac.new(API_SECRET.encode(), qs.encode(), hashlib.sha256).hexdigest()
+
+
+def _req(method: str, path: str, params: dict | None = None) -> dict:
+    if params is None:
+        params = {}
+    params["timestamp"] = int(time.time() * 1000)
+    params["signature"] = _sign(params)
+    headers = {"X-MBX-APIKEY": API_KEY}
+    url = BASE_URL + path
+    r = requests.request(method, url, params=params, headers=headers, timeout=15)
+    if r.status_code != 200:
+        raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+    return r.json()
+
+
+def get_exchange_rules(symbol: str) -> dict:
+    r = requests.get(BASE_URL + "/fapi/v1/exchangeInfo", timeout=15).json()
+    s = [x for x in r["symbols"] if x["symbol"] == symbol][0]
+    step = None
+    min_qty = None
+    max_qty = None
+    for f in s["filters"]:
+        if f.get("filterType") in ("LOT_SIZE", "MARKET_LOT_SIZE"):
+            step = float(f["stepSize"])
+            min_qty = float(f["minQty"])
+            max_qty = float(f["maxQty"])
+            break
+    prec = int(s.get("quantityPrecision", 8))
+    return {"step": step or 1.0, "min_qty": min_qty or 0.0, "max_qty": max_qty or 1e18, "prec": prec}
+
+
+def floor_to_step(q: float, step: float, prec: int) -> float:
+    if step <= 0:
+        return round(q, prec)
+    n = math.floor(q / step)
+    v = n * step
+    # avoid float noise, then apply precision
+    v = round(v, prec)
+    # for prec==0, ensure integer-like float (e.g., 104.0)
+    if prec == 0:
+        v = float(int(v))
+    return v
+
+
+def get_mark_price(symbol: str) -> float:
+    r = requests.get(BASE_URL + "/fapi/v1/premiumIndex", params={"symbol": symbol}, timeout=10).json()
+    return float(r["markPrice"])
+
+
+def get_balance_available(asset: str) -> float:
+    bal = _req("GET", "/fapi/v2/balance", {})
+    for x in bal:
+        if x.get("asset") == asset:
+            return float(x.get("availableBalance", "0") or "0")
+    return 0.0
+
+
+def get_position(symbol: str) -> dict:
+    pr = _req("GET", "/fapi/v2/positionRisk", {})
+    row = [x for x in pr if x.get("symbol") == symbol][0]
+    amt = float(row["positionAmt"])
+    side = "FLAT"
+    if amt > 0:
+        side = "LONG"
+    elif amt < 0:
+        side = "SHORT"
+    return {
+        "side": side,
+        "amt": amt,
+        "abs_qty": abs(amt),
+        "entry": float(row.get("entryPrice", "0") or "0"),
+    }
+
+
+def set_leverage(symbol: str, lev: int) -> None:
+    if not LIVE:
+        # still call leverage endpoint? No, just log.
+        log(f"(dry-run) would set leverage {symbol} => {lev}x")
+        return
+    _req("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": lev})
+
+
+def place_market(symbol: str, side: str, qty: float) -> dict:
+    # side is BUY/SELL for Binance
+    if not LIVE:
+        log(f"(dry-run) order skipped: {side} {symbol} qty={qty}")
+        return {"dry_run": True}
+    return _req("POST", "/fapi/v1/order", {"symbol": symbol, "side": side, "type": "MARKET", "quantity": qty})
+
+
+def read_signal() -> tuple[dict, str]:
+    """
+    Returns (signal_dict, src_path).
+    signal_dict has: token, desired_side, ts_iso, trade_id, hmi
+    """
+    src = DESIRED_OVERRIDE_PATH if os.path.exists(DESIRED_OVERRIDE_PATH) else LATEST_PATH
+    with open(src, "r") as f:
+        j = json.load(f)
+
+    ts = j.get("timestamp") or j.get("ts") or ""
+    hmi = j.get("hmi")
+
+    pos = j.get("position") or {}
+    token = (pos.get("token") or j.get("token") or "").strip().upper()
+    raw_side = (pos.get("side") or j.get("side") or "").strip().upper()
+
+    # normalize side
+    if raw_side in ("BUY", "LONG", "BULL"):
+        desired = "LONG"
+    elif raw_side in ("SELL", "SHORT", "BEAR"):
+        desired = "SHORT"
+    else:
+        # fallback: if hmi present and numeric, interpret >50 as LONG
+        try:
+            desired = "LONG" if float(hmi) >= 50 else "SHORT"
+        except Exception:
+            desired = ""
+
+    trade_id = pos.get("trade_id") or j.get("trade_id")
+
+    return (
+        {"token": token, "desired": desired, "ts": ts, "trade_id": trade_id, "hmi": hmi},
+        src,
+    )
+
+
+def parse_ts(ts_iso: str) -> float:
+    # returns epoch seconds; if parse fails, 0
+    try:
+        # example: 2025-12-28T19:15:40.667345Z
+        dt = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
+        return dt.timestamp()
+    except Exception:
+        return 0.0
+
+
+def main():
+    start_ts = time.time()
+    log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING} KC3_ARMED={int(KC3_ARMED)} LIVE={LIVE} VERSION={VERSION}")
+    log(f"BASE_URL={BASE_URL} QUOTE_ASSET={QUOTE_ASSET} SYMBOL_SUFFIX={SYMBOL_SUFFIX} LEV={LEV} MAX_NOTIONAL={MAX_NOTIONAL} POLL_SEC={POLL_SEC}")
+
+    st = load_state()
+    st.setdefault("last_signal_key", None)
+    st.setdefault("signal_attempts", {})  # per-signal retry count
+    save_state(st)
+
+    last_rules = {}  # symbol -> rules cache
+
+    while True:
+        try:
+            sig, src = read_signal()
+
+            token = sig["token"]
+            desired = sig["desired"]
+            ts = sig["ts"]
+            trade_id = sig["trade_id"]
+            hmi = sig["hmi"]
+
+            if not token or desired not in ("LONG", "SHORT"):
+                log(f"No valid signal in {src} (token={token!r} desired={desired!r}). Waiting...")
+                time.sleep(POLL_SEC)
+                continue
+
+            sig_ts = parse_ts(ts)
+            if sig_ts and sig_ts < start_ts:
+                log("No fresh signal yet (signal file older than service start). Waiting...")
+                time.sleep(POLL_SEC)
+                continue
+
+            # signal key: prefer trade_id, else timestamp, plus desired+token
+            # IMPORTANT: Only treat token/side changes as a new actionable signal.
+# We ignore timestamp changes because kc3_latest.json updates constantly.
+signal_key = f"{token}:{desired}"
+
+
+            # If signal didn't change, do nothing (prevents churn)
+            if signal_key == st.get("last_signal_key"):
+                time.sleep(POLL_SEC)
+                continue
+
+            symbol = f"{token}{SYMBOL_SUFFIX}"
+
+            # cache rules
+            if symbol not in last_rules:
+                rules = get_exchange_rules(symbol)
+                last_rules[symbol] = rules
+                log(f"Rules {symbol}: step={rules['step']} prec={rules['prec']} minQty={rules['min_qty']} maxQty={rules['max_qty']}")
+
+            rules = last_rules[symbol]
+            step = rules["step"]
+            prec = rules["prec"]
+
+            # reconcile actual Binance position
+            pos = get_position(symbol)
+            cur_side = pos["side"]
+            cur_abs = pos["abs_qty"]
+
+            # If Binance already matches desired side, accept the new signal but do not trade
+            if cur_side == desired:
+                st["last_signal_key"] = signal_key
+                save_state(st)
+                log(f"Signal {signal_key} matches Binance ({symbol} already {cur_side}). No action. (hmi={hmi})")
+                time.sleep(POLL_SEC)
+                continue
+
+            # retry-limiter per signal
+            attempts = st["signal_attempts"].get(signal_key, 0)
+            if attempts >= MAX_RETRIES:
+                msg = f"KC3 STOP: too many failures for signal {signal_key} (attempts={attempts}). Stopping service."
+                log(msg)
+                tg_send(msg)
+                raise SystemExit(1)
+
+            st["signal_attempts"][signal_key] = attempts + 1
+            save_state(st)
+
+            # set leverage each time before open (safe)
+            try:
+                if LIVE:
+                    set_leverage(symbol, LEV)
+                    log(f"Leverage set OK for {symbol} => {LEV}x")
+                else:
+                    log(f"(dry-run) leverage assumed {symbol} => {LEV}x")
+            except Exception as e:
+                log(f"Leverage set error: {e}")
+
+            # 1) Close existing position if any
+            if cur_side in ("LONG", "SHORT") and cur_abs > 0:
+                close_side = "SELL" if cur_side == "LONG" else "BUY"
+                qty_close = floor_to_step(cur_abs, step, prec)
+                log(f"KC3 flip: CLOSE {cur_side} {symbol} qty={qty_close} then OPEN {desired} (LIVE={LIVE})")
+                try:
+                    place_market(symbol, close_side, qty_close)
+                except Exception as e:
+                    log(f"KC3 CLOSE ERROR: {e}")
+                    time.sleep(POLL_SEC)
+                    continue
+
+                time.sleep(CLOSE_SETTLE_SEC)
+
+                # verify flat (try a couple times)
+                flat_ok = False
+                for _ in range(3):
+                    p2 = get_position(symbol)
+                    if p2["side"] == "FLAT" or p2["abs_qty"] == 0:
+                        flat_ok = True
+                        break
+                    # try closing again
+                    q2 = floor_to_step(p2["abs_qty"], step, prec)
+                    side2 = "SELL" if p2["side"] == "LONG" else "BUY"
+                    log(f"Still not flat, retry close {p2['side']} qty={q2}")
+                    try:
+                        place_market(symbol, side2, q2)
+                    except Exception as e:
+                        log(f"Retry close error: {e}")
+                    time.sleep(CLOSE_SETTLE_SEC)
+
+                if not flat_ok:
+                    log("KC3 STOP: Could not flatten position after retries. Stopping.")
+                    tg_send(f"KC3 STOP: Could not flatten {symbol}. Manual intervention required.")
+                    raise SystemExit(2)
+
+            else:
+                log(f"KC3 open (from flat): OPEN {desired} {symbol} (LIVE={LIVE})")
+
+            # 2) Balance check (after close settlement)
+            avail = get_balance_available(QUOTE_ASSET)
+            if avail < MIN_BAL:
+                msg = f"KC3 STOP: available {QUOTE_ASSET} balance too low ({avail:.4f} < {MIN_BAL})."
+                log(msg)
+                tg_send(msg)
+                raise SystemExit(0)
+
+            # margin to use with buffer (prevents -2019 margin insufficient)
+            margin_to_use = avail * MARGIN_FRAC
+            if MAX_NOTIONAL and MAX_NOTIONAL > 0:
+                # MAX_NOTIONAL is notional cap, convert to margin cap
+                margin_cap = MAX_NOTIONAL / float(LEV)
+                margin_to_use = min(margin_to_use, margin_cap)
+
+            # 3) Compute qty
+            mark = get_mark_price(symbol)
+            notional = margin_to_use * float(LEV)
+            qty_raw = notional / mark
+            qty = floor_to_step(qty_raw, step, prec)
+
+            # enforce min/max qty
+            if qty < rules["min_qty"]:
+                msg = f"KC3 STOP: computed qty {qty} < minQty {rules['min_qty']} for {symbol}. (avail={avail:.4f})"
+                log(msg)
+                tg_send(msg)
+                raise SystemExit(0)
+            qty = min(qty, rules["max_qty"])
+
+            side_open = "BUY" if desired == "LONG" else "SELL"
+            log(f"KC3 open: {desired} {symbol} margin~{margin_to_use:.2f} {QUOTE_ASSET} qty~{qty:g} LIVE={LIVE} (src={src} hmi={hmi} trade_id={trade_id})")
+
+            # 4) Open
+            try:
+                place_market(symbol, side_open, qty)
+            except Exception as e:
+                log(f"KC3 OPEN ERROR: {e}")
+                time.sleep(POLL_SEC)
+                continue
+
+            # 5) Success -> accept signal (prevents repeat)
+            st["last_signal_key"] = signal_key
+            # clear attempts for older signals to keep state small
+            if len(st["signal_attempts"]) > 50:
+                st["signal_attempts"] = {signal_key: st["signal_attempts"].get(signal_key, 0)}
+            save_state(st)
+
+            tg_send(f"KC3 EXECUTED: {symbol} {desired} qty={qty:g} mark={mark:.6f} hmi={hmi} signal={signal_key} LIVE={LIVE}")
+
+            time.sleep(POLL_SEC)
+
+        except SystemExit:
+            raise
+        except Exception as e:
+            log(f"KC3 LOOP ERROR: {e}")
+            time.sleep(POLL_SEC)
+
+
+if __name__ == "__main__":
+    main()

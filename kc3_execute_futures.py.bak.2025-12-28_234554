@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""
+KC3 Futures Executor (USDⓈ-M) — Stable Signal + Debounce + Sequential Flip
+
+Reads desired from:
+  1) /var/www/bbotpat_live/kc3_exec_desired.json (if exists)
+  2) /var/www/bbotpat_live/kc3_latest.json (fallback)
+
+IMPORTANT:
+- We DO NOT trade based on file mtime or JSON timestamp changing.
+- We trade only when the *signal changes* (side/token), with debounce.
+- Sequential flip:
+    close -> wait -> verify flat -> refresh balance -> size -> open
+- Even in dry-run (KC3_ARMED=0), we persist state to stop log spam.
+
+Signal fields supported (kc3_latest.json):
+- preferred:  signal_side + best_token
+- fallback:   position.side + position.token
+
+Env:
+  LIVE_TRADING_KC3=1/0   (overall live capability)
+  KC3_ARMED=1/0          (hard gate: if 0 => no real orders)
+  KC3_LEVERAGE=5
+  KC3_MAX_NOTIONAL=0     (0 means "no cap")
+  KC3_POLL_SEC=2.0
+  KC3_MARGIN_FRAC=0.95   (use this fraction of available balance as margin)
+  KC3_MIN_BALANCE=5.0    (if avail balance below => exit + telegram)
+  KC3_DEBOUNCE_HITS=2    (signal must match this many polls before acting)
+"""
+
+import os
+import json
+import time
+import math
+import hmac
+import hashlib
+import urllib.parse
+from datetime import datetime, timezone
+
+import requests
+
+VERSION = "2025-12-28-stable-signal-debounce-v1"
+
+BASE_URL = "https://fapi.binance.com"
+STATE_PATH = "/root/bbotpat_live/data/kc3_futures_exec_state.json"
+DESIRED_OVERRIDE = "/var/www/bbotpat_live/kc3_exec_desired.json"
+SIGNAL_PATH = "/var/www/bbotpat_live/kc3_latest.json"
+
+API_KEY = os.getenv("BINANCE_API_KEY", "")
+API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+
+QUOTE_ASSET = os.getenv("KC3_QUOTE_ASSET", "USDT")
+SYMBOL_SUFFIX = os.getenv("KC3_SYMBOL_SUFFIX", "USDT")
+
+LEV = int(float(os.getenv("KC3_LEVERAGE", "5")))
+MAX_NOTIONAL = float(os.getenv("KC3_MAX_NOTIONAL", "0") or "0")  # 0 => unlimited
+POLL_SEC = float(os.getenv("KC3_POLL_SEC", "2.0"))
+MARGIN_FRAC = float(os.getenv("KC3_MARGIN_FRAC", "0.95"))
+MIN_BAL = float(os.getenv("KC3_MIN_BALANCE", "5.0"))
+DEBOUNCE_HITS = int(float(os.getenv("KC3_DEBOUNCE_HITS", "2")))
+
+LIVE_TRADING = str(os.getenv("LIVE_TRADING_KC3", "0")).lower() in ("1", "true", "yes", "y")
+KC3_ARMED = str(os.getenv("KC3_ARMED", "0")).lower() in ("1", "true", "yes", "y")
+LIVE = LIVE_TRADING and KC3_ARMED
+
+TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": "kc3-executor/1.0"})
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def log(msg: str):
+    print(f"[{now_iso()}] {msg}", flush=True)
+
+
+def tg_send(text: str):
+    if not TG_TOKEN or not TG_CHAT_ID:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        SESSION.post(url, json={"chat_id": TG_CHAT_ID, "text": text}, timeout=10)
+    except Exception:
+        pass
+
+
+def load_json(path: str):
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def save_state(state: dict):
+    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+    tmp = STATE_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f, indent=2, sort_keys=True)
+    os.replace(tmp, STATE_PATH)
+
+
+def load_state() -> dict:
+    st = load_json(STATE_PATH)
+    if isinstance(st, dict):
+        return st
+    return {}
+
+
+def sign_params(params: dict) -> dict:
+    if not API_SECRET:
+        raise RuntimeError("Missing BINANCE_API_SECRET")
+    qs = urllib.parse.urlencode(params, doseq=True)
+    sig = hmac.new(API_SECRET.encode(), qs.encode(), hashlib.sha256).hexdigest()
+    out = dict(params)
+    out["signature"] = sig
+    return out
+
+
+def private_get(path: str, params: dict = None):
+    if not API_KEY or not API_SECRET:
+        raise RuntimeError("Missing BINANCE API keys")
+    if params is None:
+        params = {}
+    params["timestamp"] = int(time.time() * 1000)
+    params = sign_params(params)
+    r = SESSION.get(BASE_URL + path, params=params, headers={"X-MBX-APIKEY": API_KEY}, timeout=15)
+    return r
+
+
+def private_post(path: str, params: dict):
+    if not API_KEY or not API_SECRET:
+        raise RuntimeError("Missing BINANCE API keys")
+    params = dict(params)
+    params["timestamp"] = int(time.time() * 1000)
+    params = sign_params(params)
+    r = SESSION.post(BASE_URL + path, params=params, headers={"X-MBX-APIKEY": API_KEY}, timeout=15)
+    return r
+
+
+def public_get(path: str, params: dict = None):
+    r = SESSION.get(BASE_URL + path, params=params or {}, timeout=15)
+    return r
+
+
+def get_symbol(token: str) -> str:
+    return f"{token.upper()}{SYMBOL_SUFFIX.upper()}"
+
+
+def get_rules(symbol: str) -> tuple[float, int]:
+    """Return (stepSize, quantityPrecision)."""
+    ei = public_get("/fapi/v1/exchangeInfo").json()
+    sym = [x for x in ei.get("symbols", []) if x.get("symbol") == symbol]
+    if not sym:
+        raise RuntimeError(f"Symbol not found in exchangeInfo: {symbol}")
+    s = sym[0]
+    prec = int(s.get("quantityPrecision", 0) or 0)
+    step = 1.0
+    for f in s.get("filters", []):
+        if f.get("filterType") in ("LOT_SIZE", "MARKET_LOT_SIZE"):
+            step = float(f.get("stepSize", "1") or "1")
+            break
+    return step, prec
+
+
+def floor_qty(qty: float, step: float, prec: int) -> float:
+    if qty <= 0:
+        return 0.0
+    # floor to step
+    steps = math.floor(qty / step)
+    q = steps * step
+    # floor to precision
+    if prec <= 0:
+        q = float(int(q))
+    else:
+        fmt = "{:0." + str(prec) + "f}"
+        q = float(fmt.format(q))
+    return q
+
+
+def get_mark(symbol: str) -> float:
+    r = public_get("/fapi/v1/premiumIndex", {"symbol": symbol})
+    r.raise_for_status()
+    return float(r.json()["markPrice"])
+
+
+def get_position(symbol: str) -> float:
+    r = private_get("/fapi/v2/positionRisk")
+    r.raise_for_status()
+    arr = r.json()
+    for p in arr:
+        if p.get("symbol") == symbol:
+            return float(p.get("positionAmt", "0") or "0")
+    return 0.0
+
+
+def get_available_balance(asset: str) -> float:
+    r = private_get("/fapi/v2/balance")
+    r.raise_for_status()
+    for b in r.json():
+        if b.get("asset") == asset:
+            # availableBalance is what matters for new positions
+            return float(b.get("availableBalance", "0") or "0")
+    return 0.0
+
+
+def set_leverage(symbol: str, lev: int):
+    r = private_post("/fapi/v1/leverage", {"symbol": symbol, "leverage": lev})
+    if r.status_code != 200:
+        raise RuntimeError(f"Leverage set failed {r.status_code}: {r.text}")
+
+
+def close_position(symbol: str, pos_amt: float):
+    if pos_amt == 0:
+        return
+    side = "BUY" if pos_amt < 0 else "SELL"  # buying closes short, selling closes long
+    qty = abs(pos_amt)
+    params = {
+        "symbol": symbol,
+        "side": side,
+        "type": "MARKET",
+        "quantity": qty,
+        "reduceOnly": "true",
+    }
+    if not LIVE:
+        log(f"(dry-run) CLOSE {symbol} side={side} qty={qty} skipped")
+        return
+    r = private_post("/fapi/v1/order", params)
+    if r.status_code != 200:
+        raise RuntimeError(f"CLOSE order failed {r.status_code}: {r.text}")
+
+
+def open_position(symbol: str, desired_side: str, qty: float):
+    # LONG => BUY, SHORT => SELL
+    side = "BUY" if desired_side == "LONG" else "SELL"
+    params = {
+        "symbol": symbol,
+        "side": side,
+        "type": "MARKET",
+        "quantity": qty,
+    }
+    if not LIVE:
+        log(f"(dry-run) OPEN {symbol} {desired_side} qty={qty} skipped")
+        return
+    r = private_post("/fapi/v1/order", params)
+    if r.status_code != 200:
+        raise RuntimeError(f"OPEN order failed {r.status_code}: {r.text}")
+
+
+def read_desired() -> tuple[str, str, dict]:
+    """Return (desired_side, token, raw_json)."""
+    src = None
+    data = None
+
+    if os.path.exists(DESIRED_OVERRIDE):
+        data = load_json(DESIRED_OVERRIDE)
+        src = DESIRED_OVERRIDE
+    if data is None:
+        data = load_json(SIGNAL_PATH)
+        src = SIGNAL_PATH
+
+    if not isinstance(data, dict):
+        raise RuntimeError(f"Signal JSON unreadable from {src}")
+
+    # Priority: explicit signal fields
+    token = (data.get("best_token") or "").strip().upper()
+    desired = (data.get("signal_side") or "").strip().upper()
+
+    # Fallback: position object (older format)
+    if not token or desired not in ("LONG", "SHORT"):
+        pos = data.get("position") or {}
+        if isinstance(pos, dict):
+            token = token or (pos.get("token") or "").strip().upper()
+            desired = desired if desired in ("LONG", "SHORT") else (pos.get("side") or "").strip().upper()
+
+    if desired not in ("LONG", "SHORT") or not token:
+        raise RuntimeError(f"Signal missing token/side in {src}: token={token} side={desired}")
+
+    return desired, token, data
+
+
+def main():
+    start_ts = time.time()
+    log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING} KC3_ARMED={int(KC3_ARMED)} LIVE={LIVE} VERSION={VERSION}")
+    log(f"BASE_URL={BASE_URL} QUOTE_ASSET={QUOTE_ASSET} SYMBOL_SUFFIX={SYMBOL_SUFFIX} LEV={LEV} MAX_NOTIONAL={MAX_NOTIONAL} POLL_SEC={POLL_SEC}")
+    log(f"DESIRED override: {DESIRED_OVERRIDE} | fallback: {SIGNAL_PATH}")
+
+    state = load_state()
+    state.setdefault("last_executed_sig", "")
+    state.setdefault("candidate_sig", "")
+    state.setdefault("candidate_hits", 0)
+    state.setdefault("last_log_sig", "")
+    save_state(state)
+
+    # Freshness gate: wait until signal file timestamp is newer than start time.
+    # We only use it as a "don’t immediately enter on boot" gate.
+    while True:
+        data = load_json(SIGNAL_PATH)
+        if isinstance(data, dict) and isinstance(data.get("timestamp"), str):
+            # parse ISO-ish; if parsing fails, just break
+            try:
+                ts = data["timestamp"].replace("Z", "+00:00")
+                sig_dt = datetime.fromisoformat(ts).timestamp()
+                if sig_dt >= start_ts:
+                    break
+                log("No fresh signal yet (signal timestamp older than service start). Waiting...")
+            except Exception:
+                break
+        else:
+            break
+        time.sleep(min(5.0, POLL_SEC))
+
+    leverage_cache = set()
+    rules_cache = {}
+
+    while True:
+        try:
+            desired, token, raw = read_desired()
+            symbol = get_symbol(token)
+
+            # Build a stable signal id: ONLY side+token (NOT timestamp/mtime).
+            sig_id = f"{token}:{desired}"
+
+            # Debounce: require same sig_id for N hits before acting
+            if state.get("candidate_sig") != sig_id:
+                state["candidate_sig"] = sig_id
+                state["candidate_hits"] = 1
+                save_state(state)
+                log(f"Signal candidate={sig_id} (1/{DEBOUNCE_HITS})")
+                time.sleep(POLL_SEC)
+                continue
+            else:
+                state["candidate_hits"] = int(state.get("candidate_hits", 0)) + 1
+                save_state(state)
+
+            if state["candidate_hits"] < DEBOUNCE_HITS:
+                log(f"Signal candidate={sig_id} ({state['candidate_hits']}/{DEBOUNCE_HITS})")
+                time.sleep(POLL_SEC)
+                continue
+
+            # At this point, signal is stable.
+            # If we already executed this sig_id, do nothing (and DO NOT spam).
+            if state.get("last_executed_sig") == sig_id:
+                time.sleep(POLL_SEC)
+                continue
+
+            # set leverage once per symbol (per process)
+            if symbol not in leverage_cache:
+                set_leverage(symbol, LEV)
+                leverage_cache.add(symbol)
+                log(f"Leverage set OK for {symbol} => {LEV}x")
+
+            if symbol not in rules_cache:
+                step, prec = get_rules(symbol)
+                rules_cache[symbol] = (step, prec)
+                log(f"Rules {symbol}: step={step} prec={prec}")
+
+            # Read current position from Binance (authoritative)
+            try:
+                pos_amt = get_position(symbol)
+            except Exception as e:
+                log(f"ERROR fetching positionRisk: {e}. Skipping this tick.")
+                time.sleep(POLL_SEC)
+                continue
+
+            current_side = "FLAT"
+            if pos_amt > 0:
+                current_side = "LONG"
+            elif pos_amt < 0:
+                current_side = "SHORT"
+
+            # If already in desired side, mark executed and move on
+            if current_side == desired:
+                state["last_executed_sig"] = sig_id
+                state["candidate_hits"] = 0
+                save_state(state)
+                log(f"No action: desired={desired} equals current={current_side} for {symbol}.")
+                time.sleep(POLL_SEC)
+                continue
+
+            # If we are not flat, close first
+            if current_side != "FLAT":
+                log(f"KC3 CLOSE {current_side} {symbol} qty={abs(pos_amt)} LIVE={LIVE}")
+                close_position(symbol, pos_amt)
+                time.sleep(2.0)
+
+                # verify flat
+                pos2 = get_position(symbol)
+                if abs(pos2) > 0:
+                    log(f"ERROR: close did not flatten position (posAmt={pos2}). Aborting this signal.")
+                    # do not mark executed; wait next poll
+                    time.sleep(POLL_SEC)
+                    continue
+
+            # Refresh balance AFTER close
+            bal = get_available_balance(QUOTE_ASSET)
+            if bal < MIN_BAL:
+                msg = f"KC3 STOP: available balance {bal:.4f} {QUOTE_ASSET} < {MIN_BAL}. Stopping executor."
+                log(msg)
+                tg_send(msg)
+                raise SystemExit(2)
+
+            margin = bal * MARGIN_FRAC
+            notional = margin * LEV
+            if MAX_NOTIONAL > 0:
+                notional = min(notional, MAX_NOTIONAL)
+            # floor notional to whole units
+            notional = float(int(notional))
+
+            mark = get_mark(symbol)
+            step, prec = rules_cache[symbol]
+            qty_raw = notional / mark if mark > 0 else 0.0
+            qty = floor_qty(qty_raw, step, prec)
+
+            if qty <= 0:
+                log(f"ERROR: computed qty={qty} (raw={qty_raw}) notional={notional} mark={mark}. Aborting this signal.")
+                time.sleep(POLL_SEC)
+                continue
+
+            log(f"KC3 OPEN {desired} {symbol} margin~{margin:.4g} {QUOTE_ASSET} notional~{notional:.0f} qty~{qty} mark~{mark:.6g} LIVE={LIVE}")
+            open_position(symbol, desired, qty)
+
+            # Mark executed signal even in dry-run to prevent repeats/spam
+            state["last_executed_sig"] = sig_id
+            state["candidate_hits"] = 0
+            save_state(state)
+
+        except SystemExit:
+            raise
+        except Exception as e:
+            log(f"KC3 ERROR: {e}")
+        time.sleep(POLL_SEC)
+
+
+if __name__ == "__main__":
+    main()
