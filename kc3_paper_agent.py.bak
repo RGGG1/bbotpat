@@ -1,18 +1,7 @@
-trade_id += 1  # bump on publish
 #!/usr/bin/env python3
 import json, time, csv
 from pathlib import Path
 from datetime import datetime, timezone
-
-
-def _load_last_trade_id(path="/var/www/bbotpat_live/kc3_latest.json"):
-    try:
-        import json
-        with open(path, "r") as f:
-            d = json.load(f)
-        return int(d.get("trade_id") or 0)
-    except Exception:
-        return 0
 
 WEBROOT = Path("/var/www/bbotpat_live")
 HMI_PATH = WEBROOT / "hmi_latest.json"

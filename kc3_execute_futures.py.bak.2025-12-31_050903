@@ -208,20 +208,7 @@ def avail_balance() -> float:
     d = private_req("GET", "/fapi/v2/balance", {})
     for x in d:
         if x.get("asset") == QUOTE_ASSET:
-                        # Robust balance selection:
-            # Some accounts/assets report low/zero "availableBalance" even when wallet/equity is higher.
-            # Use the maximum of common balance fields to avoid false "BALANCE TOO LOW" shutdowns.
-            def f(v):
-                try:
-                    return float(v)
-                except Exception:
-                    return 0.0
-            avail  = f(x.get("availableBalance", 0) or 0)
-            wallet = f(x.get("walletBalance", 0) or 0)
-            bal    = f(x.get("balance", 0) or 0)
-            total  = f(x.get("totalWalletBalance", 0) or 0)
-            return max(avail, wallet, bal, total)
-
+            return float(x.get("availableBalance","0") or "0")
     return 0.0
 
 def place_market(symbol: str, side: str, qty: float, reduce_only: bool):
@@ -253,7 +240,7 @@ def close_position(symbol: str):
 def open_position(symbol: str, desired_side: str, hmi=None, hmi_delta=None, src=None):
     bal = avail_balance()
     if bal < MIN_BALANCE:
-        log(f"BALANCE TOO LOW: {QUOTE_ASSET}={bal:.6g} < {MIN_BALANCE} (max of avail/wallet/balance/total). Stopping executor.")
+        log(f"BALANCE TOO LOW: available {QUOTE_ASSET}={bal:.6g} < {MIN_BALANCE}. Stopping executor.")
         raise SystemExit(2)
 
     mark = get_mark(symbol)
