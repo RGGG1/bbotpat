@@ -1,10 +1,10 @@
+trade_id += 1  # bump on publish
 #!/usr/bin/env python3
 import json, time, csv
 from pathlib import Path
 from datetime import datetime, timezone
 
 
-trade_id = 0  # monotonic id for published snapshots
 def _load_last_trade_id(path="/var/www/bbotpat_live/kc3_latest.json"):
     try:
         import json
