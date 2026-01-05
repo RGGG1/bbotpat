@@ -449,8 +449,7 @@ def handle_signal(sig: dict):
             return False
         time.sleep(2.0)
 
-    opened = open_position(symbol, side, sig)
-    return bool(opened)
+    return bool(ok)
 # ---- /helper ----
 
 if __name__ == "__main__":
