@@ -415,9 +415,16 @@ def main():
 
 
 # ---- Exposed helper for robust wrapper ----
-def handle_signal(sig: dict):
-    if not isinstance(sig, dict): return False
-    src = sig.get("src") or ""
+def handle_signal(sig: dict):    # --- NORMALIZE SIGNAL (robust wrapper + manual overrides) ---
+    if isinstance(sig, dict):
+        if 'token' not in sig and 'best_token' in sig:
+            sig['token'] = sig.get('best_token')
+        if 'side' not in sig and 'signal_side' in sig:
+            sig['side'] = sig.get('signal_side')
+        sig.setdefault('src','')
+    ok = True
+if not isinstance(sig, dict): return False
+    src = sig.get('src') or ""
     token = sig.get("token") or sig.get("best_token")
     side = sig.get("side") or sig.get("signal_side")
     if not token or not side:
@@ -449,7 +456,7 @@ def handle_signal(sig: dict):
             return False
         time.sleep(2.0)
 
-    return True
+    return bool(ok)
 # ---- /helper ----
 
 if __name__ == "__main__":

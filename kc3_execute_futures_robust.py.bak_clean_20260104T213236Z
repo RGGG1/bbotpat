@@ -1,0 +1,87 @@
+import os, time, json, traceback
+from datetime import datetime, timezone
+from pathlib import Path
+import kc3_execute_futures as base
+
+STATUS_PATH = Path('/var/www/bbotpat_live/kc3_futures_status.json')
+RECONCILE_SEC       = float(os.getenv('KC3_RECONCILE_SEC','30'))
+HEARTBEAT_SEC       = float(os.getenv('KC3_HEARTBEAT_SEC','60'))
+MAX_BAD_DESIRED_SEC = float(os.getenv('KC3_MAX_BAD_DESIRED_SEC','120'))
+
+def utc_iso():
+    return datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
+
+def atomic_write(path: Path, d: dict):
+    tmp = path.with_suffix(path.suffix + '.tmp')
+    tmp.write_text(json.dumps(d, indent=2) + '\n', encoding='utf-8')
+    tmp.replace(path)
+
+def side_from_amt(amt: float) -> str:
+    if amt > 0: return 'LONG'
+    if amt < 0: return 'SHORT'
+    return 'FLAT'
+
+def normalize_sig(sig: dict, src: str):
+    if not isinstance(sig, dict): return {}
+    sig = dict(sig)
+    sig.setdefault('src', src)
+    if 'token' not in sig and 'best_token' in sig:
+        sig['token'] = sig.get('best_token')
+    if 'side' not in sig and 'signal_side' in sig:
+        sig['side'] = sig.get('signal_side')
+    return sig
+
+def read_desired():
+    over = Path('/var/www/bbotpat_live/kc3_exec_desired.json')
+    if over.exists():
+        try:
+            return normalize_sig(json.loads(over.read_text(encoding='utf-8')), str(over))
+        except Exception:
+            return {}
+    latest = Path('/var/www/bbotpat_live/kc3_latest.json')
+    try:
+        return normalize_sig(json.loads(latest.read_text(encoding='utf-8')), str(latest))
+    except Exception:
+        return {}
+
+def get_have(symbol: str):
+    row = base.get_position(symbol)
+    amt = float(row.get('positionAmt','0') or '0')
+    entry = float(row.get('entryPrice','0') or '0')
+    return {'symbol': symbol, 'side': side_from_amt(amt), 'amt': amt, 'entry': entry}
+
+def main():
+    base.log(f'ROBUST enabled: RECONCILE_SEC={RECONCILE_SEC} HEARTBEAT_SEC={HEARTBEAT_SEC} MAX_BAD_DESIRED_SEC={MAX_BAD_DESIRED_SEC}')
+    last_hb=0.0; last_rec=0.0
+    last_good=None; last_good_ts=0.0
+    while True:
+        now=time.time()
+        if now-last_hb >= HEARTBEAT_SEC:
+            base.log('HEARTBEAT: alive')
+            atomic_write(STATUS_PATH, {'ts': utc_iso(), 'alive': True, 'note': 'heartbeat'})
+            last_hb=now
+        sig=read_desired()
+        if sig.get('token') and sig.get('side'):
+            last_good=sig; last_good_ts=now
+        else:
+            if last_good and (now-last_good_ts)<=MAX_BAD_DESIRED_SEC:
+                sig=last_good
+            else:
+                sig={}
+        if now-last_rec >= RECONCILE_SEC:
+            try:
+                token=sig.get('token'); want=sig.get('side'); src=sig.get('src','')
+                if token and want:
+                    symbol = token + base.SYMBOL_SUFFIX
+                    have = get_have(symbol)
+                    atomic_write(STATUS_PATH, {'ts': utc_iso(), 'alive': True, 'note': 'ok_in_sync' if have['side']==want else 'drift_reconcile', 'desired': {'token': token, 'side': want, 'src': src}, 'have': have})
+                    if have['side'] != want:
+                        base.log(f'DRIFT: desired={token}:{want} have={have['"'"'symbol'"'"']}:{have['"'"'side'"'"']} amt={have['"'"'amt'"'"']} entry={have['"'"'entry'"'"']} src={src} -> reconcile')
+                        base.handle_signal(sig)
+            except Exception:
+                base.log('ERROR: reconcile crashed:\n' + traceback.format_exc())
+            last_rec=now
+        time.sleep(base.POLL_SEC)
+
+if __name__ == '__main__':
+    main()

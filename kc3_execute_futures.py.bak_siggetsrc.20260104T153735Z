@@ -416,20 +416,10 @@ def main():
 
 # ---- Exposed helper for robust wrapper ----
 def handle_signal(sig: dict):
-    if not isinstance(sig, dict): return False
-    src = sig.get("src") or ""
-    token = sig.get("token") or sig.get("best_token")
-    side = sig.get("side") or sig.get("signal_side")
-    if not token or not side:
-        log(f"handle_signal: missing token/side src={src}")
-        return False
-    sig.setdefault("token", token)
-    sig.setdefault("side", side)
-    sig.setdefault("best_token", token)
-    sig.setdefault("signal_side", side)
     token = sig.get("best_token") or sig.get("token")
     side  = sig.get("signal_side") or (sig.get("position") or {}).get("side")
     if not token or not side:
+        log(f"handle_signal: missing token/side in sig src={sig.get(src)}")
         return False
 
     symbol = token + SYMBOL_SUFFIX
@@ -449,7 +439,8 @@ def handle_signal(sig: dict):
             return False
         time.sleep(2.0)
 
-    return True
+    ok = open_position(symbol, side, hmi=sig.get("hmi"), hmi_delta=sig.get("hmi_delta"), src=sig.get("src"))
+    return bool(ok)
 # ---- /helper ----
 
 if __name__ == "__main__":

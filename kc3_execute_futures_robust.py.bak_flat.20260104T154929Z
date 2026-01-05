@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+import os, time, json, traceback
+from datetime import datetime, timezone
+from pathlib import Path
+import kc3_execute_futures as base
+
+STATUS_PATH = Path("/var/www/bbotpat_live/kc3_futures_status.json")
+
+RECONCILE_SEC      = float(os.getenv("KC3_RECONCILE_SEC", "30"))
+HEARTBEAT_SEC      = float(os.getenv("KC3_HEARTBEAT_SEC", "60"))
+MAX_BAD_DESIRED_SEC= float(os.getenv("KC3_MAX_BAD_DESIRED_SEC", "120"))
+
+def utc_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def atomic_write(path: Path, d: dict):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+def side_from_amt(amt: float) -> str:
+    if amt > 0: return "LONG"
+    if amt < 0: return "SHORT"
+    return "FLAT"
+
+def get_position_side(symbol: str) -> tuple[str, float, float]:
+    # Uses Binance positionRisk directly via base.private_req (already in your module).
+    pos = base.private_req("GET", "/fapi/v2/positionRisk", {})
+    row = next((r for r in pos if r.get("symbol") == symbol), None)
+    if not row:
+        return ("FLAT", 0.0, 0.0)
+    amt = float(row.get("positionAmt", "0") or "0")
+    entry = float(row.get("entryPrice", "0") or "0")
+    return (side_from_amt(amt), amt, entry)
+
+def desired_from_sig(sig: dict) -> tuple[str|None, str|None, str]:
+    tok  = sig.get("best_token") or sig.get("token")
+    side = sig.get("signal_side") or sig.get("side")
+    src  = sig.get("src") or ""
+    return tok, side, src
+
+def write_status(**kw):
+    d = {"ts": utc_iso(), **kw}
+    try:
+        atomic_write(STATUS_PATH, d)
+    except Exception:
+        # status file failure should never stop trading loop
+        pass
+
+def main():
+    base.log(f"ROBUST enabled: RECONCILE_SEC={RECONCILE_SEC} HEARTBEAT_SEC={HEARTBEAT_SEC} MAX_BAD_DESIRED_SEC={MAX_BAD_DESIRED_SEC}")
+
+    last_hb = 0.0
+    last_reconcile = 0.0
+
+    last_good_sig = None
+    last_good_ts  = 0.0
+
+    # Main loop
+    while True:
+        now = time.time()
+
+        # Heartbeat
+        if now - last_hb >= HEARTBEAT_SEC:
+            base.log("HEARTBEAT: alive")
+            write_status(alive=True, note="heartbeat")
+            last_hb = now
+
+        # Load desired (tolerate brief bad snapshots)
+        sig = None
+        try:
+            sig = base.read_desired()
+        except Exception as e:
+            sig = None
+
+        if sig:
+            last_good_sig = sig
+            last_good_ts  = now
+        else:
+            # Use last good for a short window
+            if last_good_sig and (now - last_good_ts) <= MAX_BAD_DESIRED_SEC:
+                sig = dict(last_good_sig)
+                sig["src"] = (sig.get("src") or "") + " (cached)"
+            else:
+                # Nothing usable; wait and retry
+                time.sleep(getattr(base, "POLL_SEC", 2.0))
+                continue
+
+        tok, want_side, src = desired_from_sig(sig)
+        if not tok or not want_side:
+            # Don’t trade on invalid desired
+            write_status(alive=True, note="bad_desired", desired=sig)
+            time.sleep(getattr(base, "POLL_SEC", 2.0))
+            continue
+
+        symbol = tok + base.SYMBOL_SUFFIX
+
+        # Reconcile (only trades if drift)
+        if now - last_reconcile >= RECONCILE_SEC:
+            have_side, amt, entry = get_position_side(symbol)
+
+            if want_side != have_side:
+                base.log(f"DRIFT: desired={tok}:{want_side} have={symbol}:{have_side} amt={amt} entry={entry} src={src} -> reconcile")
+                write_status(
+                    alive=True,
+                    note="drift_reconcile",
+                    desired={"token": tok, "side": want_side, "src": src},
+                    have={"symbol": symbol, "side": have_side, "amt": amt, "entry": entry},
+                )
+                # Minimal + safe: delegate to your existing executor decision path
+                try:
+                    base.handle_signal(sig)
+                except Exception:
+                    base.log("ERROR: reconcile handle_signal crashed:\n" + traceback.format_exc())
+            else:
+                write_status(
+                    alive=True,
+                    note="ok_in_sync",
+                    desired={"token": tok, "side": want_side, "src": src},
+                    have={"symbol": symbol, "side": have_side, "amt": amt, "entry": entry},
+                )
+
+            last_reconcile = now
+
+        time.sleep(getattr(base, "POLL_SEC", 2.0))
+
+if __name__ == "__main__":
+    main()

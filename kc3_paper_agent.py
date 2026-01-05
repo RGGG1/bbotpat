@@ -3,17 +3,6 @@ import json, time, csv
 from pathlib import Path
 from datetime import datetime, timezone
 
-
-trade_id = 0  # monotonic id for published snapshots
-def _load_last_trade_id(path="/var/www/bbotpat_live/kc3_latest.json"):
-    try:
-        import json
-        with open(path, "r") as f:
-            d = json.load(f)
-        return int(d.get("trade_id") or 0)
-    except Exception:
-        return 0
-
 WEBROOT = Path("/var/www/bbotpat_live")
 HMI_PATH = WEBROOT / "hmi_latest.json"
 PRICES_PATH = WEBROOT / "prices_latest.json"
@@ -28,80 +17,51 @@ def utc_now_iso():
 
 def safe_float(x):
     try:
-        if x is None:
-            return None
         return float(x)
     except Exception:
         return None
 
 def read_json(path: Path):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text())
     except Exception:
         return {}
 
 def atomic_write(path: Path, data: dict):
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
     tmp.replace(path)
+
+def load_last_trade_id():
+    try:
+        d = json.loads(KC3_OUT.read_text())
+        return int(d.get("trade_id", 0))
+    except Exception:
+        return 0
 
 class KC3PaperAgent:
     def __init__(self):
         self.prev_hmi = None
         self.anchor_hmi = None
         self.signal_side = "LONG"
-        self.trade_id = 0
-        self.last_log = 0.0
+        self.trade_id = load_last_trade_id()
+        self.last_log = 0
 
-    def best_token_from_prices(self, prices_js: dict):
-        rows = prices_js.get("rows", [])
+    def best_token(self, prices):
         best_tok, best_pot = None, None
-
-        for r in rows:
-            tok = str(r.get("token","")).upper().strip()
+        for r in prices.get("rows", []):
+            tok = str(r.get("token", "")).upper()
             if not tok or tok in EXCLUDE:
                 continue
-
             pot = safe_float(r.get("pot_roi_pct"))
             if pot is None:
                 frac = safe_float(r.get("pot_roi_frac"))
                 if frac is None:
                     continue
-                pot = frac * 100.0
-
+                pot = frac * 100
             if best_pot is None or pot > best_pot:
                 best_tok, best_pot = tok, pot
-
         return best_tok, best_pot
-
-    def compute_delta(self, hmi):
-        if self.prev_hmi is None:
-            return None
-        return hmi - self.prev_hmi
-
-    def update_signal_anchor_flip(self, hmi):
-        if self.anchor_hmi is None:
-            self.anchor_hmi = hmi
-            return False
-
-        move = hmi - self.anchor_hmi
-        if abs(move) >= HMI_THRESHOLD:
-            old = self.signal_side
-            self.signal_side = "LONG" if move > 0 else "SHORT"
-            self.anchor_hmi = hmi
-            self.trade_id += 1
-            print(f"[{utc_now_iso()}] FLIP {old} -> {self.signal_side} (move={move:.6f}, anchor={self.anchor_hmi:.6f})", flush=True)
-            return True
-        return False
-
-    def append_csv(self, out: dict):
-        new = not KC3_CSV.exists()
-        with KC3_CSV.open("a", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            if new:
-                w.writerow(["ts","hmi","hmi_delta","signal_side","best_token","best_pot_roi_pct","trade_id"])
-            w.writerow([out["timestamp"], out["hmi"], out["hmi_delta"], out["signal_side"],
-                        out["best_token"], out["best_pot_roi_pct"], out["trade_id"]])
 
     def step(self):
         hmi_js = read_json(HMI_PATH)
@@ -111,15 +71,23 @@ class KC3PaperAgent:
         if hmi is None:
             return
 
-        best_tok, best_pot = self.best_token_from_prices(prices_js)
-        hmi_delta = self.compute_delta(hmi)
+        best_tok, best_pot = self.best_token(prices_js)
+        hmi_delta = None if self.prev_hmi is None else round(hmi - self.prev_hmi, 6)
 
-        self.update_signal_anchor_flip(hmi)
+        if self.anchor_hmi is None:
+            self.anchor_hmi = hmi
+        else:
+            move = hmi - self.anchor_hmi
+            if abs(move) >= HMI_THRESHOLD:
+                self.signal_side = "LONG" if move > 0 else "SHORT"
+                self.anchor_hmi = hmi
+                self.trade_id += 1
+                print(f"[{utc_now_iso()}] FLIP -> {self.signal_side} move={move:.4f}", flush=True)
 
         out = {
             "timestamp": utc_now_iso(),
             "hmi": hmi,
-            "hmi_delta": (None if hmi_delta is None else round(hmi_delta, 6)),
+            "hmi_delta": hmi_delta,
             "signal_side": self.signal_side,
             "best_token": best_tok,
             "best_pot_roi_pct": best_pot,
@@ -127,13 +95,18 @@ class KC3PaperAgent:
         }
 
         atomic_write(KC3_OUT, out)
-        self.append_csv(out)
-        self.prev_hmi = hmi
 
-        now = time.time()
-        if now - self.last_log >= 15:
-            self.last_log = now
-            print(f"[{out['timestamp']}] hmi={out['hmi']} delta={out['hmi_delta']} side={out['signal_side']} best={out['best_token']} pot={out['best_pot_roi_pct']} trade_id={out['trade_id']}", flush=True)
+        new = not KC3_CSV.exists()
+        with KC3_CSV.open("a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(out.keys())
+            w.writerow(out.values())
+
+        self.prev_hmi = hmi
+        if time.time() - self.last_log > 15:
+            self.last_log = time.time()
+            print(f"[{out['timestamp']}] hmi={hmi} side={self.signal_side} best={best_tok}", flush=True)
 
 def main():
     agent = KC3PaperAgent()

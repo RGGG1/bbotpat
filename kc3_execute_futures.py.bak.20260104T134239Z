@@ -413,44 +413,5 @@ def main():
 
         time.sleep(POLL_SEC)
 
-
-# ---- Exposed helper for robust wrapper ----
-def handle_signal(sig: dict):
-    if not isinstance(sig, dict): return False
-    src = sig.get("src") or ""
-    token = sig.get("token") or sig.get("best_token")
-    side = sig.get("side") or sig.get("signal_side")
-    if not token or not side:
-        log(f"handle_signal: missing token/side src={src}")
-        return False
-    sig.setdefault("token", token)
-    sig.setdefault("side", side)
-    sig.setdefault("best_token", token)
-    sig.setdefault("signal_side", side)
-    token = sig.get("best_token") or sig.get("token")
-    side  = sig.get("signal_side") or (sig.get("position") or {}).get("side")
-    if not token or not side:
-        return False
-
-    symbol = token + SYMBOL_SUFFIX
-
-    pos = get_position(symbol)
-    have_side = "FLAT"
-    if pos["amt"] > 0: have_side = "LONG"
-    if pos["amt"] < 0: have_side = "SHORT"
-
-    if have_side == side:
-        return True
-
-    if have_side != "FLAT":
-        closed = close_position(symbol)
-        if not closed:
-            log("handle_signal: close failed; will retry next loop.")
-            return False
-        time.sleep(2.0)
-
-    return True
-# ---- /helper ----
-
 if __name__ == "__main__":
     main()

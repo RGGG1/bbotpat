@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+import os, time, json, traceback
+from datetime import datetime, timezone
+from pathlib import Path
+import kc3_execute_futures as base
+
+STATUS_PATH = Path("/var/www/bbotpat_live/kc3_futures_status.json")
+RECONCILE_SEC       = float(os.getenv("KC3_RECONCILE_SEC", "30"))
+HEARTBEAT_SEC       = float(os.getenv("KC3_HEARTBEAT_SEC", "60"))
+MAX_BAD_DESIRED_SEC = float(os.getenv("KC3_MAX_BAD_DESIRED_SEC", "120"))
+
+def utc_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def atomic_write(path: Path, d: dict):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+def side_from_amt(amt: float) -> str:
+    if amt > 0: return "LONG"
+    if amt < 0: return "SHORT"
+    return "FLAT"
+
+def safe_have(token: str):
+    sym = token + getattr(base, "SYMBOL_SUFFIX", "USDT")
+    try:
+        pos = base.get_position(sym)  # expected (amt, entry) or dict depending on your impl
+        if isinstance(pos, dict):
+            amt = float(pos.get("amt", 0.0))
+            entry = float(pos.get("entry", 0.0))
+        else:
+            amt = float(pos[0])
+            entry = float(pos[1])
+    except Exception:
+        amt, entry = 0.0, 0.0
+    return {"symbol": sym, "amt": amt, "entry": entry, "side": side_from_amt(amt)}
+
+def read_desired_with_src():
+    # base.read_desired() reads /var/www/.../kc3_exec_desired.json (override) or kc3_latest.json
+    try:
+        sig = base.read_desired()
+    except Exception:
+        return None, "read_desired_failed"
+
+    if not isinstance(sig, dict):
+        return None, "desired_not_dict"
+
+    # normalize incoming keys
+    if "token" not in sig and "best_token" in sig:
+        sig["token"] = sig.get("best_token")
+    if "side" not in sig and "signal_side" in sig:
+        sig["side"] = sig.get("signal_side")
+
+    src = sig.get("src") or ""
+    # If your base.read_desired sets desired_key()/read path, keep it best-effort only
+    return sig, src
+
+def main():
+    base.log(f"[{utc_iso()}] ROBUST enabled: RECONCILE_SEC={RECONCILE_SEC} HEARTBEAT_SEC={HEARTBEAT_SEC} MAX_BAD_DESIRED_SEC={MAX_BAD_DESIRED_SEC}")
+
+    last_reconcile = 0.0
+    last_heartbeat = 0.0
+    bad_desired_since = None
+
+    while True:
+        try:
+            now = time.time()
+
+            sig, src = read_desired_with_src()
+            if sig is None:
+                if bad_desired_since is None:
+                    bad_desired_since = now
+                if now - bad_desired_since > MAX_BAD_DESIRED_SEC:
+                    atomic_write(STATUS_PATH, {"ts": utc_iso(), "alive": True, "note": "bad_desired_timeout"})
+                time.sleep(1)
+                continue
+            bad_desired_since = None
+
+            token = sig.get("token")
+            want  = sig.get("side")
+            if not token or want not in ("LONG","SHORT","FLAT"):
+                base.log(f"handle_signal: missing token/side in sig src={src}")
+                time.sleep(1)
+                continue
+
+            have = safe_have(token)
+
+            # Auto-reconcile when drifted (or on schedule)
+            if now - last_reconcile >= RECONCILE_SEC:
+                if have["side"] != want:
+                    base.log(
+                        "DRIFT: desired={}:{} have={}:{} amt={} entry={} src={} -> reconcile".format(
+                            token, want, have.get("symbol","?"), have.get("side","?"),
+                            have.get("amt",0.0), have.get("entry",0.0), src
+                        )
+                    )
+                base.handle_signal(sig)
+                last_reconcile = now
+
+            if now - last_heartbeat >= HEARTBEAT_SEC:
+                atomic_write(STATUS_PATH, {
+                    "ts": utc_iso(),
+                    "alive": True,
+                    "note": "heartbeat",
+                    "desired": {"token": token, "side": want, "src": src},
+                    "have": have,
+                })
+                base.log(f"[{utc_iso()}] HEARTBEAT: alive")
+                last_heartbeat = now
+
+            time.sleep(1)
+
+        except Exception:
+            base.log("ERROR: reconcile crashed:\n" + traceback.format_exc())
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()

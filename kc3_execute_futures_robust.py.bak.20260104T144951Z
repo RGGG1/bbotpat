@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+import os, time, json, traceback
+from datetime import datetime, timezone
+from pathlib import Path
+
+import kc3_execute_futures as base
+
+STATUS_PATH = Path("/var/www/bbotpat_live/kc3_futures_status.json")
+
+RECONCILE_SEC = float(os.getenv("KC3_RECONCILE_SEC", "30"))
+HEARTBEAT_SEC = float(os.getenv("KC3_HEARTBEAT_SEC", "60"))
+MAX_BAD_DESIRED_SEC = float(os.getenv("KC3_MAX_BAD_DESIRED_SEC", "120"))
+
+def utc_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def atomic_write(path: Path, d: dict):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+def side_from_amt(amt: float) -> str:
+    if amt > 0: return "LONG"
+    if amt < 0: return "SHORT"
+    return "FLAT"
+
+def get_have_side(token: str) -> dict:
+    sym = token + base.SYMBOL_SUFFIX
+    pos = base.private_req("GET", "/fapi/v2/positionRisk", {})
+    row = next((r for r in pos if r.get("symbol") == sym), None)
+    if not row:
+        return {"symbol": sym, "amt": 0.0, "have_side": "FLAT", "entry": None}
+    amt = float(row.get("positionAmt", "0") or "0")
+    return {"symbol": sym, "amt": amt, "have_side": side_from_amt(amt), "entry": row.get("entryPrice")}
+
+def normalize_desired(sig: dict) -> dict:
+    # supports both shapes:
+    #  - {"signal_side":"SHORT","best_token":"UNI",...}
+    #  - {"position":{"side":"LONG","token":"UNI"}, ...}
+    want_side = None
+    token = None
+    if isinstance(sig.get("signal_side"), str):
+        want_side = sig.get("signal_side") or None
+        token = sig.get("best_token") or sig.get("token")
+    elif isinstance(sig.get("position"), dict):
+        want_side = sig["position"].get("side") or None
+        token = sig["position"].get("token") or None
+    return {"want_side": want_side, "token": token}
+
+def main():
+    base.log(f"ROBUST enabled: RECONCILE_SEC={RECONCILE_SEC} HEARTBEAT_SEC={HEARTBEAT_SEC} MAX_BAD_DESIRED_SEC={MAX_BAD_DESIRED_SEC}")
+
+    last_good_sig = None
+    last_good_ts = 0.0
+    last_hb = 0.0
+    last_rec = 0.0
+
+    while True:
+        now = time.time()
+        try:
+            # heartbeat (journald never goes silent)
+            if now - last_hb >= HEARTBEAT_SEC:
+                atomic_write(STATUS_PATH, {
+                    "ts": utc_iso(),
+                    "alive": True,
+                    "note": "heartbeat",
+                })
+                base.log("HEARTBEAT: alive")
+                last_hb = now
+
+            # read desired (NOTE: base uses read_desired(), not load_desired())
+            sig = None
+            try:
+                sig = base.read_desired()
+            except Exception as e:
+                sig = None
+                base.log(f"ROBUST: read_desired failed: {e}")
+
+            if sig:
+                last_good_sig = sig
+                last_good_ts = now
+            else:
+                if last_good_sig and (now - last_good_ts) <= MAX_BAD_DESIRED_SEC:
+                    sig = dict(last_good_sig)
+                    sig["src"] = (sig.get("src") or "") + " (last_good_fallback)"
+                else:
+                    time.sleep(base.POLL_SEC)
+                    continue
+
+            want = normalize_desired(sig)
+            token = want["token"]
+            want_side = want["want_side"]
+
+            # drift reconciliation
+            if token and want_side and (now - last_rec) >= RECONCILE_SEC:
+                have = get_have_side(token)
+                drift = (want_side != have["have_side"])
+                atomic_write(STATUS_PATH, {
+                    "ts": utc_iso(),
+                    "desired": {"token": token, "side": want_side, "src": sig.get("src"), "signal_ts": sig.get("timestamp")},
+                    "have": have,
+                    "drift": drift,
+                })
+                if drift:
+                    base.log(f"DRIFT: desired {token}:{want_side} but have {have[have_side]} amt={have[amt]} -> reconciling via handle_signal()")
+                    try:
+                        base.handle_signal(sig)
+                    except Exception as e:
+                        base.log(f"DRIFT: handle_signal error: {e}")
+                last_rec = now
+
+            time.sleep(base.POLL_SEC)
+
+        except Exception as e:
+            base.log(f"ROBUST LOOP ERROR: {e}")
+            base.log(traceback.format_exc())
+            time.sleep(base.POLL_SEC)
+
+if __name__ == "__main__":
+    main()

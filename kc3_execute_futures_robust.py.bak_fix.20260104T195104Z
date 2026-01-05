@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+import os, time, json, traceback
+from datetime import datetime, timezone
+from pathlib import Path
+
+import kc3_execute_futures as base
+
+STATUS_PATH = Path("/var/www/bbotpat_live/kc3_futures_status.json")
+
+RECONCILE_SEC       = float(os.getenv("KC3_RECONCILE_SEC", "30"))
+HEARTBEAT_SEC       = float(os.getenv("KC3_HEARTBEAT_SEC", "60"))
+MAX_BAD_DESIRED_SEC = float(os.getenv("KC3_MAX_BAD_DESIRED_SEC", "120"))
+
+def utc_iso():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def atomic_write(path: Path, d: dict):
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+def side_from_amt(amt: float) -> str:
+    if amt > 0: return "LONG"
+    if amt < 0: return "SHORT"
+    return "FLAT"
+
+def norm_desired(d: dict, src: str) -> dict:
+    # Ensure base.handle_signal() sees the keys it expects
+    tok = d.get("best_token") or d.get("token")
+    side = d.get("signal_side") or d.get("side")
+    out = dict(d)
+    out["best_token"] = tok
+    out["signal_side"] = side
+    out["src"] = src
+    return out
+
+def main():
+    base.log(f"ROBUST enabled: RECONCILE_SEC={RECONCILE_SEC} HEARTBEAT_SEC={HEARTBEAT_SEC} MAX_BAD_DESIRED_SEC={MAX_BAD_DESIRED_SEC}")
+
+    last_hb = 0.0
+    last_rec = 0.0
+
+    last_good = None
+    last_good_ts = 0.0
+
+    while True:
+        now = time.time()
+
+        # Heartbeat
+        if now - last_hb >= HEARTBEAT_SEC:
+            base.log("HEARTBEAT: alive")
+            atomic_write(STATUS_PATH, {"ts": utc_iso(), "alive": True, "note": "heartbeat"})
+            last_hb = now
+
+        # Load desired (prefer exec override if present)
+        desired = None
+        src = None
+        try:
+            # --- NORMALIZE SIGNAL (safe) ---
+            if isinstance(sig, dict):
+                if 'token' not in sig and 'best_token' in sig:
+                    sig['token'] = sig.get('best_token')
+                if 'side' not in sig and 'signal_side' in sig:
+                    sig['side'] = sig.get('signal_side')
+            desired, src = base.read_desired()   # your module exposes read_desired()
+            if desired and (desired.get("best_token") or desired.get("token")) and (desired.get("signal_side") or desired.get("side")):
+                last_good = desired
+                last_good_ts = now
+            else:
+                desired = None
+        except Exception:
+            desired = None
+
+        # Tolerate brief bad desired by using last_good for up to MAX_BAD_DESIRED_SEC
+        if desired is None and last_good is not None and (now - last_good_ts) <= MAX_BAD_DESIRED_SEC:
+            desired = last_good
+            src = src or "last_good_cached"
+
+        # Reconcile loop
+        if desired is not None and (now - last_rec) >= RECONCILE_SEC:
+            try:
+                tok = desired.get("best_token") or desired.get("token")
+                want = desired.get("signal_side") or desired.get("side")
+                symbol = tok + base.SYMBOL_SUFFIX
+
+                have = base.get_position(symbol)  # should return dict with positionAmt/entryPrice
+                amt = float(have.get("positionAmt", "0") or "0")
+                have_side = side_from_amt(amt)
+
+                if want != have_side:
+                    base.log(f"DRIFT: desired={tok}:{want} have={symbol}:{have_side} amt={amt} entry={have.get(entryPrice)} src={src} -> reconcile")
+                    sig = norm_desired(desired, src or "")
+                    base.handle_signal(sig)  # <-- flat keys now
+                    note = "drift_reconcile"
+                else:
+                    note = "ok_in_sync"
+
+                atomic_write(STATUS_PATH, {
+                    "ts": utc_iso(),
+                    "alive": True,
+                    "note": note,
+                    "desired": {"token": tok, "side": want, "src": src},
+                    "have": {"symbol": symbol, "side": have_side, "amt": amt, "entry": float(have.get("entryPrice","0") or "0")},
+                })
+
+            except Exception:
+                base.log("ERROR: reconcile crashed:\n" + traceback.format_exc())
+
+            last_rec = now
+
+        time.sleep(base.POLL_SEC)
+
+if __name__ == "__main__":
+    main()
