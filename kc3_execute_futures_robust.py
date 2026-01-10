@@ -2,83 +2,273 @@
 import os, time, json, traceback
 from pathlib import Path
 from datetime import datetime, timezone
+
 import kc3_execute_futures as base
 
-STATUS = Path("/var/www/bbotpat_live/kc3_futures_status.json")
+STATUS  = Path("/var/www/bbotpat_live/kc3_futures_status.json")
 DESIRED = Path("/root/bbotpat_live/kc3_desired_position.json")
+STATE   = Path("/root/bbotpat_live/data/kc3_exec_state.json")
+STATE.parent.mkdir(parents=True, exist_ok=True)
 
-RECONCILE_SEC = float(os.getenv("KC3_RECONCILE_SEC", "30"))
+RECONCILE_SEC = float(os.getenv("KC3_RECONCILE_SEC", "15"))
 HEARTBEAT_SEC = float(os.getenv("KC3_HEARTBEAT_SEC", "60"))
 
-def utc():
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+TP_PCT = float(os.getenv("KC3_TP_PCT", "0.0"))
+SL_PCT = float(os.getenv("KC3_SL_PCT", "0.0"))
 
-def write_status(obj):
+ROTATE_MIN_ROI = float(os.getenv("KC3_ROTATE_MIN_ROI", "0.0"))        # e.g. 0.002 => +0.2%
+ALLOW_OPEN_ON_HOLD = int(os.getenv("KC3_ALLOW_OPEN_ON_HOLD", "1"))     # 0 = do not open from HOLD when flat
+MAX_CAND_TRIES = int(os.getenv("KC3_MAX_CAND_TRIES", "7"))             # for FLAT close scanning
+
+def utc():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+
+def write_status(o):
     tmp = STATUS.with_suffix(".tmp")
-    tmp.write_text(json.dumps(obj, indent=2) + "\n")
+    tmp.write_text(json.dumps(o, indent=2) + "\n")
     tmp.replace(STATUS)
+
+def load_state():
+    if STATE.exists():
+        try:
+            return json.loads(STATE.read_text())
+        except Exception:
+            pass
+    return {}
+
+def save_state(s):
+    STATE.write_text(json.dumps(s, indent=2) + "\n")
 
 def read_desired():
     if not DESIRED.exists():
         return None
     try:
-        raw = json.loads(DESIRED.read_text() or "{}")
+        return json.loads(DESIRED.read_text())
     except Exception:
         return None
-    if not isinstance(raw, dict):
+
+def current_roi(symbol):
+    pos = base.get_position(symbol)
+    if not pos or float(pos.get("amt", 0) or 0) == 0.0:
         return None
-
-    # Normalize
-    if "token" not in raw and "best_token" in raw:
-        raw["token"] = raw["best_token"]
-    if "symbol" in raw and "token" not in raw:
-        sym = str(raw["symbol"]).upper().strip()
-        raw["token"] = sym[:-4] if sym.endswith("USDT") else sym
-    if "side" not in raw and "signal_side" in raw:
-        raw["side"] = raw["signal_side"]
-
-    sig = {
-        "token": raw.get("token"),
-        "side": raw.get("side"),
-        "symbol": raw.get("symbol", (str(raw.get("token", "")).upper() + "USDT") if raw.get("token") else None),
-        "notional_usd": float(raw.get("notional_usd", raw.get("usd", 100.0)) or 100.0),
-        "src": raw.get("src", "robust"),
-        "ts": raw.get("timestamp", raw.get("ts", utc())),
-    }
-
-    if not sig.get("token") or not sig.get("side"):
+    entry = float(pos["entry"])
+    mark  = float(base.get_mark(symbol))
+    side  = "LONG" if float(pos["amt"]) > 0 else "SHORT"
+    if entry <= 0:
         return None
-    return sig
+    if side == "LONG":
+        return (mark - entry) / entry
+    else:
+        return (entry - mark) / entry
+
+def symbols_to_scan(desired):
+    # Enforce "single position" over tracked universe without needing get_all_positions()
+    syms = []
+    if isinstance(desired, dict):
+        s = desired.get("symbol")
+        if isinstance(s, str) and s.endswith("USDT"):
+            syms.append(s)
+        for x in (desired.get("candidates") or []):
+            if isinstance(x, str) and x.endswith("USDT"):
+                syms.append(x)
+        for tok in (desired.get("alt_list") or []):
+            if isinstance(tok, str) and tok.strip():
+                syms.append(tok.strip().upper() + "USDT")
+    # de-dupe preserve order
+    seen = set()
+    out = []
+    for s in syms:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+def close_other_positions(keep_symbol, desired):
+    closed = []
+    for sym in symbols_to_scan(desired):
+        if sym == keep_symbol:
+            continue
+        try:
+            pos = base.get_position(sym)
+            if pos and float(pos.get("amt", 0) or 0) != 0.0:
+                base.close_position(sym)
+                closed.append(sym)
+                print(f"[{utc()}] KC3 FORCE CLOSE {sym} (single-position rule)", flush=True)
+                time.sleep(1)
+        except Exception:
+            pass
+    return closed
 
 def main():
-    base.log("ROBUST wrapper started")
-    last_reconcile = 0
     last_beat = 0
+    last_reconcile = 0
+    last_tp_check = 0
+    state = load_state()
+
+    print(f"[{utc()}] ROBUST wrapper started (TP+SL)", flush=True)
 
     while True:
         try:
             now = time.time()
 
+            # heartbeat
             if now - last_beat >= HEARTBEAT_SEC:
                 write_status({"ts": utc(), "alive": True, "note": "heartbeat"})
-                base.log("HEARTBEAT: alive")
                 last_beat = now
 
+            # TP/SL loop (every ~1s)
+            if now - last_tp_check >= 1:
+                sym = state.get("symbol")
+                side = state.get("side")
+                if sym and side:
+                    roi = current_roi(sym)
+                    if roi is not None:
+                        state["last_roi"] = roi
+                        if TP_PCT > 0 and (roi >= TP_PCT):
+                            base.close_position(sym)
+                            state.update({
+                                "symbol": None, "side": None,
+                                "cooldown": "tp",
+                                "cooldown_signal_id": state.get("open_signal_id"),
+                            })
+                            print(f"[{utc()}] TP hit {sym} roi={roi:.4f}", flush=True)
+                            save_state(state)
+                        elif SL_PCT > 0 and (roi <= -SL_PCT):
+                            base.close_position(sym)
+                            state.update({
+                                "symbol": None, "side": None,
+                                "cooldown": "sl",
+                                "cooldown_signal_id": state.get("open_signal_id"),
+                            })
+                            print(f"[{utc()}] SL hit {sym} roi={roi:.4f}", flush=True)
+                            save_state(state)
+                last_tp_check = now
+
+            # reconcile desired
             if now - last_reconcile >= RECONCILE_SEC:
-                sig = read_desired()
-                if not sig:
-                    write_status({"ts": utc(), "alive": True, "note": "no_desired"})
+                desired = read_desired()
+
+                # --- FLAT handling: close any tracked open positions and continue ---
+                if isinstance(desired, dict) and str(desired.get("side","")).upper() == "FLAT":
+                    attempts = []
+                    closed_any = False
+                    syms = symbols_to_scan(desired)[:MAX_CAND_TRIES]
+                    for sym in syms:
+                        try:
+                            pos = base.get_position(sym)
+                            if pos and float(pos.get("amt", 0) or 0) != 0.0:
+                                ok = base.close_position(sym)
+                                attempts.append({"symbol": sym, "ok": bool(ok), "action": "close"})
+                                closed_any = closed_any or bool(ok)
+                        except Exception as e:
+                            attempts.append({"symbol": sym, "action": "exception", "err": repr(e)})
+
+                    # clear local tracking if we are flattening
+                    state.update({"symbol": None, "side": None})
+                    save_state(state)
+
+                    write_status({
+                        "ts": utc(),
+                        "alive": True,
+                        "note": "flat",
+                        "desired": desired,
+                        "result": {"closed_any": closed_any, "attempts": attempts},
+                    })
+                    last_reconcile = now
+                    time.sleep(RECONCILE_SEC)
+                    continue
+
+                if not isinstance(desired, dict):
                     last_reconcile = now
                     time.sleep(1)
                     continue
 
-                # IMPORTANT: use base's internal execution path
-                base.handle_signal(sig)
+                d_side = str(desired.get("side","")).upper()
+                d_sym  = desired.get("symbol")
+                d_reason = str(desired.get("reason",""))
+                d_signal_id = desired.get("signal_id")
 
-                write_status({"ts": utc(), "alive": True, "note": "reconciled", "desired": sig})
+                # If we're flat and the agent is saying HOLD, optionally do NOT open
+                if (not state.get("symbol")) and d_reason == "hold" and ALLOW_OPEN_ON_HOLD == 0:
+                    write_status({"ts": utc(), "alive": True, "note": "flat_wait_fresh_signal", "desired": desired})
+                    last_reconcile = now
+                    time.sleep(1)
+                    continue
+
+                # Fresh-signal gate: if we exited on TP/SL, do not re-enter on same signal_id
+                if (not state.get("symbol")) and d_side in ("LONG","SHORT") and d_signal_id:
+                    if state.get("cooldown_signal_id") == d_signal_id:
+                        write_status({"ts": utc(), "alive": True, "note": "flat_wait_fresh_signal", "desired": desired})
+                        last_reconcile = now
+                        time.sleep(1)
+                        continue
+                    # once we see a different signal id, clear cooldown
+                    state["cooldown_signal_id"] = None
+                    state["cooldown"] = None
+
+                # Determine what we currently have in desired symbol
+                if not isinstance(d_sym, str) or not d_sym.endswith("USDT"):
+                    last_reconcile = now
+                    time.sleep(1)
+                    continue
+
+                # Current tracked position (single position model)
+                cur_sym = state.get("symbol")
+                cur_side = state.get("side")
+
+                # If we have a position and agent wants a different symbol/side => rotation candidate
+                if cur_sym and cur_side and (cur_sym != d_sym or cur_side != d_side):
+                    # Gate: do not rotate while underwater; require ROI >= ROTATE_MIN_ROI
+                    roi = current_roi(cur_sym)
+                    if roi is None:
+                        roi = 0.0
+                    if roi < ROTATE_MIN_ROI:
+                        write_status({
+                            "ts": utc(),
+                            "alive": True,
+                            "note": "hold_roi_gate",
+                            "roi": roi,
+                            "rotate_min_roi": ROTATE_MIN_ROI,
+                            "have": {"symbol": cur_sym, "side": cur_side},
+                            "desired": desired,
+                        })
+                        last_reconcile = now
+                        time.sleep(1)
+                        continue
+
+                # Enforce single position over tracked universe:
+                close_other_positions(d_sym, desired)
+
+                # Reconcile desired symbol/side
+                pos = base.get_position(d_sym)
+                have = "FLAT"
+                if pos and float(pos.get("amt",0) or 0) > 0: have = "LONG"
+                if pos and float(pos.get("amt",0) or 0) < 0: have = "SHORT"
+
+                if have == d_side:
+                    state.update({"symbol": d_sym, "side": d_side})
+                else:
+                    if have != "FLAT":
+                        base.close_position(d_sym)
+                        time.sleep(2)
+                    base.open_position(
+                        symbol=d_sym,
+                        desired_side=d_side,
+                        hmi=desired.get("hmi"),
+                        hmi_delta=desired.get("hmi_delta"),
+                        src="robust",
+                    )
+                    state.update({
+                        "symbol": d_sym,
+                        "side": d_side,
+                        "open_signal_id": d_signal_id,
+                    })
+
+                save_state(state)
+                write_status({"ts": utc(), "alive": True, "note": "reconciled", "desired": desired})
                 last_reconcile = now
 
-            time.sleep(1)
+            time.sleep(0.5)
 
         except Exception:
             traceback.print_exc()
