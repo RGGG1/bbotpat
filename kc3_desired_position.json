@@ -1,6 +1,29 @@
 {
   "side": "LONG",
-  "symbol": "UNIUSDT",
-  "qty": 1,
-  "timestamp": "2026-01-05T06:35:00Z"
+  "symbol": "BNBUSDT",
+  "notional_usd": 25.0,
+  "timestamp": "2026-01-10T23:36:03.276258Z",
+  "src": "lag_selector",
+  "reason": "hold",
+  "alt_list": [
+    "UNI",
+    "SOL",
+    "ETH",
+    "BNB",
+    "DOGE",
+    "TON",
+    "SUI"
+  ],
+  "prices_ts": "2026-01-10T23:36:02.413984Z",
+  "z_score": -1.5181390575147977,
+  "signal_id": "2026-01-10T23:28:03.185569Z|LONG|BNBUSDT|z=-2.2146|pts=2026-01-10T23:28:02.942437Z",
+  "candidates": [
+    "BNBUSDT",
+    "DOGEUSDT",
+    "SOLUSDT",
+    "UNIUSDT",
+    "ETHUSDT",
+    "SUIUSDT",
+    "TONUSDT"
+  ]
 }

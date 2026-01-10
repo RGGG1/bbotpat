@@ -1,20 +1,5 @@
 nohup: ignoring input
-[2026-01-05T06:04:13.699754Z] ROBUST wrapper started
-[2026-01-05T06:04:13.700160Z] HEARTBEAT: alive
-[2026-01-05T06:04:17.632601Z] KC3 ERROR: Computed qty too small: qty=0.0 minQty=0.001 mark=92403.1 notional=47.931143535
-[2026-01-05T06:04:47.751649Z] KC3 ERROR: Computed qty too small: qty=0.0 minQty=0.001 mark=92396.45415217 notional=47.931143535
-[2026-01-05T06:05:13.758947Z] HEARTBEAT: alive
-[2026-01-05T06:05:16.014485Z] KC3 ERROR: Computed qty too small: qty=0.0 minQty=0.001 mark=92363.1 notional=47.931143535
-[2026-01-05T06:05:46.322485Z] KC3 ERROR: Computed qty too small: qty=0.0 minQty=0.001 mark=92362.5 notional=47.931143535
-[2026-01-05T06:06:14.328751Z] HEARTBEAT: alive
-[2026-01-05T06:06:18.941957Z] KC3 ERROR: Computed qty too small: qty=0.0 minQty=0.001 mark=92357.28376312 notional=47.931143535
-[2026-01-05T06:06:47.228727Z] KC3 ERROR: Computed qty too small: qty=0.0 minQty=0.001 mark=92364.7 notional=47.931143535
-[2026-01-05T06:07:15.234746Z] HEARTBEAT: alive
-[2026-01-05T06:07:17.451747Z] KC3 ERROR: Computed qty too small: qty=0.0 minQty=0.001 mark=92396.40067391 notional=47.931143535
-[2026-01-05T06:07:47.717275Z] KC3 ERROR: Computed qty too small: qty=0.0 minQty=0.001 mark=92398.79831884 notional=47.931143535
-[2026-01-05T06:08:15.723158Z] HEARTBEAT: alive
-[2026-01-05T06:08:17.998073Z] KC3 OPEN LONG UNIUSDT (hmi={'token': 'UNI', 'side': 'LONG', 'symbol': 'UNIUSDT', 'notional_usd': 25.0, 'src': 'robust', 'ts': '2026-01-05T06:30:00Z', 'best_token': 'UNI', 'signal_side': 'LONG'} hmi_delta=?) margin~10.6514 BNFCR notional~47.9311 qty~8.0 mark~5.85242 LIVE=True (src=None)
-[2026-01-05T06:09:16.635905Z] HEARTBEAT: alive
-[2026-01-05T06:09:49.223395Z] KC3 OPEN LONG UNIUSDT (hmi={'token': 'UNI', 'side': 'LONG', 'symbol': 'UNIUSDT', 'notional_usd': 100.0, 'src': 'robust', 'ts': '2026-01-05T06:35:00Z', 'best_token': 'UNI', 'signal_side': 'LONG'} hmi_delta=?) margin~10.6365 BNFCR notional~47.8644 qty~8.0 mark~5.8576 LIVE=True (src=None)
-[2026-01-05T06:10:17.530288Z] HEARTBEAT: alive
-[2026-01-05T06:11:18.168965Z] HEARTBEAT: alive
+[2026-01-10T23:27:18.305060Z] ROBUST wrapper started (TP+SL)
+[2026-01-10T23:27:34.199347Z] KC3 CLOSE LONG BNBUSDT qty=0.2 mark~907.243 LIVE=True
+[2026-01-10T23:27:34.489345Z] KC3 FORCE CLOSE BNBUSDT (single-position rule)
+[2026-01-10T23:27:38.183873Z] KC3 OPEN SHORT TONUSDT (hmi=? hmi_delta=?) margin~20.4351 BNFCR notional~183.916 qty~105.6 mark~1.74038 LIVE=True (src=robust)

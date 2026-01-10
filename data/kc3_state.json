@@ -8,7 +8,11 @@
     "opened_at": "2026-01-03T12:27:06.464530Z",
     "trade_id": 350
   },
-  "last_hmi": 77.3,
+  "last_hmi": 81.6,
   "started_at": "2025-12-26T22:04:01.882910Z",
-  "trade_id_seq": 350
+  "trade_id_seq": 350,
+  "last_signal": "UNIUSDT|SHORT",
+  "base_hmi": 78.0,
+  "side": "SHORT",
+  "last_signal_key": "SHORT|UNIUSDT,DOGEUSDT,SOLUSDT|100"
 }
