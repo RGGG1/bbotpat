@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+import os, json, time, math
+from pathlib import Path
+from datetime import datetime, timezone
+
+# ---- Price helper for prices_latest.json (expects {'rows':[{'token','price'},...]}) ----
+def get_px(prices_doc, token: str):
+    try:
+        token = str(token).upper()
+    except Exception:
+        return None
+    if not isinstance(prices_doc, dict):
+        return None
+    rows = prices_doc.get('rows')
+    if isinstance(rows, list):
+        for r in rows:
+            if isinstance(r, dict) and str(r.get('token','')).upper() == token:
+                try:
+                    v = float(r.get('price'))
+                    return v if v > 0 else None
+                except Exception:
+                    return None
+    # fallback: sometimes direct mapping exists
+    v = prices_doc.get(token)
+    try:
+        v = float(v)
+        return v if v > 0 else None
+    except Exception:
+        return None
+# ---- end price helper ----
+
+PRICES_IN   = Path("/var/www/bbotpat_live/prices_latest.json")
+DESIRED_OUT = Path("/root/bbotpat_live/kc3_desired_position.json")
+
+STATE_DIR = Path("/root/bbotpat_live/data")
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+STATE_PATH = STATE_DIR / "kc3_lag_state.json"
+
+# Loop + sizing
+LOOP_SEC     = float(os.getenv("KC3_AGENT_LOOP_SEC", "15"))
+USD_NOTIONAL = float(os.getenv("KC3_USD_NOTIONAL", "25"))
+
+# Universe
+ALT_LIST = [t.strip().upper() for t in os.getenv("KC3_ALT_LIST", "UNI,SOL,ETH,BNB,DOGE,TON,SUI").split(",") if t.strip()]
+
+# Lag model params
+LOOKBACK_SEC = float(os.getenv("KC3_LAG_LOOKBACK_SEC", "900"))   # 15 minutes
+Z_ENTER      = float(os.getenv("KC3_LAG_Z_ENTER", "1.2"))        # threshold to enter
+Z_EXIT       = float(os.getenv("KC3_LAG_Z_EXIT", "0.3"))          # exit (hysteresis)
+SWITCH_DELTA = float(os.getenv("KC3_LAG_SWITCH_DELTA", "0.3"))     # rotate only if better by this
+MAX_CANDS    = int(float(os.getenv("KC3_MAX_CANDIDATES", "7")))  # candidates list length
+
+# Direction choice: trade the bigger extreme (leader or laggard)
+TRADE_MODE   = os.getenv("KC3_LAG_MODE", "both").lower()         # both|long_only|short_only
+
+def utc():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+
+def safe_read_json(p: Path):
+    try:
+        if not p.exists():
+            return None
+        return json.loads(p.read_text() or "null")
+    except Exception:
+        return None
+
+def safe_write_json(p: Path, obj: dict):
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(obj, indent=2) + "\n")
+    tmp.replace(p)
+
+def safe_unlink(p: Path):
+    try:
+        p.unlink()
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+def load_state():
+    st = safe_read_json(STATE_PATH)
+    if not isinstance(st, dict):
+        st = {}
+    st.setdefault("history", [])  # list of {"t": epoch, "rel": {tok: log(alt/btc)}}
+    return st
+
+def save_state(st: dict):
+    safe_write_json(STATE_PATH, st)
+
+def build_snapshot(prices_doc):
+    # Build rel[tok] = log(alt/btc)
+    btc = get_px(prices_doc, 'BTC')
+    if not btc or btc <= 0:
+        return None
+    rel = {}
+    for tok in ALT_LIST:
+        p = get_px(prices_doc, tok)
+        if p and p > 0:
+            rel[tok] = math.log(p / btc)
+    # require enough symbols to avoid junk signals
+    if len(rel) < max(2, int(len(ALT_LIST) * 0.6)):
+        return None
+    return rel
+
+def prune_history(hist: list, now: float):
+    cutoff = now - LOOKBACK_SEC
+    # keep at least 2 points if possible
+    out = [h for h in hist if isinstance(h, dict) and float(h.get("t", 0)) >= cutoff]
+    return out
+
+def compute_returns(hist: list):
+    # return over window = latest - oldest
+    if len(hist) < 2:
+        return None
+    oldest = hist[0].get("rel") or {}
+    latest = hist[-1].get("rel") or {}
+    rets = {}
+    for tok in ALT_LIST:
+        if tok in oldest and tok in latest:
+            rets[tok] = float(latest[tok]) - float(oldest[tok])
+    if len(rets) < 2:
+        return None
+    return rets
+
+def mean_std(vals):
+    xs = list(vals)
+    if len(xs) < 2:
+        return (0.0, 0.0)
+    m = sum(xs) / len(xs)
+    v = sum((x - m) ** 2 for x in xs) / (len(xs) - 1)
+    s = math.sqrt(v) if v > 0 else 0.0
+    return (m, s)
+
+def main():
+    print(f"[{utc()}] KC3 LAG agent started | alts={ALT_LIST} lookback_sec={LOOKBACK_SEC} z_enter={Z_ENTER} loop={LOOP_SEC}s", flush=True)
+    st = load_state()
+    st.setdefault('pos_active', False)
+
+    while True:
+        pass  # LOOP_BODY_REMOVED
+desired = {
+                    "side": "FLAT",
+                    "symbol": "",
+                    "notional_usd": float(USD_NOTIONAL),
+                    "timestamp": utc(),
+                    "src": "lag_selector",
+                    "reason": "zero_dispersion",
+                    "alt_list": ALT_LIST,
+                    "prices_ts": (prices_doc.get("timestamp") if isinstance(prices_doc, dict) else None) or utc(),
+                    "candidates": [f"{tok}USDT" for tok in ALT_LIST],
+                }
+                safe_write_json(DESIRED_OUT, desired)
+                print(f"[{utc()}] zero dispersion; FLAT", flush=True)
+                time.sleep(LOOP_SEC)
+                continue
+
+            z = {tok: (ret - m) / s for tok, ret in rets.items()}
+            # --- CLEAN DECISION ENGINE ---
+            best_tok, best_z = max(z.items(), key=lambda kv: abs(kv[1]))
+            side = 'LONG' if best_z < 0 else 'SHORT'
+            reason = 'enter'
+
+            if abs(best_z) < Z_ENTER:
+                save_state(st)
+                time.sleep(LOOP_SEC)
+                continue
+
+            desired = {
+                'side': side,
+                'symbol': f'{best_tok}USDT',
+                'notional_usd': float(USD_NOTIONAL),
+                'timestamp': utc(),
+                'src': 'lag_selector',
+                'reason': reason,
+                'z_score': float(best_z),
+                'prices_ts': prices_ts,
+                'candidates': [f'{t}USDT' for t,_ in sorted(z.items(), key=lambda kv: -abs(kv[1]))],
+            }
+            safe_write_json(DESIRED_OUT, desired)
+            save_state(st)
+            time.sleep(LOOP_SEC)
+            time.sleep(LOOP_SEC)
+            continue
+            # --- end hysteresis+rotation engine ---
+
+            # candidates sorted for each direction
+            laggards = sorted(z.items(), key=lambda kv: kv[1])                 # most negative first
+            leaders  = sorted(z.items(), key=lambda kv: kv[1], reverse=True)   # most positive first
+
+            best_long_tok, best_long_z = laggards[0]
+            best_short_tok, best_short_z = leaders[0]
+
+            chosen_side = None
+            chosen_tok  = None
+
+            if TRADE_MODE == "long_only":
+                if best_long_z <= -Z_ENTER:
+                    chosen_side, chosen_tok = "LONG", best_long_tok
+            elif TRADE_MODE == "short_only":
+                if best_short_z >= Z_ENTER:
+                    chosen_side, chosen_tok = "SHORT", best_short_tok
+            else:
+                # both: take bigger absolute extreme
+                long_ok  = best_long_z <= -Z_ENTER
+                short_ok = best_short_z >= Z_ENTER
+                if long_ok or short_ok:
+                    if long_ok and short_ok:
+                        # choose larger magnitude
+                        if abs(best_short_z) > abs(best_long_z):
+                            chosen_side, chosen_tok = "SHORT", best_short_tok
+                        else:
+                            chosen_side, chosen_tok = "LONG", best_long_tok
+                    elif long_ok:
+                        chosen_side, chosen_tok = "LONG", best_long_tok
+                    else:
+                        chosen_side, chosen_tok = "SHORT", best_short_tok
+
+            prices_ts = prices_doc.get("timestamp")
+
+            if not chosen_side:
+                # no trade zone: go flat (explicit FLAT signal so executor can close)
+                desired = {
+                    "side": "FLAT",
+                    "symbol": "",
+                    "notional_usd": float(USD_NOTIONAL),
+                    "timestamp": utc(),
+                    "src": "lag_selector",
+                    "reason": "no_trade_zone",
+                    "alt_list": ALT_LIST,
+                    "prices_ts": (prices_doc.get("timestamp") if isinstance(prices_doc, dict) else None) or utc(),
+                }
+                safe_write_json(DESIRED_OUT, desired)
+                st["last_signal"] = None
+                st["last_note"] = "no_signal"
+                save_state(st)
+                print(f"[{utc()}] NO SIGNAL | best_long_z={best_long_z:.3f} best_short_z={best_short_z:.3f} prices_ts={prices_ts}", flush=True)
+                time.sleep(LOOP_SEC)
+                continue
+
+            # build candidates list for fallback if primary fails
+            if chosen_side == "LONG":
+                cand = [f"{tok}USDT" for tok, _ in laggards[:MAX_CANDS]]
+                score = float(best_long_z)
+            else:
+                cand = [f"{tok}USDT" for tok, _ in leaders[:MAX_CANDS]]
+                score = float(best_short_z)
+
+            desired = {
+                "side": chosen_side,
+                "symbol": f"{chosen_tok}USDT",
+                "candidates": cand,
+                "notional_usd": float(USD_NOTIONAL),
+                "timestamp": utc(),
+                "src": "lag_selector",
+                "prices_ts": (prices_doc.get("timestamp") if isinstance(prices_doc, dict) else None) or utc(),
+                "lookback_sec": float(LOOKBACK_SEC),
+                "z_enter": float(Z_ENTER),
+                "z_score": score,
+                "best_long": {"token": best_long_tok, "z": float(best_long_z)},
+                "best_short": {"token": best_short_tok, "z": float(best_short_z)},
+                "alts": ALT_LIST,
+            }
+
+            safe_write_json(DESIRED_OUT, desired)
+            st["last_signal"] = [desired["symbol"], desired["side"]]
+            st["last_note"] = "signal_written"
+            save_state(st)
+
+            print(f"[{utc()}] SIGNAL {chosen_side} {desired['symbol']} z={score:.3f} c0={cand[:3]} prices_ts={prices_ts}", flush=True)
+
+        except Exception as e:
+            print(f"[{utc()}] ERROR {type(e).__name__}: {e}", flush=True)
+
+        time.sleep(LOOP_SEC)
+
+if __name__ == "__main__":
+    main()

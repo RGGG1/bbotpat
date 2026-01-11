@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+import os, time, json, traceback
+from pathlib import Path
+from datetime import datetime, timezone
+import kc3_execute_futures as base
+
+STATUS = Path("/var/www/bbotpat_live/kc3_futures_status.json")
+DESIRED = Path("/root/bbotpat_live/kc3_desired_position.json")
+STATE   = Path("/root/bbotpat_live/data/kc3_exec_state.json")
+STATE.parent.mkdir(parents=True, exist_ok=True)
+
+RECONCILE_SEC = float(os.getenv("KC3_RECONCILE_SEC", "15"))
+HEARTBEAT_SEC = float(os.getenv("KC3_HEARTBEAT_SEC", "60"))
+TP_PCT = float(os.getenv("KC3_TP_PCT", "0.01"))
+SL_PCT = float(os.getenv("KC3_SL_PCT", "0.005"))
+
+def utc():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+
+def write_status(o):
+    tmp = STATUS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(o, indent=2) + "\n")
+    tmp.replace(STATUS)
+
+def load_state():
+    if STATE.exists():
+        try:
+            return json.loads(STATE.read_text())
+        except Exception:
+            pass
+    return {}
+
+def save_state(s):
+    STATE.write_text(json.dumps(s, indent=2))
+
+def read_desired():
+    if not DESIRED.exists():
+        return None
+    try:
+        return json.loads(DESIRED.read_text())
+    except Exception:
+        return None
+
+def current_roi(symbol):
+    pos = base.get_position(symbol)
+    if not pos or pos["amt"] == 0:
+        return None
+    entry = pos["entry"]
+    mark  = base.get_mark(symbol)
+    side  = "LONG" if pos["amt"] > 0 else "SHORT"
+    if side == "LONG":
+        return (mark - entry) / entry
+    else:
+        return (entry - mark) / entry
+
+def main():
+    last_beat = 0
+    last_reconcile = 0
+    last_tp_check = 0
+    state = load_state()
+
+    print(f"[{utc()}] ROBUST wrapper started (TP+SL)", flush=True)
+
+    while True:
+        try:
+            now = time.time()
+
+            if now - last_beat >= HEARTBEAT_SEC:
+                write_status({"ts": utc(), "alive": True, "note": "heartbeat"})
+                last_beat = now
+
+            if now - last_tp_check >= 1:
+                sym = state.get("symbol")
+                side = state.get("side")
+                if sym and side:
+                    roi = current_roi(sym)
+                    if roi is not None:
+                        state["last_roi"] = roi
+                        if TP_PCT > 0 and (roi >= TP_PCT): 
+                            base.close_position(sym)
+                            state.update({"symbol": None, "side": None, "cooldown": "tp"})
+                            print(f"[{utc()}] TP hit {sym} roi={roi:.4f}", flush=True)
+                        elif SL_PCT > 0 and roi <= -SL_PCT:
+                            base.close_position(sym)
+                            state.update({"symbol": None, "side": None, "cooldown": "sl"})
+                            print(f"[{utc()}] SL hit {sym} roi={roi:.4f}", flush=True)
+                        save_state(state)
+                last_tp_check = now
+
+            if now - last_reconcile >= RECONCILE_SEC:
+                desired = read_desired()
+                # --- FLAT handling: if agent says FLAT, close open positions and continue ---
+                if isinstance(desired, dict) and str(desired.get('side','')).upper() == 'FLAT':
+                    attempts = []
+                    cands = desired.get('candidates') or []
+                    syms = [x for x in cands if isinstance(x, str) and x.endswith('USDT')]
+                    # If no candidates provided, do nothing (stay flat)
+                    closed_any = False
+                    limit = int(globals().get('MAX_CAND_TRIES', 7))
+                    for sym in syms[:limit]:
+                        try:
+                            pos = base.get_position(sym)
+                            if pos and float(pos.get('amt', 0) or 0) != 0.0:
+                                ok = base.close_position(sym)
+                                attempts.append({'symbol': sym, 'ok': bool(ok), 'action': 'close'})
+                                closed_any = closed_any or bool(ok)
+                        except Exception as e:
+                            attempts.append({'symbol': sym, 'action': 'exception', 'err': repr(e)})
+                    write_status({
+                        'ts': utc(),
+                        'alive': True,
+                        'note': 'flat',
+                        'desired': desired,
+                        'result': {'closed_any': closed_any, 'attempts': attempts},
+                    })
+                    time.sleep(RECONCILE_SEC)
+                    continue
+
+                if not desired:
+                    last_reconcile = now
+                    time.sleep(1)
+                    continue
+
+                d_side = desired.get("side")
+                d_sym  = desired.get("symbol")
+
+                if state.get("cooldown") == "sl":
+                    if state.get("last_signal") == (d_sym, d_side):
+                        last_reconcile = now
+                        time.sleep(1)
+                        continue
+                    state["cooldown"] = None
+
+                pos = base.get_position(d_sym)
+
+                have = "FLAT"
+                if pos["amt"] > 0: have = "LONG"
+                if pos["amt"] < 0: have = "SHORT"
+
+                if have == d_side:
+                    state.update({"symbol": d_sym, "side": d_side})
+                else:
+                    if have != "FLAT":
+                        base.close_position(d_sym)
+                        time.sleep(2)
+                    
+
+
+
+                    base.open_position(
+                        symbol=d_sym,
+                        desired_side=d_side,
+                        hmi=desired.get("hmi"),
+                        hmi_delta=desired.get("hmi_delta"),
+                        src="robust"
+                    )
+                    state.update({
+                        "symbol": d_sym,
+                        "side": d_side,
+                        "last_signal": (d_sym, d_side)
+                    })
+
+                save_state(state)
+                write_status({
+                    "ts": utc(),
+                    "alive": True,
+                    "note": "reconciled",
+                    "desired": desired
+                })
+                last_reconcile = now
+
+            time.sleep(0.5)
+
+        except Exception:
+            traceback.print_exc()
+            write_status({"ts": utc(), "alive": True, "note": "error", "err": "see log"})
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()
