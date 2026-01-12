@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+import os, json, time
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.request import urlopen, Request
+
+ROOT = Path(__file__).resolve().parent
+OUT  = Path("/var/www/bbotpat_live/prices_latest.json")
+OUT.parent.mkdir(parents=True, exist_ok=True)
+
+# -------- FORCE LOAD .env (NO RELYING ON SHELL) --------
+envp = ROOT / ".env"
+if envp.exists():
+    for line in envp.read_text().splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        v = v.strip()
+        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+            v = v[1:-1]
+        os.environ[k.strip()] = v
+
+ALT_ENV = os.getenv("KC3_ALT_LIST")
+if not ALT_ENV:
+    raise RuntimeError("KC3_ALT_LIST is NOT SET inside live_collector")
+
+TOKENS = [t for t in ALT_ENV.replace(",", " ").split() if t]
+TOKENS = [t.upper() for t in TOKENS]
+
+# BTC ALWAYS INCLUDED
+if "BTC" not in TOKENS:
+    TOKENS = ["BTC"] + TOKENS
+
+print("COLLECTOR TOKENS:", TOKENS, flush=True)
+
+BINANCE = "https://api.binance.com/api/v3/ticker/price"
+POLL = 1.0
+
+def utc():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+while True:
+    try:
+        rows = []
+        for t in TOKENS:
+            sym = f"{t}USDT"
+            url = f"{BINANCE}?symbol={sym}"
+            req = Request(url, headers={"User-Agent": "kc3"})
+            with urlopen(req, timeout=5) as r:
+                data = json.load(r)
+                rows.append({
+                    "token": t,
+                    "price": float(data["price"])
+                })
+
+        payload = {
+            "timestamp": utc(),
+            "rows": rows
+        }
+        tmp = OUT.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, indent=2))
+        tmp.replace(OUT)
+
+    except Exception as e:
+        print("COLLECTOR ERROR:", repr(e), flush=True)
+
+    time.sleep(POLL)

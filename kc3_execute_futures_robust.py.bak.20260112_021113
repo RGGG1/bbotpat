@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import os, time, json, traceback
-import time
-import os
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -17,6 +15,85 @@ HEARTBEAT_SEC = float(os.getenv("KC3_HEARTBEAT_SEC", "60"))
 
 TP_PCT = float(os.getenv("KC3_TP_PCT", "0.0"))
 SL_PCT = float(os.getenv("KC3_SL_PCT", "0.0"))
+
+
+# --- DYNAMIC_TP_HELPERS_FINAL ---
+import json, math
+from pathlib import Path as _Path
+
+def _clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+def _read_lag_history():
+    # produced by agent: /root/bbotpat_live/data/kc3_lag_state.json
+    try:
+        fp = _Path(__file__).resolve().parent / "data" / "kc3_lag_state.json"
+        if not fp.exists():
+            return []
+        d = json.loads(fp.read_text(encoding="utf-8"))
+        h = d.get("history") or []
+        return h if isinstance(h, list) else []
+    except Exception:
+        return []
+
+def _extract_token(symbol: str):
+    # "SOLUSDT" -> "SOL"
+    if not symbol or not isinstance(symbol, str):
+        return ""
+    return symbol.replace("USDT","").upper().strip()
+
+def dynamic_tp_threshold(symbol: str):
+    """
+    Vol-based TP threshold:
+    - Uses BTC-relative series from agent's lag history: entry['rel'][TOKEN]
+    - Computes stdev over last N points within lookback seconds
+    - TP = clamp(K * stdev, TP_MIN, TP_MAX)
+    - Falls back to TP_PCT if anything is missing
+    """
+    mode = (os.getenv("KC3_TP_MODE","") or "").strip().lower()
+    if mode != "vol":
+        return TP_PCT, "fixed", None
+
+    tok = _extract_token(symbol)
+    if not tok:
+        return TP_PCT, "fixed", None
+
+    lookback_sec = float(os.getenv("KC3_TP_VOL_LOOKBACK_SEC","21600") or "21600")
+    k = float(os.getenv("KC3_TP_K","1.8") or "1.8")
+    tp_min = float(os.getenv("KC3_TP_MIN","0.003") or "0.003")
+    tp_max = float(os.getenv("KC3_TP_MAX","0.012") or "0.012")
+
+    hist = _read_lag_history()
+    if len(hist) < 5:
+        return TP_PCT, "fixed", None
+
+    # we don't rely on perfect timestamps; we just take the most recent window by count
+    # approximate 15s agent loop -> points = lookback_sec / 15
+    pts = max(20, int(lookback_sec / 15.0))
+    window = hist[-pts:]
+
+    vals = []
+    for entry in window:
+        rel = entry.get("rel") if isinstance(entry, dict) else None
+        if not isinstance(rel, dict):
+            continue
+        v = rel.get(tok)
+        if v is None:
+            continue
+        try:
+            vals.append(float(v))
+        except Exception:
+            pass
+
+    if len(vals) < 10:
+        return TP_PCT, "fixed", None
+
+    mu = sum(vals) / len(vals)
+    var = sum((x - mu) ** 2 for x in vals) / len(vals)
+    vol = math.sqrt(var)
+
+    tp = _clamp(k * vol, tp_min, tp_max)
+    return tp, "vol", vol
 
 ROTATE_MIN_ROI = float(os.getenv("KC3_ROTATE_MIN_ROI", "0.0"))        # e.g. 0.002 => +0.2%
 ALLOW_OPEN_ON_HOLD = int(os.getenv("KC3_ALLOW_OPEN_ON_HOLD", "1"))     # 0 = do not open from HOLD when flat
@@ -48,76 +125,6 @@ def read_desired():
         return json.loads(DESIRED.read_text())
     except Exception:
         return None
-
-# --- DYNAMIC_TP_HELPERS_FINAL ---
-import os, json, math
-from pathlib import Path as _Path
-
-def _clamp(x, lo, hi):
-    return max(lo, min(hi, x))
-
-def _tok(symbol: str) -> str:
-    if not symbol or not isinstance(symbol, str):
-        return ""
-    return symbol.replace("USDT", "").upper().strip()
-
-def _read_lag_history():
-    try:
-        fp = _Path(__file__).resolve().parent / "data" / "kc3_lag_state.json"
-        if not fp.exists():
-            return []
-        d = json.loads(fp.read_text(encoding="utf-8"))
-        h = d.get("history") or []
-        return h if isinstance(h, list) else []
-    except Exception:
-        return []
-
-def dynamic_tp_threshold(symbol: str, default_tp: float):
-    mode = (os.getenv("KC3_TP_MODE", "") or "").strip().lower()
-    if mode != "vol":
-        return default_tp, "fixed", None
-
-    tok = _tok(symbol)
-    if not tok:
-        return default_tp, "fixed", None
-
-    lookback_sec = float(os.getenv("KC3_TP_VOL_LOOKBACK_SEC", "21600") or "21600")
-    k      = float(os.getenv("KC3_TP_K", "1.8") or "1.8")
-    tp_min = float(os.getenv("KC3_TP_MIN", "0.003") or "0.003")
-    tp_max = float(os.getenv("KC3_TP_MAX", "0.012") or "0.012")
-
-    hist = _read_lag_history()
-    if len(hist) < 10:
-        return default_tp, "fixed", None
-
-    pts = max(20, int(lookback_sec / 15.0))  # agent loop ~15s
-    window = hist[-pts:]
-
-    vals = []
-    for entry in window:
-        if not isinstance(entry, dict):
-            continue
-        rel = entry.get("rel")
-        if not isinstance(rel, dict):
-            continue
-        v = rel.get(tok)
-        if v is None:
-            continue
-        try:
-            vals.append(float(v))
-        except Exception:
-            pass
-
-    if len(vals) < 10:
-        return default_tp, "fixed", None
-
-    mu = sum(vals) / len(vals)
-    var = sum((x - mu) ** 2 for x in vals) / len(vals)
-    vol = math.sqrt(var)
-
-    tp = _clamp(k * vol, tp_min, tp_max)
-    return tp, "vol", vol
-
 
 def current_roi(symbol):
     pos = base.get_position(symbol)
@@ -171,19 +178,6 @@ def close_other_positions(keep_symbol, desired):
             pass
     return closed
 
-# --- KC3_MARGIN_COOLDOWN ---
-def _kc3_is_margin_insufficient_msg(msg: str) -> bool:
-    if not msg:
-        return False
-    return ('"code":-2019' in msg) or ("'code': -2019" in msg) or ('Margin is insufficient' in msg)
-
-def _kc3_now_tag() -> str:
-    # Prefer existing utc() helper if present
-    try:
-        return utc()
-    except Exception:
-        return 'NOW'
-
 def main():
     last_beat = 0
     last_reconcile = 0
@@ -209,8 +203,9 @@ def main():
                     roi = current_roi(sym)
                     if roi is not None:
                         state["last_roi"] = roi
-                        tp_thr, tp_mode, tp_vol = dynamic_tp_threshold(sym, TP_PCT)
-                        tp = tp_thr
+                          tp_thr, tp_mode, tp_vol = dynamic_tp_threshold(sym)
+                          tp = tp_thr
+                          # (tp used below; tp_thr may be dynamic)
 
                         try:
 
@@ -233,7 +228,7 @@ def main():
                                 "cooldown": "tp",
                                 "cooldown_signal_id": state.get("open_signal_id"),
                             })
-                            print(f"[{utc()}] TP hit {sym} roi={roi:.4f} tp_thr={tp_thr:.4f} mode={tp_mode} vol={(tp_vol if tp_vol is not None else 'NA')}", flush=True)
+                            print(f"[{utc()}] TP hit {sym} roi={roi:.4f} tp_thr={tp_thr:.4f} mode={tp_mode} vol={tp_vol if tp_vol is not None else 'NA'}", flush=True)
                             save_state(state)
                         elif SL_PCT > 0 and (roi <= -SL_PCT):
                             base.close_position(sym)
@@ -263,16 +258,6 @@ def main():
                                 attempts.append({"symbol": sym, "ok": bool(ok), "action": "close"})
                                 closed_any = closed_any or bool(ok)
                         except Exception as e:
-                            msg = str(e)
-                            if _kc3_is_margin_insufficient_msg(msg):
-                                cd = float(os.getenv('KC3_MARGIN_COOLDOWN_SEC','120') or '120')
-                                state['cooldown'] = 'margin'
-                                state['cooldown_signal_id'] = state.get('open_signal_id')
-                                state['cooldown_until'] = time.time() + cd
-                                save_state(state)
-                                print(f"[{_kc3_now_tag()}] KC3 MARGIN_INSUFFICIENT (-2019) -> cooldown {int(cd)}s", flush=True)
-                                time.sleep(1)
-                                continue
                             attempts.append({"symbol": sym, "action": "exception", "err": repr(e)})
 
                     # clear local tracking if we are flattening

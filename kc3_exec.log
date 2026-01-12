@@ -1,11 +1,123 @@
-nohup: ignoring input
-[2026-01-10T23:27:18.305060Z] ROBUST wrapper started (TP+SL)
-[2026-01-10T23:27:34.199347Z] KC3 CLOSE LONG BNBUSDT qty=0.2 mark~907.243 LIVE=True
-[2026-01-10T23:27:34.489345Z] KC3 FORCE CLOSE BNBUSDT (single-position rule)
-[2026-01-10T23:27:38.183873Z] KC3 OPEN SHORT TONUSDT (hmi=? hmi_delta=?) margin~20.4351 BNFCR notional~183.916 qty~105.6 mark~1.74038 LIVE=True (src=robust)
-[2026-01-11T00:05:53.657925Z] KC3 CLOSE SHORT TONUSDT qty=105.6 mark~1.73619 LIVE=True
-[2026-01-11T00:05:53.977150Z] KC3 FORCE CLOSE TONUSDT (single-position rule)
-[2026-01-11T00:05:58.105119Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~20.6937 BNFCR notional~186.243 qty~103.9 mark~1.79156 LIVE=True (src=robust)
-[2026-01-11T04:50:05.421118Z] KC3 CLOSE SHORT SUIUSDT qty=103.9 mark~1.8095 LIVE=True
-[2026-01-11T04:50:05.708364Z] SL hit SUIUSDT roi=-0.0100
-[2026-01-11T06:31:25.405573Z] KC3 OPEN SHORT BNBUSDT (hmi=? hmi_delta=?) margin~18.678 BNFCR notional~168.102 qty~0.18 mark~912.8 LIVE=True (src=robust)
+[2026-01-12T05:19:08.086142Z] ROBUST wrapper started (TP+SL)
+[2026-01-12T05:23:17.809803Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.2522 BNFCR notional~110.27 qty~59.9 mark~1.84 LIVE=True (src=robust)
+[2026-01-12T05:26:26.449085Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.6 mark~1.839 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:26:38.877600Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.7 mark~1.83816 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:26:51.115569Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.7 mark~1.8377 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:27:03.282497Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.6 mark~1.8388 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:27:15.558307Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.6 mark~1.8398 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:27:27.697901Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.6 mark~1.83979 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:27:39.966231Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.6 mark~1.83991 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:27:52.342442Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.6 mark~1.8403 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:28:04.518992Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.6 mark~1.8405 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:28:16.717726Z] KC3 OPEN SHORT SUIUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~59.6 mark~1.8407 LIVE=True (src=robust)
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 341, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 292, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 258, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 129, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-12T05:31:23.096725Z] KC3 OPEN LONG TONUSDT (hmi=? hmi_delta=?) margin~12.1959 BNFCR notional~109.763 qty~62.1 mark~1.7665 LIVE=True (src=robust)

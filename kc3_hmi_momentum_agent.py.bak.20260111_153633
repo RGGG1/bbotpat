@@ -8,7 +8,7 @@ DESIRED_OUT = Path("/root/bbotpat_live/kc3_desired_position.json")
 STATE_PATH  = Path("/root/bbotpat_live/data/kc3_lag_state.json")
 STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-ALT_LIST = ['UNI', 'SOL', 'ETH', 'BNB', 'DOGE', 'TON', 'SUI', 'XRP', 'TRX', 'ADA', 'LINK', 'XMR', 'XLM', 'ZEC', 'LTC', 'AVAX', 'HYPE', 'WLFI']
+ALT_LIST = ['UNI', 'SOL', 'ETH', 'BNB', 'DOGE', 'TON', 'SUI', 'XRP', 'TRX', 'ADA', 'LINK', 'XMR', 'XLM', 'ZEC', 'LTC', 'AVAX', 'HYPE', 'SHIB', 'WLFI']
 USD_NOTIONAL = float(os.getenv("KC3_USD_NOTIONAL", "25"))
 
 LOOKBACK_SEC = float(os.getenv("KC3_LAG_LOOKBACK_SEC", "900"))   # 15m default

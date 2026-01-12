@@ -2,7 +2,7 @@
   "side": "SHORT",
   "symbol": "SOLUSDT",
   "notional_usd": 25.0,
-  "timestamp": "2026-01-11T14:33:58.869601Z",
+  "timestamp": "2026-01-12T06:12:29.127335Z",
   "src": "lag_selector",
   "reason": "hold",
   "alt_list": [
@@ -12,18 +12,29 @@
     "BNB",
     "DOGE",
     "TON",
-    "SUI"
+    "SUI",
+    "XRP",
+    "TRX",
+    "ADA",
+    "LINK",
+    "XMR",
+    "XLM",
+    "ZEC",
+    "LTC",
+    "AVAX",
+    "HYPE",
+    "WLFI"
   ],
-  "prices_ts": "2026-01-11T14:33:58.765998Z",
-  "z_score": 1.7729542377863017,
-  "signal_id": "2026-01-11T13:58:06.618119Z|SHORT|SOLUSDT|z=1.7812|pts=2026-01-11T13:58:05.897707Z",
+  "prices_ts": "2026-01-12T06:12:28.848080Z",
+  "z_score": 1.9572481139621711,
+  "signal_id": "2026-01-12T06:11:58.947639Z|SHORT|SOLUSDT|z=1.9833|pts=2026-01-12T06:11:58.744649Z",
   "candidates": [
     "SOLUSDT",
+    "SUIUSDT",
+    "ETHUSDT",
+    "TONUSDT",
     "BNBUSDT",
     "UNIUSDT",
-    "TONUSDT",
-    "ETHUSDT",
-    "SUIUSDT",
     "DOGEUSDT"
   ]
 }

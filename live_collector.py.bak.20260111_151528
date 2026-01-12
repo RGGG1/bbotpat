@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+import os, json, time, urllib.request, urllib.parse
+from datetime import datetime, timezone
+from pathlib import Path
+
+WEBROOT = Path("/var/www/bbotpat_live")
+OUT = WEBROOT / "prices_latest.json"
+OUT.parent.mkdir(parents=True, exist_ok=True)
+
+TOKEN_SYMBOL_OVERRIDE = {
+    # Binance quotes SHIB as 1000SHIBUSDT; we convert back to per-1 SHIB
+    'SHIB': ('1000SHIBUSDT', 1000.0),
+}
+
+TOKENS = ['BTC', 'UNI', 'SOL', 'ETH', 'BNB', 'DOGE', 'TON', 'SUI', 'XRP', 'TRX', 'ADA', 'LINK', 'XMR', 'XLM', 'ZEC', 'LTC', 'AVAX', 'HYPE', 'SHIB', 'WLFI']
+# Poll cadence (seconds)
+LOOP_SEC = float(os.getenv("LIVE_COLLECTOR_SEC", "1.0"))
+
+SPOT_PRICE = "https://api.binance.com/api/v3/ticker/price"
+FUT_PRICE  = "https://fapi.binance.com/fapi/v1/ticker/price"
+
+def utc():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+
+def http_get_json(url, timeout=10):
+    req = urllib.request.Request(url, headers={"User-Agent":"bbotpat-live-collector/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+def fetch_prices(symbols, base_url):
+    # Binance accepts symbols as a JSON array string in query param "symbols"
+    sym_list = [s.upper() for s in symbols]
+    qs = urllib.parse.urlencode({"symbols": json.dumps(sym_list)})
+    url = base_url + "?" + qs
+    try:
+        data = http_get_json(url)
+    except Exception:
+        return {}
+    out = {}
+    if isinstance(data, list):
+        for row in data:
+            try:
+                sym = str(row.get("symbol","")).upper()
+                px  = float(row.get("price"))
+                out[sym] = px if px > 0 else None
+            except Exception:
+                continue
+    return out
+
+def write_json_atomic(path: Path, obj: dict):
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(obj, indent=2) + "\n")
+    tmp.replace(path)
+
+def main():
+    syms = [ (TOKEN_SYMBOL_OVERRIDE.get(t, (f"{t}USDT", 1.0))[0]) for t in TOKENS ]  # symbol list for Binance
+    while True:
+        ts = utc()
+
+        # Spot first
+        spot = fetch_prices(syms, SPOT_PRICE)
+
+        # Futures fallback for any missing
+        missing = [s for s in syms if spot.get(s) in (None, "None") or s not in spot]
+        fut = fetch_prices(missing, FUT_PRICE) if missing else {}
+
+        # Merge
+        merged = dict(spot)
+        merged.update(fut)
+
+        rows = []
+        for t in TOKENS:
+            sym, scale = TOKEN_SYMBOL_OVERRIDE.get(t, (f"{t}USDT", 1.0))
+            px = merged.get(sym)
+            try:
+                px = float(px) / float(scale) if px is not None else None
+            except Exception:
+                px = None
+rows.append({
+                "token": t,
+                "price": px,
+                "mc": None,
+                "change_24h": None,
+                "btc_dom": None,
+                "range": None,
+                "action": None,
+                "pot_roi_frac": None
+            })
+
+        payload = {
+            "timestamp": ts,
+            "rows": rows
+        }
+        write_json_atomic(OUT, payload)
+
+        time.sleep(LOOP_SEC)
+
+if __name__ == "__main__":
+    main()

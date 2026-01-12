@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+import os, json, time
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.request import urlopen, Request
+
+ROOT = Path(__file__).resolve().parent
+OUT  = Path("/var/www/bbotpat_live/prices_latest.json")
+OUT.parent.mkdir(parents=True, exist_ok=True)
+
+def utc():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+# ---- FORCE LOAD .env (so nohup/systemd always gets vars) ----
+envp = ROOT / ".env"
+if envp.exists():
+    for line in envp.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if (not line) or line.startswith("#") or ("=" not in line):
+            continue
+        k, v = line.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+            v = v[1:-1]
+        os.environ[k] = v
+
+ALT_ENV = (os.getenv("KC3_ALT_LIST") or "").replace(",", " ")
+ALT_ENV = " ".join(ALT_ENV.split())
+if not ALT_ENV:
+    raise SystemExit("KC3_ALT_LIST NOT SET (collector)")
+
+TOKENS = ["BTC"] + [t.upper() for t in ALT_ENV.split()]
+print("COLLECTOR TOKENS:", TOKENS, flush=True)
+
+SPOT_ALL = "https://api.binance.com/api/v3/ticker/price"
+FUT_ALL  = "https://fapi.binance.com/fapi/v1/ticker/price"
+POLL_SEC = float(os.getenv("LIVE_COLLECTOR_POLL_SEC", "1.0") or "1.0")
+
+def fetch_all(url: str):
+    req = Request(url, headers={"User-Agent": "kc3-collector/1.0"})
+    with urlopen(req, timeout=10) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+def build_map(rows):
+    mp = {}
+    if isinstance(rows, list):
+        for it in rows:
+            if not isinstance(it, dict):
+                continue
+            s = it.get("symbol")
+            p = it.get("price")
+            if isinstance(s, str) and p is not None:
+                mp[s] = p
+    return mp
+
+while True:
+    try:
+        spot = build_map(fetch_all(SPOT_ALL))
+    except Exception as e:
+        print("COLLECTOR spot fetch error:", repr(e), flush=True)
+        spot = {}
+
+    fut = {}
+    if not spot:
+        # if spot fails, try futures as backup
+        try:
+            fut = build_map(fetch_all(FUT_ALL))
+        except Exception as e:
+            print("COLLECTOR futures fetch error:", repr(e), flush=True)
+            fut = {}
+    else:
+        # still fetch futures map occasionally for missing symbols
+        try:
+            fut = build_map(fetch_all(FUT_ALL))
+        except Exception:
+            fut = {}
+
+    out_rows = []
+    for tok in TOKENS:
+        sym = f"{tok}USDT"
+        px = spot.get(sym)
+        if px is None:
+            px = fut.get(sym)
+        out_rows.append({"token": tok, "price": (float(px) if px is not None else None)})
+
+    doc = {"timestamp": utc(), "rows": out_rows}
+    OUT.write_text(json.dumps(doc, separators=(",", ":")), encoding="utf-8")
+    time.sleep(POLL_SEC)

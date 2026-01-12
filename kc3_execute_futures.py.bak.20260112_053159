@@ -35,20 +35,8 @@ Also tolerates partial/empty JSON reads (non-atomic writer).
 """
 
 import os, time, json, hmac, hashlib, urllib.parse
-import os
 from datetime import datetime, timezone
 import requests
-
-# --- KC3_LEVERAGE_CLAMP ---
-def _kc3_clamp_lev(v, lo=5, hi=15):
-    try:
-        x = int(float(v))
-    except Exception:
-        x = 10
-    if x < lo: x = lo
-    if x > hi: x = hi
-    return x
-
 
 VERSION = "2025-12-30-debounce-minhold-v1"
 
@@ -231,8 +219,6 @@ def set_leverage(symbol: str, lev: int):
     if lev <= 0:
         raise RuntimeError(f"Leverage {lev} is not valid")
     lev = _kc3_clamp_lev(lev)
-    lev = _kc3_clamp_lev(lev, int(os.getenv('KC3_LEV_MIN','5') or '5'), int(os.getenv('KC3_LEV_MAX','15') or '15'))
-    print(f"[KC3] LEVERAGE_SET symbol={{symbol}} lev={{lev}}", flush=True)
     private_req("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": lev})
     print(f"[KC3] LEVERAGE_SET {symbol} lev={lev}", flush=True)
     log(f"Leverage set OK for {symbol} => {lev}x")

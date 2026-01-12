@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
 """
-KC3 Futures Executor (USDⓈ-M) - Debounced Sequential Execut
-# --- KC3 dynamic leverage: choose -> set -> verify -> log ---
-
-req_lev = kc3_choose_leverage(z_score=z_score)
-
-try:
-
-    set_leverage(symbol, req_lev)
-
-except Exception as e:
-
-    print("[KC3] WARN set_leverage failed symbol=%s lev=%s err=%s" % (symbol, req_lev, e), flush=True)
-
-bn_lev = get_symbol_leverage(symbol)
-
-print("[KC3] LEVERAGE symbol=%s mode=%s z=%s requested=%s binance=%s" % (symbol, os.getenv('KC3_LEV_MODE','fixed'), z_score, req_lev, bn_lev), flush=True)
-
-or
+KC3 Futures Executor (USDⓈ-M) - Debounced Sequential Executor
 
 Reads desired position from:
   1) /var/www/bbotpat_live/kc3_exec_desired.json (if exists)  [manual override]
@@ -35,20 +18,8 @@ Also tolerates partial/empty JSON reads (non-atomic writer).
 """
 
 import os, time, json, hmac, hashlib, urllib.parse
-import os
 from datetime import datetime, timezone
 import requests
-
-# --- KC3_LEVERAGE_CLAMP ---
-def _kc3_clamp_lev(v, lo=5, hi=15):
-    try:
-        x = int(float(v))
-    except Exception:
-        x = 10
-    if x < lo: x = lo
-    if x > hi: x = hi
-    return x
-
 
 VERSION = "2025-12-30-debounce-minhold-v1"
 
@@ -230,11 +201,7 @@ def floor_step(qty: float, step: float, qtyPrec: int) -> float:
 def set_leverage(symbol: str, lev: int):
     if lev <= 0:
         raise RuntimeError(f"Leverage {lev} is not valid")
-    lev = _kc3_clamp_lev(lev)
-    lev = _kc3_clamp_lev(lev, int(os.getenv('KC3_LEV_MIN','5') or '5'), int(os.getenv('KC3_LEV_MAX','15') or '15'))
-    print(f"[KC3] LEVERAGE_SET symbol={{symbol}} lev={{lev}}", flush=True)
     private_req("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": lev})
-    print(f"[KC3] LEVERAGE_SET {symbol} lev={lev}", flush=True)
     log(f"Leverage set OK for {symbol} => {lev}x")
 
 def avail_balance() -> float:
@@ -283,7 +250,7 @@ def close_position(symbol: str):
     place_market(symbol, side, qty, reduce_only=True)
     return True
 
-def open_position(symbol: str, desired_side: str, hmi=None, hmi_delta=None, src=None, z_score=None):
+def open_position(symbol: str, desired_side: str, hmi=None, hmi_delta=None, src=None):
     bal = avail_balance()
     if bal < MIN_BALANCE:
         log(f"BALANCE TOO LOW: {QUOTE_ASSET}={bal:.6g} < {MIN_BALANCE} (max of avail/wallet/balance/total). Stopping executor.")
@@ -488,54 +455,3 @@ def handle_signal(sig: dict):
 
 if __name__ == "__main__":
     main()
-
-
-def _kc3_clamp(x, lo, hi):
-    return lo if x < lo else hi if x > hi else x
-
-
-def kc3_choose_leverage(z_score=None):
-    """
-    Deterministic leverage:
-      - KC3_LEV_MODE=fixed  -> KC3_LEVERAGE
-      - KC3_LEV_MODE=dynamic -> ramp with abs(z_score)
-    """
-    mode = (os.getenv("KC3_LEV_MODE", "fixed") or "fixed").strip().lower()
-    lev_fixed = int(float(os.getenv("KC3_LEVERAGE", "10") or 10))
-    if mode != "dynamic":
-        return lev_fixed
-
-    lev_min  = int(float(os.getenv("KC3_LEV_MIN", "5") or 5))
-    lev_base = int(float(os.getenv("KC3_LEV_BASE", str(lev_fixed)) or lev_fixed))
-    lev_max  = int(float(os.getenv("KC3_LEV_MAX", "15") or 15))
-
-    z_enter = float(os.getenv("KC3_LAG_Z_ENTER", "1.6") or 1.6)
-    z_full  = float(os.getenv("KC3_LEV_Z_FULL", "2.6") or 2.6)
-    if z_full <= z_enter:
-        z_full = z_enter + 1.0
-
-    try:
-        z = abs(float(z_score))
-    except Exception:
-        z = 0.0
-
-    t = (z - z_enter) / (z_full - z_enter)
-    t = _kc3_clamp(t, 0.0, 1.0)
-
-    lev = int(round(lev_base + t * (lev_max - lev_base)))
-    lev = int(_kc3_clamp(lev, lev_min, lev_max))
-    return lev
-
-
-def get_symbol_leverage(symbol: str):
-    try:
-        data = private_req("GET", "/fapi/v2/positionRisk", {})
-        for r in data or []:
-            if (r.get("symbol") or "").upper() == symbol.upper():
-                try:
-                    return int(r.get("leverage"))
-                except Exception:
-                    return None
-    except Exception:
-        return None
-    return None
