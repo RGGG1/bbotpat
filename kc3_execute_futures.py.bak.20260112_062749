@@ -9,27 +9,6 @@ try:
 
     set_leverage(symbol, req_lev)
 
-
-    # --- KC3_LEVERAGE_VERIFY_ON_OPEN ---
-
-    try:
-
-        lo = int(float(os.getenv('KC3_LEV_MIN','5') or 5))
-
-        hi = int(float(os.getenv('KC3_LEV_MAX','15') or 15))
-
-    except Exception:
-
-        lo, hi = 5, 15
-
-    bn_lev = _kc3_get_current_leverage(symbol)
-
-    print("[KC3] LEVERAGE_VERIFY symbol=%s requested=%s binance=%s" % (symbol, req_lev, bn_lev), flush=True)
-
-    if bn_lev is not None and (bn_lev < lo or bn_lev > hi):
-
-        raise RuntimeError("Binance leverage verify failed for %s: %s not in [%s,%s]" % (symbol, bn_lev, lo, hi))
-
 except Exception as e:
 
     print("[KC3] WARN set_leverage failed symbol=%s lev=%s err=%s" % (symbol, req_lev, e), flush=True)
@@ -247,21 +226,6 @@ def floor_step(qty: float, step: float, qtyPrec: int) -> float:
     n = int(qty / step)
     q = n * step
     return float(f"{q:.{qtyPrec}f}") if qtyPrec >= 0 else float(q)
-
-
-# --- KC3_GET_CURRENT_LEVERAGE ---
-def _kc3_get_current_leverage(symbol: str):
-    try:
-        d = private_req('GET', '/fapi/v2/positionRisk', {})
-        for x in d:
-            if x.get('symbol') == symbol:
-                try:
-                    return int(float(x.get('leverage', 0) or 0))
-                except Exception:
-                    return None
-    except Exception:
-        return None
-    return None
 
 def set_leverage(symbol: str, lev: int):
     if lev <= 0:
