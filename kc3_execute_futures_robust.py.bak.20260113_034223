@@ -1,0 +1,397 @@
+#!/usr/bin/env python3
+import os, time, json, traceback
+import time
+import os
+from pathlib import Path
+from datetime import datetime, timezone
+
+import kc3_execute_futures as base
+
+STATUS  = Path("/var/www/bbotpat_live/kc3_futures_status.json")
+DESIRED = Path("/root/bbotpat_live/kc3_desired_position.json")
+STATE   = Path("/root/bbotpat_live/data/kc3_exec_state.json")
+STATE.parent.mkdir(parents=True, exist_ok=True)
+
+RECONCILE_SEC = float(os.getenv("KC3_RECONCILE_SEC", "15"))
+HEARTBEAT_SEC = float(os.getenv("KC3_HEARTBEAT_SEC", "60"))
+
+TP_PCT = float(os.getenv("KC3_TP_PCT", "0.0"))
+SL_PCT = float(os.getenv("KC3_SL_PCT", "0.0"))
+
+ROTATE_MIN_ROI = float(os.getenv("KC3_ROTATE_MIN_ROI", "0.0"))        # e.g. 0.002 => +0.2%
+ALLOW_OPEN_ON_HOLD = int(os.getenv("KC3_ALLOW_OPEN_ON_HOLD", "1"))     # 0 = do not open from HOLD when flat
+MAX_CAND_TRIES = int(os.getenv("KC3_MAX_CAND_TRIES", "7"))             # for FLAT close scanning
+
+def utc():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+
+def write_status(o):
+    tmp = STATUS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(o, indent=2) + "\n")
+    tmp.replace(STATUS)
+
+def load_state():
+    if STATE.exists():
+        try:
+            return json.loads(STATE.read_text())
+        except Exception:
+            pass
+    return {}
+
+def save_state(s):
+    STATE.write_text(json.dumps(s, indent=2) + "\n")
+
+def read_desired():
+    if not DESIRED.exists():
+        return None
+    try:
+        return json.loads(DESIRED.read_text())
+    except Exception:
+        return None
+
+# --- DYNAMIC_TP_HELPERS_FINAL ---
+import os, json, math
+from pathlib import Path as _Path
+
+def _clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
+def _tok(symbol: str) -> str:
+    if not symbol or not isinstance(symbol, str):
+        return ""
+    return symbol.replace("USDT", "").upper().strip()
+
+def _read_lag_history():
+    try:
+        fp = _Path(__file__).resolve().parent / "data" / "kc3_lag_state.json"
+        if not fp.exists():
+            return []
+        d = json.loads(fp.read_text(encoding="utf-8"))
+        h = d.get("history") or []
+        return h if isinstance(h, list) else []
+    except Exception:
+        return []
+
+def dynamic_tp_threshold(symbol: str, default_tp: float):
+    mode = (os.getenv("KC3_TP_MODE", "") or "").strip().lower()
+    if mode != "vol":
+        return default_tp, "fixed", None
+
+    tok = _tok(symbol)
+    if not tok:
+        return default_tp, "fixed", None
+
+    lookback_sec = float(os.getenv("KC3_TP_VOL_LOOKBACK_SEC", "21600") or "21600")
+    k      = float(os.getenv("KC3_TP_K", "1.8") or "1.8")
+    tp_min = float(os.getenv("KC3_TP_MIN", "0.003") or "0.003")
+    tp_max = float(os.getenv("KC3_TP_MAX", "0.012") or "0.012")
+
+    hist = _read_lag_history()
+    if len(hist) < 10:
+        return default_tp, "fixed", None
+
+    pts = max(20, int(lookback_sec / 15.0))  # agent loop ~15s
+    window = hist[-pts:]
+
+    vals = []
+    for entry in window:
+        if not isinstance(entry, dict):
+            continue
+        rel = entry.get("rel")
+        if not isinstance(rel, dict):
+            continue
+        v = rel.get(tok)
+        if v is None:
+            continue
+        try:
+            vals.append(float(v))
+        except Exception:
+            pass
+
+    if len(vals) < 10:
+        return default_tp, "fixed", None
+
+    mu = sum(vals) / len(vals)
+    var = sum((x - mu) ** 2 for x in vals) / len(vals)
+    vol = math.sqrt(var)
+
+    tp = _clamp(k * vol, tp_min, tp_max)
+    return tp, "vol", vol
+
+
+def current_roi(symbol):
+    pos = base.get_position(symbol)
+    if not pos or float(pos.get("amt", 0) or 0) == 0.0:
+        return None
+    entry = float(pos["entry"])
+    mark  = float(base.get_mark(symbol))
+    side  = "LONG" if float(pos["amt"]) > 0 else "SHORT"
+    if entry <= 0:
+        return None
+    if side == "LONG":
+        return (mark - entry) / entry
+    else:
+        return (entry - mark) / entry
+
+def symbols_to_scan(desired):
+    # Enforce "single position" over tracked universe without needing get_all_positions()
+    syms = []
+    if isinstance(desired, dict):
+        s = desired.get("symbol")
+        if isinstance(s, str) and s.endswith("USDT"):
+            syms.append(s)
+        for x in (desired.get("candidates") or []):
+            if isinstance(x, str) and x.endswith("USDT"):
+                syms.append(x)
+        for tok in (desired.get("alt_list") or []):
+            if isinstance(tok, str) and tok.strip():
+                syms.append(tok.strip().upper() + "USDT")
+    # de-dupe preserve order
+    seen = set()
+    out = []
+    for s in syms:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+def close_other_positions(keep_symbol, desired):
+    closed = []
+    for sym in symbols_to_scan(desired):
+        if sym == keep_symbol:
+            continue
+        try:
+            pos = base.get_position(sym)
+            if pos and float(pos.get("amt", 0) or 0) != 0.0:
+                base.close_position(sym)
+                closed.append(sym)
+                print(f"[{utc()}] KC3 FORCE CLOSE {sym} (single-position rule)", flush=True)
+                time.sleep(1)
+        except Exception:
+            pass
+    return closed
+
+# --- KC3_MARGIN_COOLDOWN ---
+def _kc3_is_margin_insufficient_msg(msg: str) -> bool:
+    if not msg:
+        return False
+    return ('"code":-2019' in msg) or ("'code': -2019" in msg) or ('Margin is insufficient' in msg)
+
+def _kc3_now_tag() -> str:
+    # Prefer existing utc() helper if present
+    try:
+        return utc()
+    except Exception:
+        return 'NOW'
+
+def main():
+    last_beat = 0
+    last_reconcile = 0
+    last_tp_check = 0
+    state = load_state()
+
+    print(f"[{utc()}] ROBUST wrapper started (TP+SL)", flush=True)
+
+    while True:
+        try:
+            now = time.time()
+
+            # heartbeat
+            if now - last_beat >= HEARTBEAT_SEC:
+                write_status({"ts": utc(), "alive": True, "note": "heartbeat"})
+                last_beat = now
+
+            # TP/SL loop (every ~1s)
+            if now - last_tp_check >= 1:
+                sym = state.get("symbol")
+                side = state.get("side")
+                if sym and side:
+                    roi = current_roi(sym)
+                    if roi is not None:
+                        state["last_roi"] = roi
+                        tp_thr, tp_mode, tp_vol = dynamic_tp_threshold(sym, TP_PCT)
+                        tp = tp_thr
+
+                        try:
+
+                            # Prefer per-trade TP if provided by agent
+
+                            d = read_desired() or {}
+
+                            if isinstance(d, dict) and d.get('symbol') == sym and d.get('tp_roi') is not None:
+
+                                tp = float(d.get('tp_roi'))
+
+                        except Exception:
+
+                            pass
+
+                        if tp > 0 and (roi >= tp):
+                            base.close_position(sym)
+                            state.update({
+                                "symbol": None, "side": None,
+                                "cooldown": "tp",
+                                "cooldown_signal_id": state.get("open_signal_id"),
+                            })
+                            # --- KC3_TP_CHECK_LOG ---
+                            try:
+                                print(f"[{utc()}] TP_CHECK {sym} roi={roi:.4f} tp_thr={tp_thr:.4f} mode={tp_mode} vol={(tp_vol if tp_vol is not None else 'NA')}", flush=True)
+                            except Exception:
+                                pass
+                            print(f"[{utc()}] TP hit {sym} roi={roi:.4f} tp_thr={tp_thr:.4f} mode={tp_mode} vol={(tp_vol if tp_vol is not None else 'NA')}", flush=True)
+                            save_state(state)
+                        elif SL_PCT > 0 and (roi <= -SL_PCT):
+                            base.close_position(sym)
+                            state.update({
+                                "symbol": None, "side": None,
+                                "cooldown": "sl",
+                                "cooldown_signal_id": state.get("open_signal_id"),
+                            })
+                            print(f"[{utc()}] SL hit {sym} roi={roi:.4f}", flush=True)
+                            save_state(state)
+                last_tp_check = now
+
+            # reconcile desired
+            if now - last_reconcile >= RECONCILE_SEC:
+                desired = read_desired()
+
+                # --- FLAT handling: close any tracked open positions and continue ---
+                if isinstance(desired, dict) and str(desired.get("side","")).upper() == "FLAT":
+                    attempts = []
+                    closed_any = False
+                    syms = symbols_to_scan(desired)[:MAX_CAND_TRIES]
+                    for sym in syms:
+                        try:
+                            pos = base.get_position(sym)
+                            if pos and float(pos.get("amt", 0) or 0) != 0.0:
+                                ok = base.close_position(sym)
+                                attempts.append({"symbol": sym, "ok": bool(ok), "action": "close"})
+                                closed_any = closed_any or bool(ok)
+                        except Exception as e:
+                            msg = str(e)
+                            if _kc3_is_margin_insufficient_msg(msg):
+                                cd = float(os.getenv('KC3_MARGIN_COOLDOWN_SEC','120') or '120')
+                                state['cooldown'] = 'margin'
+                                state['cooldown_signal_id'] = state.get('open_signal_id')
+                                state['cooldown_until'] = time.time() + cd
+                                save_state(state)
+                                print(f"[{_kc3_now_tag()}] KC3 MARGIN_INSUFFICIENT (-2019) -> cooldown {int(cd)}s", flush=True)
+                                time.sleep(1)
+                                continue
+                            attempts.append({"symbol": sym, "action": "exception", "err": repr(e)})
+
+                    # clear local tracking if we are flattening
+                    state.update({"symbol": None, "side": None})
+                    save_state(state)
+
+                    write_status({
+                        "ts": utc(),
+                        "alive": True,
+                        "note": "flat",
+                        "desired": desired,
+                        "result": {"closed_any": closed_any, "attempts": attempts},
+                    })
+                    last_reconcile = now
+                    time.sleep(RECONCILE_SEC)
+                    continue
+
+                if not isinstance(desired, dict):
+                    last_reconcile = now
+                    time.sleep(1)
+                    continue
+
+                d_side = str(desired.get("side","")).upper()
+                d_sym  = desired.get("symbol")
+                d_reason = str(desired.get("reason",""))
+                d_signal_id = desired.get("signal_id")
+
+                # If we're flat and the agent is saying HOLD, optionally do NOT open
+                if (not state.get("symbol")) and d_reason == "hold" and ALLOW_OPEN_ON_HOLD == 0:
+                    write_status({"ts": utc(), "alive": True, "note": "flat_wait_fresh_signal", "desired": desired})
+                    last_reconcile = now
+                    time.sleep(1)
+                    continue
+
+                # Fresh-signal gate: if we exited on TP/SL, do not re-enter on same signal_id
+                if (not state.get("symbol")) and d_side in ("LONG","SHORT") and d_signal_id:
+                    if state.get("cooldown_signal_id") == d_signal_id:
+                        write_status({"ts": utc(), "alive": True, "note": "flat_wait_fresh_signal", "desired": desired})
+                        last_reconcile = now
+                        time.sleep(1)
+                        continue
+                    # once we see a different signal id, clear cooldown
+                    state["cooldown_signal_id"] = None
+                    state["cooldown"] = None
+
+                # Determine what we currently have in desired symbol
+                if not isinstance(d_sym, str) or not d_sym.endswith("USDT"):
+                    last_reconcile = now
+                    time.sleep(1)
+                    continue
+
+                # Current tracked position (single position model)
+                cur_sym = state.get("symbol")
+                cur_side = state.get("side")
+
+                # If we have a position and agent wants a different symbol/side => rotation candidate
+                if cur_sym and cur_side and (cur_sym != d_sym or cur_side != d_side):
+                    # Gate: do not rotate while underwater; require ROI >= ROTATE_MIN_ROI
+                    roi = current_roi(cur_sym)
+                    if roi is None:
+                        roi = 0.0
+                    if roi < ROTATE_MIN_ROI:
+                        write_status({
+                            "ts": utc(),
+                            "alive": True,
+                            "note": "hold_roi_gate",
+                            "roi": roi,
+                            "rotate_min_roi": ROTATE_MIN_ROI,
+                            "have": {"symbol": cur_sym, "side": cur_side},
+                            "desired": desired,
+                        })
+                        last_reconcile = now
+                        time.sleep(1)
+                        continue
+
+                # Enforce single position over tracked universe:
+                close_other_positions(d_sym, desired)
+
+                # Reconcile desired symbol/side
+                pos = base.get_position(d_sym)
+                have = "FLAT"
+                if pos and float(pos.get("amt",0) or 0) > 0: have = "LONG"
+                if pos and float(pos.get("amt",0) or 0) < 0: have = "SHORT"
+
+                if have == d_side:
+                    state.update({"symbol": d_sym, "side": d_side})
+                else:
+                    if have != "FLAT":
+                        base.close_position(d_sym)
+                        time.sleep(2)
+                    base.open_position(
+                        symbol=d_sym,
+                        desired_side=d_side,
+                          z_score=desired.get('z_score'),
+                        hmi=desired.get("hmi"),
+                        hmi_delta=desired.get("hmi_delta"),
+                        src="robust",
+                    )
+                    state.update({
+                        "symbol": d_sym,
+                        "side": d_side,
+                        "open_signal_id": d_signal_id,
+                    })
+
+                save_state(state)
+                write_status({"ts": utc(), "alive": True, "note": "reconciled", "desired": desired})
+                last_reconcile = now
+
+            time.sleep(0.5)
+
+        except Exception:
+            traceback.print_exc()
+            write_status({"ts": utc(), "alive": True, "note": "error", "err": "see log"})
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()

@@ -56,9 +56,11 @@ Also tolerates partial/empty JSON reads (non-atomic writer).
 """
 
 import os, time, json, hmac, hashlib, urllib.parse
+import time
 import os
 from datetime import datetime, timezone
 import requests
+from urllib.parse import urlencode
 
 # --- KC3_LEVERAGE_CLAMP ---
 def _kc3_clamp_lev(v, lo=5, hi=15):
@@ -74,6 +76,57 @@ def _kc3_clamp_lev(v, lo=5, hi=15):
 VERSION = "2025-12-30-debounce-minhold-v1"
 
 BASE_URL = "https://fapi.binance.com"
+
+# --- KC3_LEVERAGE_RUNTIME_HELPERS ---
+def _kc3_env_int(name: str, default: int) -> int:
+    try:
+        return int(float(os.getenv(name, str(default)) or default))
+    except Exception:
+        return default
+
+def _kc3_env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)) or default)
+    except Exception:
+        return default
+
+def _kc3_get_exchange_leverage(symbol: str):
+    "Returns int leverage from /fapi/v2/positionRisk for symbol, or None."
+    try:
+        d = private_req("GET", "/fapi/v2/positionRisk", {})
+        for x in d:
+            if x.get("symbol") == symbol:
+                return int(float(x.get("leverage", 0) or 0)) or None
+    except Exception:
+        return None
+    return None
+
+def _kc3_requested_leverage(z_score):
+    "Computes requested leverage based on env knobs; returns int."
+    mode = (os.getenv("KC3_LEV_MODE", "fixed") or "fixed").strip().lower()
+    lev_fixed = _kc3_env_int("KC3_LEVERAGE", 10)
+    lev_min   = _kc3_env_int("KC3_LEV_MIN", 5)
+    lev_base  = _kc3_env_int("KC3_LEV_BASE", lev_fixed)
+    lev_max   = _kc3_env_int("KC3_LEV_MAX", 15)
+    z_full    = _kc3_env_float("KC3_LEV_Z_FULL", 2.6)
+
+    if mode != "dynamic":
+        return _kc3_clamp_lev(lev_fixed, lev_min, lev_max)
+
+    try:
+        z = abs(float(z_score))
+    except Exception:
+        z = 0.0
+
+    # ramp from base -> max as |z| increases; at z_full we hit max
+    if z_full <= 0:
+        req = lev_base
+    else:
+        frac = min(1.0, z / z_full)
+        req = int(round(lev_base + frac * (lev_max - lev_base)))
+
+    return _kc3_clamp_lev(req, lev_min, lev_max)
+
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -150,15 +203,73 @@ def sign_params(params: dict) -> dict:
     params["signature"] = sig
     return params
 
+
+# --- KC3_TIME_SYNC ---
+_KC3_TIME_OFFSET_MS = 0
+_KC3_TIME_OFFSET_TS = 0.0
+
+def _kc3_now_ms() -> int:
+    return _kc3_now_ms()
+
+def _kc3_refresh_time_offset_ms(force: bool = False) -> int:
+    global _KC3_TIME_OFFSET_MS, _KC3_TIME_OFFSET_TS
+    # refresh at most every 60s unless forced
+    if (not force) and (_KC3_TIME_OFFSET_TS > 0) and (time.time() - _KC3_TIME_OFFSET_TS < 60):
+        return int(_KC3_TIME_OFFSET_MS)
+    try:
+        d = requests.get(BASE_URL + "/fapi/v1/time", timeout=5).json()
+        server = int(d.get("serverTime"))
+        local = _kc3_now_ms()
+        _KC3_TIME_OFFSET_MS = server - local
+        _KC3_TIME_OFFSET_TS = time.time()
+        return int(_KC3_TIME_OFFSET_MS)
+    except Exception:
+        return int(_KC3_TIME_OFFSET_MS)
+
+def _kc3_signed_timestamp_ms() -> int:
+    off = _kc3_refresh_time_offset_ms(force=False)
+    return _kc3_now_ms() + int(off)
+
+def _kc3_is_timestamp_error(text: str) -> bool:
+    return ('"code":-1021' in text) or ("'code': -1021" in text) or ("outside of the recvWindow" in text)
+
 def private_req(method: str, path: str, params: dict):
+
+    # --- KC3_PRIVATE_REQ_HARDEN ---
+    # Increase recvWindow to reduce -1021 risk; Binance max is typically 60000
+    try:
+        _rw = int(float(os.getenv("KC3_RECV_WINDOW_MS", "60000") or "60000"))
+    except Exception:
+        _rw = 60000
+    if isinstance(params, dict) and "recvWindow" not in params:
+        params["recvWindow"] = _rw
     if not API_KEY or not API_SECRET:
         raise RuntimeError("Missing BINANCE_API_KEY/BINANCE_API_SECRET in environment.")
     params = dict(params)
     params["timestamp"] = int(time.time() * 1000)
+    params["recvWindow"] = 5000
     sign_params(params)
-    r = requests.request(method, BASE_URL + path, params=params,
+    # --- KC3_RETRY_1021 ---
+    for _kc3_try in (1, 2):
+        if _kc3_try == 2:
+            _kc3_refresh_time_offset_ms(force=True)
+            r = requests.request(method, BASE_URL + path, params=params,
                          headers={"X-MBX-APIKEY": API_KEY}, timeout=10)
     if r.status_code >= 400:
+        msg = r.text
+        # --- KC3_1021_RETRY ---
+        if _kc3_is_1021(msg):
+            _kc3_refresh_time_offset()
+            # retry once with fresh time
+            params["timestamp"] = int(time.time() * 1000)
+            params["recvWindow"] = 5000
+            qs = urlencode(params, doseq=True)
+            sig = hmac.new(API_SECRET.encode(), qs.encode(), hashlib.sha256).hexdigest()
+            params["signature"] = sig
+            r2 = requests.request(method, BASE_URL + path, headers=headers, params=params, timeout=10)
+            if r2.status_code < 300:
+                return r2.json()
+            raise RuntimeError(f"{method} {path} failed {r2.status_code}: {r2.text}")
         raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
     return r.json()
 
@@ -266,11 +377,9 @@ def _kc3_get_current_leverage(symbol: str):
 def set_leverage(symbol: str, lev: int):
     if lev <= 0:
         raise RuntimeError(f"Leverage {lev} is not valid")
-    lev = _kc3_clamp_lev(lev)
     lev = _kc3_clamp_lev(lev, int(os.getenv('KC3_LEV_MIN','5') or '5'), int(os.getenv('KC3_LEV_MAX','15') or '15'))
-    print(f"[KC3] LEVERAGE_SET symbol={{symbol}} lev={{lev}}", flush=True)
     private_req("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": lev})
-    print(f"[KC3] LEVERAGE_SET {symbol} lev={lev}", flush=True)
+    log(f"[KC3] LEVERAGE_SET {symbol} lev={lev}")
     log(f"Leverage set OK for {symbol} => {lev}x")
 
 def avail_balance() -> float:
@@ -326,7 +435,21 @@ def open_position(symbol: str, desired_side: str, hmi=None, hmi_delta=None, src=
         raise SystemExit(2)
 
     mark = get_mark(symbol)
-    notional = bal * LEV * MARGIN_FRAC
+
+    # --- KC3_LEVERAGE_DECISION (requested + verified + safe sizing) ---
+    req_lev = _kc3_requested_leverage(z_score)
+    try:
+        set_leverage(symbol, req_lev)
+    except Exception as e:
+        print("[KC3] WARN set_leverage failed symbol=%s lev=%s err=%s" % (symbol, req_lev, e), flush=True)
+    bn_lev = _kc3_get_exchange_leverage(symbol)
+    print("[KC3] LEVERAGE_VERIFY symbol=%s requested=%s binance=%s" % (symbol, req_lev, bn_lev), flush=True)
+    lev_for_size = req_lev
+    if isinstance(bn_lev, int) and bn_lev > 0:
+        lev_for_size = min(req_lev, bn_lev)
+    print("[KC3] LEVERAGE symbol=%s mode=%s z=%s requested=%s binance=%s used_for_size=%s" %
+          (symbol, os.getenv('KC3_LEV_MODE','fixed'), z_score, req_lev, bn_lev, lev_for_size), flush=True)
+    notional = bal * float(lev_for_size) * MARGIN_FRAC
     rules = get_rules(symbol)
     qty_raw = (notional / mark) if mark > 0 else 0.0
     qty = floor_step(qty_raw, rules["step"], rules["qtyPrec"])
@@ -575,3 +698,25 @@ def get_symbol_leverage(symbol: str):
     except Exception:
         return None
     return None
+
+def _kc3_is_1021(e):
+    msg = str(e)
+    return ("-1021" in msg) or ("recvWindow" in msg) or ("Timestamp" in msg)
+
+
+# --- KC3_COMPAT_SHIM_REFRESH_TIME_OFFSET ---
+def _kc3_refresh_time_offset(force: bool = False) -> int:
+    """
+    Compatibility shim.
+    Some code calls _kc3_refresh_time_offset(), other versions define _kc3_refresh_time_offset_ms().
+    Return offset in ms.
+    """
+    try:
+        fn = globals().get("_kc3_refresh_time_offset_ms")
+        if callable(fn):
+            return int(fn(force))
+    except Exception:
+        pass
+    # If we cannot compute an offset, safest fallback is 0 (system clock is NTP-synced).
+    return 0
+# --- END KC3_COMPAT_SHIM_REFRESH_TIME_OFFSET ---

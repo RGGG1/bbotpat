@@ -1,0 +1,4 @@
+nohup: ignoring input
+[2026-01-13T06:41:52.377665Z] ROBUST wrapper started (TP+SL)
+[2026-01-13T07:00:06.712371Z] WARN current_roi failed SOLUSDT err=name '_kc3_refresh_time_offset' is not defined
+[2026-01-13T11:15:35.586248Z] ROBUST wrapper started (TP+SL)

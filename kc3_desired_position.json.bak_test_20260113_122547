@@ -1,0 +1,40 @@
+{
+  "side": "LONG",
+  "symbol": "SUIUSDT",
+  "notional_usd": 25.0,
+  "timestamp": "2026-01-13T12:12:44.517644Z",
+  "src": "lag_selector",
+  "reason": "hold",
+  "alt_list": [
+    "UNI",
+    "SOL",
+    "ETH",
+    "BNB",
+    "DOGE",
+    "TON",
+    "SUI",
+    "XRP",
+    "TRX",
+    "ADA",
+    "LINK",
+    "XMR",
+    "XLM",
+    "ZEC",
+    "LTC",
+    "AVAX",
+    "HYPE",
+    "WLFI"
+  ],
+  "prices_ts": "2026-01-13T12:12:43.509071Z",
+  "z_score": -1.569700054046407,
+  "signal_id": "2026-01-13T11:42:28.658948Z|LONG|SUIUSDT|z=-1.9655|pts=2026-01-13T11:42:27.791341Z",
+  "candidates": [
+    "TONUSDT",
+    "SUIUSDT",
+    "UNIUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "DOGEUSDT",
+    "ETHUSDT"
+  ]
+}
