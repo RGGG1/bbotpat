@@ -1,8 +1,8 @@
 {
-  "side": "SHORT",
-  "symbol": "TONUSDT",
+  "side": "LONG",
+  "symbol": "BNBUSDT",
   "notional_usd": 25.0,
-  "timestamp": "2026-01-12T19:16:09.467198Z",
+  "timestamp": "2026-01-13T22:18:46.389709Z",
   "src": "lag_selector",
   "reason": "hold",
   "alt_list": [
@@ -25,16 +25,16 @@
     "HYPE",
     "WLFI"
   ],
-  "prices_ts": "2026-01-12T19:16:08.965790Z",
-  "z_score": 1.9798350312501385,
-  "signal_id": "2026-01-12T19:04:21.284849Z|SHORT|TONUSDT|z=1.7497|pts=2026-01-12T19:04:20.481158Z",
+  "prices_ts": "2026-01-13T22:18:45.868684Z",
+  "z_score": -1.732039481141698,
+  "signal_id": "2026-01-13T22:15:31.311210Z|LONG|BNBUSDT|z=-1.6508|pts=2026-01-13T22:15:31.210158Z",
   "candidates": [
-    "TONUSDT",
-    "UNIUSDT",
+    "BNBUSDT",
     "SUIUSDT",
+    "TONUSDT",
     "DOGEUSDT",
     "ETHUSDT",
-    "BNBUSDT",
-    "SOLUSDT"
+    "SOLUSDT",
+    "UNIUSDT"
   ]
 }
