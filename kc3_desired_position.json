@@ -1,8 +1,8 @@
 {
   "side": "LONG",
-  "symbol": "SUIUSDT",
+  "symbol": "SOLUSDT",
   "notional_usd": 25.0,
-  "timestamp": "2026-01-14T03:01:38.760644Z",
+  "timestamp": "2026-01-14T05:58:13.408353Z",
   "src": "lag_selector",
   "reason": "hold",
   "alt_list": [
@@ -25,16 +25,16 @@
     "HYPE",
     "WLFI"
   ],
-  "prices_ts": "2026-01-14T03:01:38.695629Z",
-  "z_score": -1.6050407946293002,
-  "signal_id": "2026-01-14T02:55:23.596398Z|LONG|SUIUSDT|z=-1.6372|pts=2026-01-14T02:55:23.391190Z",
+  "prices_ts": "2026-01-14T05:58:12.438722Z",
+  "z_score": -1.706571257307219,
+  "signal_id": "2026-01-14T05:55:58.359780Z|LONG|SOLUSDT|z=-2.0147|pts=2026-01-14T05:55:58.051320Z",
   "candidates": [
-    "SUIUSDT",
-    "BNBUSDT",
-    "UNIUSDT",
-    "TONUSDT",
-    "DOGEUSDT",
     "SOLUSDT",
-    "ETHUSDT"
+    "UNIUSDT",
+    "BNBUSDT",
+    "SUIUSDT",
+    "DOGEUSDT",
+    "ETHUSDT",
+    "TONUSDT"
   ]
 }

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 PRICES_IN   = Path("/var/www/bbotpat_live/prices_latest.json")
 DESIRED_OUT = Path("/root/bbotpat_live/kc3_desired_position.json")
+ZMAP_OUT   = Path("/root/bbotpat_live/kc3_zmap.json")
 STATE_PATH  = Path("/root/bbotpat_live/data/kc3_lag_state.json")
 STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +142,7 @@ def main():
                     "candidates": [f"{tok}USDT" for tok in ALT_LIST],
                 }
                 safe_write_json(DESIRED_OUT, desired)
+                safe_write_json(ZMAP_OUT, {})
                 print(f"[{utc()}] no prices; FLAT", flush=True)
                 time.sleep(LOOP_SEC)
                 continue
@@ -172,11 +174,16 @@ def main():
                     "candidates": [f"{tok}USDT" for tok in ALT_LIST],
                 }
                 safe_write_json(DESIRED_OUT, desired)
+                safe_write_json(ZMAP_OUT, {})
                 print(f"[{utc()}] zero dispersion; FLAT", flush=True)
                 time.sleep(LOOP_SEC)
                 continue
 
             z = {tok: (ret - m)/s for tok, ret in rets.items()}
+            # --- emit z-map for executor (symbol->z) ---
+            zmap = {f"{tok}USDT": float(val) for tok, val in z.items()}
+            safe_write_json(ZMAP_OUT, zmap)
+
 
             # sort tokens by abs(z) descending (candidate list)
             ranked = sorted(z.items(), key=lambda kv: abs(kv[1]), reverse=True)

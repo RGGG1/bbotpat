@@ -19,6 +19,7 @@ import kc3_execute_futures as base
 
 STATUS  = Path("/var/www/bbotpat_live/kc3_futures_status.json")
 DESIRED = Path("/root/bbotpat_live/kc3_desired_position.json")
+ZMAP = Path("/root/bbotpat_live/kc3_zmap.json")
 STATE   = Path("/root/bbotpat_live/data/kc3_exec_state.json")
 STATE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -82,6 +83,16 @@ def read_desired():
 # --- DYNAMIC_TP_HELPERS_FINAL ---
 import os, json, math
 from pathlib import Path as _Path
+
+
+def read_zmap():
+    try:
+        if not ZMAP.exists():
+            return {}
+        import json
+        return json.loads(ZMAP.read_text() or "{}")
+    except Exception:
+        return {}
 
 def _clamp(x, lo, hi):
     return max(lo, min(hi, x))
@@ -251,13 +262,30 @@ def main():
                     cfg = edge_stop_cfg()
                     if cfg.enabled and state.get("symbol") and state.get("side") and isinstance(desired, dict):
                         # Use desired z_score as current z if present
-                        z_now = desired.get("z_score")
+                                                zmap = read_zmap()
+                        z_now = None
+                        try:
+                            z_now = zmap.get(state.get('symbol'))
+                        except Exception:
+                            z_now = None
                         # entry z is captured from desired at open time (best-effort)
-                        kc3_edge_stop.set_entry_z_if_missing(state, state.get("edge_stop", {}).get("entry_z") or desired.get("z_score"))
-                        lev = float(pos.get("leverage") or 0) if isinstance(pos, dict) else 0.0
-                        lev_roi = float(state.get("last_roi") or 0.0) * lev if lev else None
-                        kc3_edge_stop.update_edge_state(state, z_now=z_now, lev_roi=lev_roi, symbol=state.get("symbol"), side=state.get("side"))
+                        kc3_edge_stop.set_entry_z_if_missing(state, state.get('edge_stop', {}).get('entry_z') or desired.get('z_score'))
+                        _p = base.get_position(state.get('symbol'))
+                        lev = float((_p or {}).get('leverage') or 0.0)
+                        roi = state.get('last_roi')
+                        lev_roi = (float(roi) * lev) if (roi is not None and lev) else None
+                        kc3_edge_stop.update_edge_state(state, z_now=z_now, lev_roi=lev_roi, symbol=state.get('symbol'), side=state.get('side'))
                         do_stop, reason, details = kc3_edge_stop.should_edge_stop(state, cfg, z_now=z_now, lev_roi=lev_roi)
+
+                        # --- Edge-stop debug (throttled, 60s) ---
+                        es = state.setdefault("edge_stop", {})
+                        last = float(es.get("last_log_ts") or 0)
+                        if time.time() - last >= 60:
+                            es["last_log_ts"] = time.time()
+                            print(f"[{utc()}] EDGE_STOP chk sym={state.get('symbol')} lev_roi={lev_roi} z_now={z_now} -> {reason}", flush=True)
+                            save_state(state)
+
+
                         if do_stop:
                             write_status({"ts": utc(), "alive": True, "note": reason, "details": details, "desired": desired})
                             # Prevent immediate re-entry on same signal id
