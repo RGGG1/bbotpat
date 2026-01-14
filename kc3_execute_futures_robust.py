@@ -11,6 +11,8 @@ def _kc3_filelog(msg: str, path: str = "kc3_exec.log"):
     except Exception:
         pass
 from pathlib import Path
+import kc3_edge_stop
+
 from datetime import datetime, timezone
 
 import kc3_execute_futures as base
@@ -48,6 +50,26 @@ def load_state():
 
 def save_state(s):
     STATE.write_text(json.dumps(s, indent=2) + "\n")
+
+
+def edge_stop_cfg():
+    # Defaults OFF; safe to ship enabled=0
+    enabled = os.getenv("KC3_EDGE_STOP_ENABLED","0").strip() in ("1","true","True","YES","yes","on","ON")
+    def f(k, d):
+        try: return float(os.getenv(k, str(d)))
+        except Exception: return float(d)
+    def i(k, d):
+        try: return int(os.getenv(k, str(d)))
+        except Exception: return int(d)
+    return kc3_edge_stop.EdgeStopConfig(
+        enabled=enabled,
+        lev_dd=f("KC3_EDGE_STOP_LEV_DD", 0.08),
+        z_revert=f("KC3_EDGE_STOP_Z_REVERT", 0.55),
+        z_vel_cycles=i("KC3_EDGE_STOP_Z_VEL_CYCLES", 3),
+        no_bounce=f("KC3_EDGE_STOP_NO_BOUNCE", 0.02),
+        hard_max_lev_dd=f("KC3_HARD_MAX_LEV_DD", 0.15),
+        z_hist_max=8,
+    )
 
 def read_desired():
     if not DESIRED.exists():
@@ -223,8 +245,28 @@ def main():
                         continue
                     if roi is not None:
                         state["last_roi"] = roi
-                        tp_thr, tp_mode, tp_vol = dynamic_tp_threshold(sym, TP_PCT)
-                        tp = tp_thr
+
+                # --- Edge-stop (optional, OFF by default) ---
+                try:
+                    cfg = edge_stop_cfg()
+                    if cfg.enabled and state.get("symbol") and state.get("side") and isinstance(desired, dict):
+                        # Use desired z_score as current z if present
+                        z_now = desired.get("z_score")
+                        # entry z is captured from desired at open time (best-effort)
+                        kc3_edge_stop.set_entry_z_if_missing(state, state.get("edge_stop", {}).get("entry_z") or desired.get("z_score"))
+                        lev = float(pos.get("leverage") or 0) if isinstance(pos, dict) else 0.0
+                        lev_roi = float(state.get("last_roi") or 0.0) * lev if lev else None
+                        kc3_edge_stop.update_edge_state(state, z_now=z_now, lev_roi=lev_roi, symbol=state.get("symbol"), side=state.get("side"))
+                        do_stop, reason, details = kc3_edge_stop.should_edge_stop(state, cfg, z_now=z_now, lev_roi=lev_roi)
+                        if do_stop:
+                            write_status({"ts": utc(), "alive": True, "note": reason, "details": details, "desired": desired})
+                            # Prevent immediate re-entry on same signal id
+                            if desired.get("signal_id"):
+                                state["cooldown_signal_id"] = desired.get("signal_id")
+                            base.close_position(state.get("symbol"), reason=reason)
+                except Exception:
+                    # Never allow edge-stop to break main loop
+                    pass
                 last_tp_check = now
 
             # reconcile desired

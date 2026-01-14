@@ -20,3 +20,10 @@ dist/
 htmlcov/
 kc3_desired_position.json
 pip-wheel-metadata/
+
+# local env/venv
+.env
+.venv/
+__pycache__/
+*.pyc
+/data/kc3_exec_state.json
