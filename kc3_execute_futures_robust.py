@@ -262,7 +262,7 @@ def main():
                     cfg = edge_stop_cfg()
                     if cfg.enabled and state.get("symbol") and state.get("side") and isinstance(desired, dict):
                         # Use desired z_score as current z if present
-                                                zmap = read_zmap()
+                        zmap = read_zmap()
                         z_now = None
                         try:
                             z_now = zmap.get(state.get('symbol'))
