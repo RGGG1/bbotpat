@@ -1,11 +1,11 @@
 {
-  "equity_usd": 95.00805152979066,
-  "position_type": "ALT",
-  "position_token": "UNI",
-  "position_units": 16.10305958132045,
-  "entry_price": 6.21,
-  "entry_timestamp": "2025-11-27T22:28:32.328151Z",
-  "last_update": "2025-12-25T23:20:06.332167Z",
+  "equity_usd": 93.55877616747182,
+  "position_type": "BTC",
+  "position_token": "BTC",
+  "position_units": 0.0009610458666831549,
+  "entry_price": 97351.0,
+  "entry_timestamp": "2026-01-14T16:15:03.110961Z",
+  "last_update": "2026-01-14T16:15:03.110961Z",
   "base_timestamp": "2025-11-27T22:28:32.329309Z",
   "base_balance_usd": 100.0,
   "mode": "SIM"

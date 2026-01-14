@@ -180,6 +180,18 @@ def main():
                 continue
 
             z = {tok: (ret - m)/s for tok, ret in rets.items()}
+
+            # --- Emit full z-map each cycle (all symbols, missing -> null) ---
+            try:
+                zmap_out = {}
+                for tok in ALT_LIST:
+                    sym = f"{str(tok).upper()}USDT"
+                    v = z.get(str(tok).upper())
+                    zmap_out[sym] = (float(v) if v is not None else None)
+                safe_write_json(ZMAP_OUT, zmap_out)
+            except Exception:
+                pass
+
             # --- emit z-map for executor (symbol->z) ---
             zmap = {f"{tok}USDT": float(val) for tok, val in z.items()}
             safe_write_json(ZMAP_OUT, zmap)

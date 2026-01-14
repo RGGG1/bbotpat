@@ -2,6 +2,10 @@
 import asyncio
 import json
 import math
+
+# ---- Token universe (single source of truth) ----
+TOKEN_UNIVERSE = ['BTC', 'ETH', 'BNB', 'SOL', 'DOGE', 'TON', 'SUI', 'UNI', 'XRP', 'TRX', 'ADA', 'LINK', 'XMR', 'XLM', 'ZEC', 'LTC', 'AVAX', 'HYPE', 'WLFI']
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -141,7 +145,7 @@ SUPPLIES_PATHS = [
 ]
 
 # Universe used on your site (match your V1 index token set)
-TOKENS = ["BTC", "ETH", "BNB", "SOL", "DOGE", "TON", "SUI", "UNI"]
+TOKENS = ['BTC', 'ETH', 'BNB', 'SOL', 'DOGE', 'TON', 'SUI', 'UNI', 'XRP', 'TRX', 'ADA', 'LINK', 'XMR', 'XLM', 'ZEC', 'LTC', 'AVAX', 'HYPE', 'WLFI']
 STABLE_HINTS = ("USD",)
 
 BINANCE_SPOT_WS = "wss://stream.binance.com:9443/stream"

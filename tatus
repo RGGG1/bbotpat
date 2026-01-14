@@ -1,0 +1,11 @@
+○ hiveai-kc3-futures.service - HiveAI KC3 Futures Executor (USDⓈ-M)
+     Loaded: loaded (]8;;file://ubuntu-s-1vcpu-1gb-ams3-01/etc/systemd/system/hiveai-kc3-futures.service/etc/systemd/system/hiveai-kc3-futures.service]8;;; [0;1;32menabled[0m; preset: [0;1;32menabled[0m)
+    Drop-In: /etc/systemd/system/hiveai-kc3-futures.service.d
+             └─]8;;file://ubuntu-s-1vcpu-1gb-ams3-01/etc/systemd/system/hiveai-kc3-futures.service.d/override.confoverride.conf]8;;
+     Active: inactive (dead) since Wed 2026-01-14 05:58:15 UTC; 8h ago
+   Duration: 33ms
+    Process: 1260420 ExecStart=/root/bbotpat_live/.venv/bin/python -u /root/bbotpat_live/kc3_execute_futures_robust.py [0;1;31m(code=exited, status=1/FAILURE)[0m
+   Main PID: 1260420 (code=exited, status=1/FAILURE)
+        CPU: 27ms
+
+Jan 14 05:58:15 ubuntu-s-1vcpu-1gb-ams3-01 systemd[1]: Stopped hiveai-kc3-futures.service - HiveAI KC3 Futures Executor (USDⓈ-M).
