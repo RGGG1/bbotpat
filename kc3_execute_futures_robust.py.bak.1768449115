@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+import os, time, json, traceback
+import time
+import os
+
+# --- KC3_FILELOG_HELPER ---
+def _kc3_filelog(msg: str, path: str = "kc3_exec.log"):
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(str(msg).rstrip("\n") + "\n")
+    except Exception:
+        # Never let logging kill the bot
+        pass
+
+from pathlib import Path
+import kc3_edge_stop
+
+from datetime import datetime, timezone
+
+import kc3_execute_futures as base
+
+STATUS  = Path("/var/www/bbotpat_live/kc3_futures_status.json")
+DESIRED = Path("/root/bbotpat_live/kc3_desired_position.json")
+ZMAP = Path("/root/bbotpat_live/kc3_zmap.json")
+STATE   = Path("/root/bbotpat_live/data/kc3_exec_state.json")
+STATE.parent.mkdir(parents=True, exist_ok=True)
+
+RECONCILE_SEC = float(os.getenv("KC3_RECONCILE_SEC", "15"))
+HEARTBEAT_SEC = float(os.getenv("KC3_HEARTBEAT_SEC", "60"))
+
+TP_PCT = float(os.getenv("KC3_TP_PCT", "0.0"))
+SL_PCT = float(os.getenv("KC3_SL_PCT", "0.0"))
+
+ROTATE_MIN_ROI = float(os.getenv("KC3_ROTATE_MIN_ROI", "0.0"))        # e.g. 0.002 => +0.2%
+ALLOW_OPEN_ON_HOLD = int(os.getenv("KC3_ALLOW_OPEN_ON_HOLD", "1"))     # 0 = do not open from HOLD when flat
+MAX_CAND_TRIES = int(os.getenv("KC3_MAX_CAND_TRIES", "7"))             # for FLAT close scanning
+
+def utc():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+
+def write_status(o):
+    """
+    Write status JSON to STATUS atomically.
+
+    IMPORTANT: heartbeat must NOT clobber prior meaningful status fields.
+    If payload.note == 'heartbeat', we merge it into the existing JSON and only
+    overwrite ts/alive/note (and any keys provided in payload).
+    """
+    try:
+        payload = o if isinstance(o, dict) else {"note": str(o)}
+
+        # Merge heartbeat into previous status (preserve last meaningful fields)
+        if isinstance(payload, dict) and payload.get("note") == "heartbeat":
+            try:
+                if STATUS.exists():
+                    prev_txt = STATUS.read_text(encoding="utf-8", errors="replace") or "{}"
+                    prev = json.loads(prev_txt) if prev_txt.strip() else {}
+                    if isinstance(prev, dict):
+                        merged = dict(prev)
+                        merged.update(payload)  # payload overwrites ts/alive/note
+                        payload = merged
+            except Exception:
+                # If merge fails, fall back to writing heartbeat payload only
+                pass
+
+        # Ensure directory exists
+        try:
+            STATUS.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        # Atomic write: write temp then replace
+        tmp = STATUS.with_suffix(STATUS.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(tmp, STATUS)
+    except Exception:
+        # Never let status writing kill the bot
+        pass
+
+def read_desired():
+    try:
+        return json.loads(DESIRED.read_text())
+    except Exception:
+        return None
+
+def load_state():
+    if STATE.exists():
+        try:
+            return json.loads(STATE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+def save_state(st):
+    try:
+        STATE.write_text(json.dumps(st, indent=2, sort_keys=True) + "\n")
+    except Exception:
+        pass
+
+def flat_state():
+    return {
+        "symbol": None,
+        "side": None,
+        "cooldown_signal_id": None,
+        "cooldown": None,
+        "open_signal_id": None,
+        "last_roi": None,
+        "edge_stop": None,
+    }
+
+def reconcile(desired, st):
+    """
+    Core reconcile loop.
+    st tracks current bot state, desired comes from kc3_desired_position.json.
+    We delegate actual exchange ops to base module.
+    """
+    # If desired is missing or malformed, do nothing but report
+    if not isinstance(desired, dict):
+        write_status({"ts": utc(), "alive": True, "note": "no_desired_or_bad_desired"})
+        return st
+
+    want_symbol = desired.get("symbol")
+    want_side   = desired.get("side")
+    want_reason = desired.get("reason")
+    want_signal = desired.get("signal_id")
+
+    cur_symbol = st.get("symbol")
+    cur_side   = st.get("side")
+
+    # Pull current position info from base
+    try:
+        pos = base.get_open_position()
+    except Exception as e:
+        write_status({"ts": utc(), "alive": True, "note": "error", "err": f"get_open_position: {e!r}"})
+        return st
+
+    # Normalize: if exchange says flat, state should be flat-ish
+    if not pos:
+        if cur_symbol or cur_side:
+            st = flat_state()
+            save_state(st)
+
+    # If flat and desired is HOLD, optionally open
+    if not pos:
+        if want_reason == "hold" and not ALLOW_OPEN_ON_HOLD:
+            write_status({"ts": utc(), "alive": True, "note": "hold_flat_no_open", "want_symbol": want_symbol, "want_side": want_side})
+            return st
+
+        # If desired says hold but includes symbol/side, we treat it as "keep/enter" signal
+        if want_symbol and want_side:
+            # attempt open
+            try:
+                base.open_position(want_symbol, want_side, desired.get("notional_usd"))
+                st["symbol"] = want_symbol
+                st["side"] = want_side
+                st["open_signal_id"] = want_signal
+                st["last_roi"] = None
+                st["cooldown"] = None
+                st["cooldown_signal_id"] = None
+                save_state(st)
+                write_status({"ts": utc(), "alive": True, "note": "opened", "symbol": want_symbol, "side": want_side, "signal_id": want_signal})
+            except Exception as e:
+                write_status({"ts": utc(), "alive": True, "note": "error", "err": f"open_position: {e!r}", "symbol": want_symbol, "side": want_side})
+            return st
+
+        write_status({"ts": utc(), "alive": True, "note": "flat_no_action"})
+        return st
+
+    # If we have an open position, decide whether to close / rotate
+    have_symbol = pos.get("symbol")
+    have_side = pos.get("side")
+
+    # If desired differs from current, close then (optionally) open desired next tick
+    if want_symbol and want_side and (want_symbol != have_symbol or want_side != have_side):
+        try:
+            base.close_position(have_symbol)
+            st = flat_state()
+            save_state(st)
+            write_status({"ts": utc(), "alive": True, "note": "closed_for_rotate", "from_symbol": have_symbol, "from_side": have_side, "to_symbol": want_symbol, "to_side": want_side})
+        except Exception as e:
+            write_status({"ts": utc(), "alive": True, "note": "error", "err": f"close_for_rotate: {e!r}", "symbol": have_symbol, "side": have_side})
+        return st
+
+    # Same symbol/side: manage edge stop / tp/sl via kc3_edge_stop
+    try:
+        st = kc3_edge_stop.maybe_manage(pos, st)
+        save_state(st)
+        write_status({"ts": utc(), "alive": True, "note": "managed", "symbol": have_symbol, "side": have_side})
+    except Exception as e:
+        write_status({"ts": utc(), "alive": True, "note": "error", "err": f"edge_stop: {e!r}", "symbol": have_symbol, "side": have_side})
+
+    return st
+
+def main():
+    write_status({"ts": utc(), "alive": True, "note": "started"})
+    st = load_state() or flat_state()
+
+    last_reconcile = 0.0
+    last_heartbeat = 0.0
+
+    while True:
+        now = time.time()
+
+        if now - last_heartbeat >= HEARTBEAT_SEC:
+            last_heartbeat = now
+            write_status({"ts": utc(), "alive": True, "note": "heartbeat"})
+
+        if now - last_reconcile >= RECONCILE_SEC:
+            last_reconcile = now
+
+            desired = read_desired()
+            try:
+                if isinstance(desired, dict):
+                    write_status({
+                        "ts": utc(), "alive": True, "note": "reconcile_tick",
+                        "d_side": desired.get("side"), "d_symbol": desired.get("symbol"),
+                        "d_reason": desired.get("reason"), "d_signal": desired.get("signal_id"),
+                    })
+                else:
+                    write_status({"ts": utc(), "alive": True, "note": "reconcile_tick", "d": str(desired)})
+            except Exception:
+                pass
+
+            st = reconcile(desired, st)
+
+        time.sleep(1)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        write_status({"ts": utc(), "alive": False, "note": "stopped"})
+    except Exception as _e:
+        try:
+            write_status({"ts": utc(), "alive": True, "note": "error", "err": repr(_e), "tb": traceback.format_exc()[-2000:]})
+        except Exception:
+            pass
+        time.sleep(5)

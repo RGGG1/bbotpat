@@ -328,81 +328,12 @@ def read_desired():
     }
 
 def get_position(symbol: str):
-    """
-    Return detailed position info for a single symbol using /fapi/v2/positionRisk.
-    This is the canonical futures position endpoint for our bot.
-    """
     data = private_req("GET", "/fapi/v2/positionRisk", {})
     for x in data:
         if x.get("symbol") == symbol:
-            amt  = float(x.get("positionAmt") or 0.0)
-            entry = float(x.get("entryPrice") or 0.0)
-            mark  = float(x.get("markPrice") or 0.0)
-            upnl  = float(x.get("unRealizedProfit") or 0.0)
-            lev   = float(x.get("leverage") or 0.0)
-            side  = "LONG" if amt > 0 else ("SHORT" if amt < 0 else None)
-
-            roi = (upnl / (abs(amt) * entry)) if (amt and entry) else None
-            lev_roi = (roi * lev) if (roi is not None and lev) else None
-
-            return {
-                "symbol": symbol,
-                "amt": amt,
-                "side": side,
-                "entry": entry,
-                "mark": mark,
-                "upnl": upnl,
-                "leverage": lev,
-                "roi": roi,
-                "lev_roi": lev_roi,
-                "raw": x,
-            }
-    return {
-        "symbol": symbol,
-        "amt": 0.0,
-        "side": None,
-        "entry": 0.0,
-        "mark": 0.0,
-        "upnl": 0.0,
-        "leverage": 0.0,
-        "roi": None,
-        "lev_roi": None,
-        "raw": {},
-    }
-
-def get_open_position(symbol: str | None = None):
-    """
-    Return the first non-zero open position, or the open position for `symbol` if provided.
-    Uses /fapi/v2/positionRisk to avoid dependency on external SDKs.
-    """
-    data = private_req("GET", "/fapi/v2/positionRisk", {})
-    for x in data:
-        sym = x.get("symbol")
-        if symbol is not None and sym != symbol:
-            continue
-        amt = float(x.get("positionAmt") or 0.0)
-        if amt != 0.0:
-            entry = float(x.get("entryPrice") or 0.0)
-            mark  = float(x.get("markPrice") or 0.0)
-            upnl  = float(x.get("unRealizedProfit") or 0.0)
-            lev   = float(x.get("leverage") or 0.0)
-            side  = "LONG" if amt > 0 else "SHORT"
-            roi = (upnl / (abs(amt) * entry)) if entry else None
-            lev_roi = (roi * lev) if (roi is not None and lev) else None
-            return {
-                "symbol": sym,
-                "amt": amt,
-                "side": side,
-                "entry": entry,
-                "mark": mark,
-                "upnl": upnl,
-                "leverage": lev,
-                "roi": roi,
-                "lev_roi": lev_roi,
-                "raw": x,
-            }
-    return None
-
+            amt = float(x.get("positionAmt", "0") or "0")
+            entry = float(x.get("entryPrice", "0") or "0")
+            return {"amt": amt, "entry": entry}
     return {"amt": 0.0, "entry": 0.0}
 
 def get_mark(symbol: str) -> float:
