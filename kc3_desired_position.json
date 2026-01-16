@@ -1,8 +1,8 @@
 {
-  "side": "LONG",
-  "symbol": "AVAXUSDT",
+  "side": "SHORT",
+  "symbol": "SUIUSDT",
   "notional_usd": 25.0,
-  "timestamp": "2026-01-15T16:18:50.916224Z",
+  "timestamp": "2026-01-16T20:51:40.908265Z",
   "src": "lag_selector",
   "reason": "hold",
   "alt_list": [
@@ -25,25 +25,25 @@
     "HYPE",
     "WLFI"
   ],
-  "prices_ts": "2026-01-15T16:18:50.090372Z",
-  "z_score": -2.5427369906631996,
-  "signal_id": "2026-01-15T16:16:20.785444Z|LONG|AVAXUSDT|z=-2.3786|pts=2026-01-15T16:16:20.542507Z",
+  "prices_ts": "2026-01-16T20:51:40.451157Z",
+  "z_score": 2.2433125493362582,
+  "signal_id": "2026-01-16T20:46:55.708556Z|SHORT|SUIUSDT|z=2.3104|pts=2026-01-16T20:46:55.545217Z",
   "candidates": [
-    "AVAXUSDT",
-    "ZECUSDT",
-    "WLFIUSDT",
-    "TONUSDT",
-    "ADAUSDT",
-    "ETHUSDT",
     "SUIUSDT",
-    "XLMUSDT",
-    "SOLUSDT",
-    "BNBUSDT",
+    "LTCUSDT",
     "UNIUSDT",
+    "ADAUSDT",
     "LINKUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "ZECUSDT",
     "DOGEUSDT",
     "TRXUSDT",
-    "XRPUSDT",
-    "LTCUSDT"
+    "SOLUSDT",
+    "XLMUSDT",
+    "AVAXUSDT",
+    "TONUSDT",
+    "WLFIUSDT",
+    "XRPUSDT"
   ]
 }

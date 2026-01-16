@@ -330,53 +330,46 @@ def read_desired():
 def get_position(symbol: str):
     """
     Return detailed position info for a single symbol using /fapi/v2/positionRisk.
-    Adds margin-based ROI (matches Binance UI ROI much more closely):
-      margin_roi = unRealizedProfit / positionInitialMargin   (fallback isolatedMargin)
+    This is the canonical futures position endpoint for our bot.
     """
     data = private_req("GET", "/fapi/v2/positionRisk", {})
     for x in data:
-        if x.get("symbol") != symbol:
-            continue
+        if x.get("symbol") == symbol:
+            amt  = float(x.get("positionAmt") or 0.0)
+            entry = float(x.get("entryPrice") or 0.0)
+            mark  = float(x.get("markPrice") or 0.0)
+            upnl  = float(x.get("unRealizedProfit") or 0.0)
+            lev   = float(x.get("leverage") or 0.0)
+            side  = "LONG" if amt > 0 else ("SHORT" if amt < 0 else None)
 
-        amt   = float(x.get("positionAmt") or 0.0)
-        entry = float(x.get("entryPrice") or 0.0)
-        mark  = float(x.get("markPrice") or 0.0)
-        upnl  = float(x.get("unRealizedProfit") or 0.0)
-        lev   = float(x.get("leverage") or 0.0)
+            roi = (upnl / (abs(amt) * entry)) if (amt and entry) else None
+            lev_roi = (roi * lev) if (roi is not None and lev) else None
 
-        side = None
-        if amt > 0: side = "LONG"
-        elif amt < 0: side = "SHORT"
+            return {
+                "symbol": symbol,
+                "amt": amt,
+                "side": side,
+                "entry": entry,
+                "mark": mark,
+                "upnl": upnl,
+                "leverage": lev,
+                "roi": roi,
+                "lev_roi": lev_roi,
+                "raw": x,
+            }
+    return {
+        "symbol": symbol,
+        "amt": 0.0,
+        "side": None,
+        "entry": 0.0,
+        "mark": 0.0,
+        "upnl": 0.0,
+        "leverage": 0.0,
+        "roi": None,
+        "lev_roi": None,
+        "raw": {},
+    }
 
-        # old-style roi (notional based)
-        denom_notional = abs(amt) * entry if entry else 0.0
-        roi = (upnl / denom_notional) if denom_notional else None
-        lev_roi = (roi * lev) if (roi is not None and lev) else None
-
-        # Binance-UI-style ROI (margin based)
-        pim = float(x.get("positionInitialMargin") or 0.0)
-        iso = float(x.get("isolatedMargin") or 0.0)
-        denom_margin = pim if pim > 0 else iso
-        margin_roi = (upnl / denom_margin) if denom_margin > 0 else None  # already "leveraged ROI" effectively
-
-        return {
-            "symbol": symbol,
-            "side": side,
-            "amt": amt,
-            "entry": entry,
-            "mark": mark,
-            "upnl": upnl,
-            "leverage": lev,
-            "roi": roi,
-            "lev_roi": lev_roi,
-            "margin_roi": margin_roi,
-            "positionInitialMargin": pim,
-            "isolatedMargin": iso,
-        }
-
-    # not found => flat/unknown
-    return {"symbol": symbol, "side": None, "amt": 0.0, "entry": 0.0, "mark": 0.0, "upnl": 0.0, "leverage": 0.0,
-            "roi": None, "lev_roi": None, "margin_roi": None, "positionInitialMargin": 0.0, "isolatedMargin": 0.0}
 def get_open_position(symbol: str | None = None):
     """
     Return the first non-zero open position, or the open position for `symbol` if provided.

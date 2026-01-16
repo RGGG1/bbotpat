@@ -7,21 +7,6 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timezone
 
-
-# --- NO_TRADE_WINDOW_UTC ---
-# Flat / in stables from 02:30 to 08:00 UTC daily.
-# If a position is open while inside the window, we force-close it and remain flat.
-NO_TRADE_START_MIN = 2*60 + 30   # 02:30 UTC
-NO_TRADE_END_MIN   = 8*60 + 0    # 08:00 UTC
-
-def _utc_min_of_day():
-    now = datetime.now(timezone.utc)
-    return now.hour*60 + now.minute
-
-def in_no_trade_window_utc():
-    m = _utc_min_of_day()
-    return NO_TRADE_START_MIN <= m < NO_TRADE_END_MIN
-
 import kc3_edge_stop
 import kc3_execute_futures as base
 
@@ -263,69 +248,6 @@ def main():
     print(f"[{utc()}] ROBUST wrapper started (TP+SL)", flush=True)
 
     while True:
-
-        # --- NO_TRADE_WINDOW_ENFORCE ---
-
-        # Stay flat from 02:30–08:00 UTC.
-
-        if in_no_trade_window_utc():
-
-            sym = state.get("symbol")
-
-            side = state.get("side")
-
-            if sym and side:
-
-                try:
-
-                    write_status({
-
-                        "ts": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
-
-                        "alive": True,
-
-                        "note": "no_trade_window_force_close",
-
-                        "window_utc": "02:30-08:00",
-
-                        "have": {"symbol": sym, "side": side}
-
-                    })
-
-                    base.close_position(sym)
-
-                except Exception as e:
-
-                    try:
-
-                        write_status({"ts": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"), "alive": True, "note": "no_trade_window_force_close_error", "err": repr(e)})
-
-                    except Exception:
-
-                        pass
-
-                state["symbol"] = None
-
-                state["side"] = None
-
-                state.pop("edge_stop", None)
-
-                save_state(state)
-
-            else:
-
-                try:
-
-                    write_status({"ts": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"), "alive": True, "note": "no_trade_window_flat", "window_utc": "02:30-08:00"})
-
-                except Exception:
-
-                    pass
-
-            time.sleep(5)
-
-            continue
-
         try:
             now = time.time()
 
@@ -375,73 +297,6 @@ def main():
                             lev_roi = (float(roi) * lev) if (roi is not None and lev) else None
 
                             kc3_edge_stop.update_edge_state(state, z_now=z_now, lev_roi=lev_roi_for_risk, symbol=sym, side=side)
-                            # --- HARD_MAX_DD_AND_ROLLING_TP ---
-                            # Absolute hard stop on leveraged ROI drawdown
-                            try:
-                                if cfg and getattr(cfg, "hard_max_lev_dd", None) is not None and lev_roi is not None:
-                                    if float(lev_roi) <= -float(cfg.hard_max_lev_dd):
-                                        write_status({
-                                            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
-                                            "alive": True,
-                                            "note": "hard_max_lev_dd_trigger",
-                                            "lev_roi": float(lev_roi),
-                                            "hard_max_lev_dd": float(cfg.hard_max_lev_dd),
-                                            "have": {"symbol": sym, "side": side}
-                                        })
-                                        base.close_position(sym)
-                                        state["symbol"] = None
-                                        state["side"] = None
-                                        state.pop("edge_stop", None)
-                                        save_state(state)
-                                        continue
-                            except Exception as e:
-                                try:
-                                    write_status({"ts": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"), "alive": True, "note": "hard_max_lev_dd_check_error", "err": repr(e)})
-                                except Exception:
-                                    pass
-
-                            # Rolling TP: arm once lev_roi >= 7%, then close if it retraces 30% from peak
-                            try:
-                                ARM = 0.07
-                                DROP_FRAC = 0.30
-                                es_state = state.setdefault("edge_stop", {})
-                                if lev_roi is not None:
-                                    armed = bool(es_state.get("trail_armed", False))
-                                    peak = es_state.get("trail_peak", None)
-                                    if (not armed) and float(lev_roi) >= ARM:
-                                        es_state["trail_armed"] = True
-                                        es_state["trail_peak"] = float(lev_roi)
-                                        peak = es_state["trail_peak"]
-                                    if armed:
-                                        if peak is None or float(lev_roi) > float(peak):
-                                            es_state["trail_peak"] = float(lev_roi)
-                                            peak = es_state["trail_peak"]
-                                        if peak is not None and float(peak) >= ARM:
-                                            thresh = float(peak) * (1.0 - DROP_FRAC)
-                                            if float(lev_roi) <= thresh:
-                                                write_status({
-                                                    "ts": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
-                                                    "alive": True,
-                                                    "note": "rolling_tp_trigger",
-                                                    "lev_roi": float(lev_roi),
-                                                    "peak": float(peak),
-                                                    "drop_frac": DROP_FRAC,
-                                                    "threshold": float(thresh),
-                                                    "have": {"symbol": sym, "side": side}
-                                                })
-                                                base.close_position(sym)
-                                                state["symbol"] = None
-                                                state["side"] = None
-                                                state.pop("edge_stop", None)
-                                                save_state(state)
-                                                continue
-                                save_state(state)
-                            except Exception as e:
-                                try:
-                                    write_status({"ts": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"), "alive": True, "note": "rolling_tp_check_error", "err": repr(e)})
-                                except Exception:
-                                    pass
-
                             do_stop, reason, details = kc3_edge_stop.should_edge_stop(state, cfg, z_now=z_now, lev_roi=lev_roi_for_risk)
 
                             es = state.setdefault("edge_stop", {})
