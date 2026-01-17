@@ -27,3 +27,6 @@ pip-wheel-metadata/
 __pycache__/
 *.pyc
 /data/kc3_exec_state.json
+.env.bak.*
+*.bak.*
+/tmp/*.log
