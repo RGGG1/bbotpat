@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 
-def parse_alt_list_from_env():
+def json.load(open("data/kc3_token_universe.json")):
     alt = os.getenv("KC3_ALT_LIST", "").strip()
     if alt:
         alt = alt.replace(",", " ")
@@ -28,7 +28,7 @@ ZMAP_OUT   = Path("/root/bbotpat_live/kc3_zmap.json")
 STATE_PATH  = Path("/root/bbotpat_live/data/kc3_lag_state.json")
 STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-ALT_LIST = parse_alt_list_from_env()
+ALT_LIST = json.load(open("data/kc3_token_universe.json"))
 USD_NOTIONAL = float(os.getenv("KC3_USD_NOTIONAL", "25"))
 
 LOOKBACK_SEC = float(os.getenv("KC3_LAG_LOOKBACK_SEC", "900"))   # 15m default

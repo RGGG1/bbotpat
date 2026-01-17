@@ -4,7 +4,7 @@ import json
 import math
 
 # ---- Token universe (single source of truth) ----
-TOKEN_UNIVERSE = ['BTC', 'ETH', 'BNB', 'SOL', 'DOGE', 'TON', 'SUI', 'UNI', 'XRP', 'TRX', 'ADA', 'LINK', 'XMR', 'XLM', 'ZEC', 'LTC', 'AVAX', 'HYPE', 'WLFI']
+TOKEN_UNIVERSE = json.load(open("data/kc3_token_universe.json"))
 
 from datetime import datetime, timezone
 from pathlib import Path

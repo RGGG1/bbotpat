@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Auto-managed universe (BTC + ALT_LIST from kc3_hmi_momentum_agent)
-TOKENS = ['BTC', 'UNI', 'SOL', 'ETH', 'BNB', 'DOGE', 'TON', 'SUI', 'XRP', 'TRX', 'ADA', 'LINK', 'XMR', 'XLM', 'ZEC', 'LTC', 'AVAX', 'HYPE', 'WLFI']
+TOKENS = json.load(open("data/kc3_token_universe.json"))
 
 import requests
 
