@@ -3,13 +3,32 @@ import os, time, json, math, traceback
 from pathlib import Path
 from datetime import datetime, timezone
 
+
+def parse_alt_list_from_env():
+    alt = os.getenv("KC3_ALT_LIST", "").strip()
+    if alt:
+        alt = alt.replace(",", " ")
+        alt = " ".join(alt.split())
+        toks = [t.upper() for t in alt.split() if t.strip()]
+    else:
+        toks = []
+    # de-dupe preserve order
+    seen=set()
+    out=[]
+    for t in toks:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
 PRICES_IN   = Path("/var/www/bbotpat_live/prices_latest.json")
 DESIRED_OUT = Path("/root/bbotpat_live/kc3_desired_position.json")
 ZMAP_OUT   = Path("/root/bbotpat_live/kc3_zmap.json")
 STATE_PATH  = Path("/root/bbotpat_live/data/kc3_lag_state.json")
 STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-ALT_LIST = ['UNI', 'SOL', 'ETH', 'BNB', 'DOGE', 'TON', 'SUI', 'XRP', 'TRX', 'ADA', 'LINK', 'XMR', 'XLM', 'ZEC', 'LTC', 'AVAX', 'HYPE', 'WLFI']
+ALT_LIST = parse_alt_list_from_env()
 USD_NOTIONAL = float(os.getenv("KC3_USD_NOTIONAL", "25"))
 
 LOOKBACK_SEC = float(os.getenv("KC3_LAG_LOOKBACK_SEC", "900"))   # 15m default

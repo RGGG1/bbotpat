@@ -1,2 +1,422 @@
 nohup: ignoring input
 [2026-01-13T11:43:25.245703Z] ROBUST wrapper started (TP+SL)
+[2026-01-17T00:43:58.091220Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 581, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:44:15.737336Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 581, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:44:41.999030Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:44:59.563814Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:45:17.415980Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:45:35.266374Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:45:53.074804Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:46:12.750682Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:46:51.719396Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:47:09.915203Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:47:27.960203Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:47:45.808932Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:48:03.503174Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:48:21.260000Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:48:39.042268Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:48:56.630746Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:49:14.250910Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:49:31.926449Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:49:49.681067Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:50:07.746506Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:50:25.541971Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:50:44.148929Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:51:02.957662Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:51:21.030005Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:51:39.635270Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:51:57.883297Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:52:15.908747Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:52:33.943773Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:52:52.081898Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:53:10.144392Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:53:28.567982Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:53:46.615064Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:54:04.742690Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:54:22.973213Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}
+[2026-01-17T00:54:41.776822Z] ERROR RuntimeError('POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}')
+Traceback (most recent call last):
+  File "/root/bbotpat_live/kc3_execute_futures_robust.py", line 590, in main
+    base.open_position(
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 541, in open_position
+    place_market(symbol, order_side, qty, reduce_only=False)
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 493, in place_market
+    return private_req("POST", "/fapi/v1/order", params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/bbotpat_live/kc3_execute_futures.py", line 273, in private_req
+    raise RuntimeError(f"{method} {path} failed {r.status_code}: {r.text}")
+RuntimeError: POST /fapi/v1/order failed 400: {"code":-2019,"msg":"Margin is insufficient."}

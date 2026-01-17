@@ -36,7 +36,7 @@ def parse_alt_list():
     else:
         toks = [
             "UNI","SOL","ETH","BNB","DOGE","TON","SUI",
-            "XRP","TRX","ADA","LINK","XMR","XLM","ZEC","LTC","AVAX","HYPE","WLFI",
+            "XRP","ADA","LINK","XMR","XLM","ZEC","LTC","AVAX","HYPE",
         ]
     # de-dupe preserve order
     seen=set()

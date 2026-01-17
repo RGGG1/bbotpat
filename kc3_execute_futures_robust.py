@@ -374,17 +374,26 @@ def main():
                             lev = float(_p.get("leverage") or 0.0)
                             lev_roi = (float(roi) * lev) if (roi is not None and lev) else None
 
+                            # Prefer Binance-UI-style margin ROI if base.get_position provides it;
+                            # otherwise fall back to lev_roi (= roi*leverage).
+                            margin_roi = None
+                            try:
+                                margin_roi = _p.get("margin_roi")
+                            except Exception:
+                                margin_roi = None
+                            lev_roi_for_risk = margin_roi if (margin_roi is not None) else lev_roi
+
                             kc3_edge_stop.update_edge_state(state, z_now=z_now, lev_roi=lev_roi_for_risk, symbol=sym, side=side)
                             # --- HARD_MAX_DD_AND_ROLLING_TP ---
                             # Absolute hard stop on leveraged ROI drawdown
                             try:
-                                if cfg and getattr(cfg, "hard_max_lev_dd", None) is not None and lev_roi is not None:
-                                    if float(lev_roi) <= -float(cfg.hard_max_lev_dd):
+                                if cfg and getattr(cfg, "hard_max_lev_dd", None) is not None and lev_roi_for_risk is not None:
+                                    if float(lev_roi_for_risk) <= -float(cfg.hard_max_lev_dd):
                                         write_status({
                                             "ts": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
                                             "alive": True,
                                             "note": "hard_max_lev_dd_trigger",
-                                            "lev_roi": float(lev_roi),
+                                            "lev_roi": float(lev_roi_for_risk),
                                             "hard_max_lev_dd": float(cfg.hard_max_lev_dd),
                                             "have": {"symbol": sym, "side": side}
                                         })
@@ -405,25 +414,25 @@ def main():
                                 ARM = 0.07
                                 DROP_FRAC = 0.30
                                 es_state = state.setdefault("edge_stop", {})
-                                if lev_roi is not None:
+                                if lev_roi_for_risk is not None:
                                     armed = bool(es_state.get("trail_armed", False))
                                     peak = es_state.get("trail_peak", None)
-                                    if (not armed) and float(lev_roi) >= ARM:
+                                    if (not armed) and float(lev_roi_for_risk) >= ARM:
                                         es_state["trail_armed"] = True
-                                        es_state["trail_peak"] = float(lev_roi)
+                                        es_state["trail_peak"] = float(lev_roi_for_risk)
                                         peak = es_state["trail_peak"]
                                     if armed:
-                                        if peak is None or float(lev_roi) > float(peak):
-                                            es_state["trail_peak"] = float(lev_roi)
+                                        if peak is None or float(lev_roi_for_risk) > float(peak):
+                                            es_state["trail_peak"] = float(lev_roi_for_risk)
                                             peak = es_state["trail_peak"]
                                         if peak is not None and float(peak) >= ARM:
                                             thresh = float(peak) * (1.0 - DROP_FRAC)
-                                            if float(lev_roi) <= thresh:
+                                            if float(lev_roi_for_risk) <= thresh:
                                                 write_status({
                                                     "ts": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
                                                     "alive": True,
                                                     "note": "rolling_tp_trigger",
-                                                    "lev_roi": float(lev_roi),
+                                                    "lev_roi": float(lev_roi_for_risk),
                                                     "peak": float(peak),
                                                     "drop_frac": DROP_FRAC,
                                                     "threshold": float(thresh),
