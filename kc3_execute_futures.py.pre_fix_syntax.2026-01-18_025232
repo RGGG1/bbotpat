@@ -208,8 +208,9 @@ REQUIRE_CHANGE_ON_START = env_bool("KC3_REQUIRE_SIGNAL_CHANGE_ON_START", True)
 
 # Sizing
 MARGIN_FRAC = env_float("KC3_MARGIN_FRAC", 0.90)
-DESIRED_OVERRIDE = "{KC3_DESIRED_OVERRIDE}"
-DESIRED_FALLBACK = "{KC3_DESIRED_FALLBACK}"
+
+DESIRED_OVERRIDE = "/var/www/bbotpat_live/kc3_exec_desired.json"
+DESIRED_FALLBACK = "/var/www/bbotpat_live/kc3_latest.json"
 
 STATE_PATH = "/root/bbotpat_live/data/kc3_futures_exec_state.json"
 
@@ -319,70 +320,47 @@ def safe_read_json(path: str):
         raise RuntimeError(f"ERROR reading {path}: {e}")
 
 def read_desired():
-    """
-    Robust desired reader:
-      - Try override and fallback
-      - If override exists but invalid -> FALL BACK (do NOT block trading)
-      - Normalize into {side, symbol, token}
-    """
-    override = os.getenv("KC3_DESIRED_OVERRIDE", "/var/www/bbotpat_live/kc3_exec_desired.json")
-    fallback = os.getenv("KC3_DESIRED_FALLBACK", "/var/www/bbotpat_live/kc3_latest.json")
+    src = None
+    if os.path.exists(DESIRED_OVERRIDE):
+        src = DESIRED_OVERRIDE
+    else:
+        src = DESIRED_FALLBACK
 
-    def _load(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                obj = json.load(f)
-            return obj if isinstance(obj, dict) else None
-        except FileNotFoundError:
-            return None
-        except Exception:
-            return None
+    data = safe_read_json(src)
 
-    def _normalize(raw, src_path):
-        if not isinstance(raw, dict):
-            return None
+    # Support both formats:
+    #  - {"signal_side":"SHORT","best_token":"UNI","hmi":..., "hmi_delta":...}
+    #  - {"position":{"side":"LONG","token":"UNI",...}, ...}
+    side = ""
+    token = ""
+    if isinstance(data.get("signal_side"), str):
+        side = data.get("signal_side","")
+        token = data.get("best_token","") or data.get("token","")
+    elif isinstance(data.get("position"), dict):
+        side = data["position"].get("side","")
+        token = data["position"].get("token","")
+    side = str(side).strip().upper()
+    token = str(token).strip().upper()
 
-        sig = dict(raw)
+    hmi = data.get("hmi", None)
+    hmi_delta = data.get("hmi_delta", None)
+    ts = data.get("timestamp", None)
 
-        # legacy nested
-        if isinstance(sig.get("position"), dict):
-            pos = sig["position"]
-            sig.setdefault("side", pos.get("side"))
-            sig.setdefault("symbol", pos.get("symbol"))
-            sig.setdefault("token", pos.get("token"))
+    if side not in ("LONG","SHORT"):
+        raise RuntimeError(f"Desired side missing/invalid in {src}: got side={side!r}")
 
-        # legacy alt keys
-        if "signal_side" in sig and "side" not in sig:
-            sig["side"] = sig.get("signal_side")
-        if "best_token" in sig and "token" not in sig:
-            sig["token"] = sig.get("best_token")
+    if not token:
+        raise RuntimeError(f"Desired token missing/invalid in {src}")
 
-        side = (sig.get("side") or "").upper().strip()
-        symbol = (sig.get("symbol") or "").upper().strip()
-        token = (sig.get("token") or "").upper().strip()
-
-        if not symbol and token:
-            symbol = f"{token}{SYMBOL_SUFFIX}"
-        if symbol and not token and symbol.endswith(SYMBOL_SUFFIX):
-            token = symbol[:-len(SYMBOL_SUFFIX)]
-
-        if side not in ("LONG", "SHORT", "FLAT"):
-            log(f"Desired side missing/invalid in {src_path}: got side={side!r}")
-            return None
-
-        sig["side"] = side
-        sig["symbol"] = symbol
-        sig["token"] = token
-        return sig
-
-    raw_override = _load(override)
-    sig = _normalize(raw_override, override) if raw_override is not None else None
-
-    if sig is None:
-        raw_fallback = _load(fallback)
-        sig = _normalize(raw_fallback, fallback) if raw_fallback is not None else None
-
-    return sig
+    return {
+        "side": side,
+        "token": token,
+        "symbol": f"{token}{SYMBOL_SUFFIX}",
+        "hmi": hmi,
+        "hmi_delta": hmi_delta,
+        "timestamp": ts,
+        "src": src
+    }
 
 def get_position(symbol: str):
     """
@@ -599,17 +577,19 @@ def open_position(symbol: str, desired_side: str, hmi=None, hmi_delta=None, src=
     return True
 
 def desired_key(sig: dict) -> str:
-    return f"{sig.get('token','')}:{sig.get('side','')}:{sig.get('symbol','')}"
+    return f"{sig['token']}:{sig['side']}"
+
 def main():
     st = load_state()
     process_start = time.time()
 
     log(f"KC3 Futures Executor starting. LIVE_TRADING_KC3={LIVE_TRADING} KC3_ARMED={int(KC3_ARMED)} LIVE={LIVE} VERSION={VERSION}")
     log(f"BASE_URL={BASE_URL} QUOTE_ASSET={QUOTE_ASSET} SYMBOL_SUFFIX={SYMBOL_SUFFIX} LEV={LEV} POLL_SEC={POLL_SEC}")
-
-
     log(f"DESIRED override: {DESIRED_OVERRIDE} | fallback: {DESIRED_FALLBACK}")
 
+except Exception:
+    pass
+    log(f"Debounce: KC3_STABLE_POLLS={STABLE_POLLS}  MinHold: KC3_MIN_HOLD_SEC={MIN_HOLD_SEC}")
 
     stable_count = 0
     last_seen_key = st.get("last_seen_key")
@@ -621,11 +601,7 @@ def main():
         try:
             sig0 = read_desired()
             baseline_key = desired_key(sig0)
-              log(f"Startup baseline desired key={baseline_key} (src={sig0.get('src')}). Waiting for change...")
-              # patched: allow immediate action when KC3_REQUIRE_CHANGE_ON_START=0
-if not KC3_REQUIRE_CHANGE_ON_START:
-    last_desired_key = None
-")
+            log(f"Startup baseline desired key={baseline_key} (src={sig0['src']}). Waiting for change...")
         except Exception as e:
             log(str(e))
             log("No valid signal at startup; waiting...")

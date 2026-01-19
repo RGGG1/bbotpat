@@ -1,10 +1,10 @@
 {
-  "baseline_key": "UNI:LONG",
-  "last_acted_key": "UNI:LONG",
-  "last_open_ts": 1767534131.0872812,
+  "baseline_key": null,
+  "last_acted_key": ":LONG:XLMUSDT",
+  "last_open_ts": 1768740412.6735296,
   "last_processed_key": "UNI:LONG",
   "last_seen_at": "2025-12-30T10:07:54.225Z",
-  "last_seen_key": "UNI:SHORT",
+  "last_seen_key": ":LONG:ZECUSDT",
   "retries": {
     "DOGE:SHORT": 0,
     "UNI:LONG": {
@@ -16,7 +16,7 @@
       "last_ts": 1766972546.5451937
     }
   },
-  "stable_count": 2,
+  "stable_count": 3,
   "started_after_change": true,
   "startup_baseline_key": "DOGE:SHORT"
 }

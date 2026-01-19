@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 import os, time, json, math, traceback
+
+def _atomic_write_json(path: str, obj: dict) -> None:
+    import json, os, tempfile
+    d = os.path.dirname(path) or "."
+    fd, tmpp = tempfile.mkstemp(prefix=".tmp_kc3_", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2, sort_keys=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmpp, path)
+    finally:
+        try:
+            if os.path.exists(tmpp):
+                os.remove(tmpp)
+        except Exception:
+            pass
+
 from pathlib import Path
 from datetime import datetime, timezone
+TOKEN_UNIVERSE = json.load(open("data/kc3_token_universe.json"))
 
-
-def json.load(open("data/kc3_token_universe.json")):
+def get_alt_list_env():
     alt = os.getenv("KC3_ALT_LIST", "").strip()
     if alt:
         alt = alt.replace(",", " ")
@@ -22,13 +40,23 @@ def json.load(open("data/kc3_token_universe.json")):
     return out
 
 
+
+
+def write_json_atomic(path: Path, obj: dict):
+    """
+    Write JSON atomically to avoid readers seeing partial/truncated files.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
 PRICES_IN   = Path("/var/www/bbotpat_live/prices_latest.json")
 DESIRED_OUT = Path("/root/bbotpat_live/kc3_desired_position.json")
 ZMAP_OUT   = Path("/root/bbotpat_live/kc3_zmap.json")
 STATE_PATH  = Path("/root/bbotpat_live/data/kc3_lag_state.json")
 STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-ALT_LIST = json.load(open("data/kc3_token_universe.json"))
+ALT_LIST = get_alt_list_env()
 USD_NOTIONAL = float(os.getenv("KC3_USD_NOTIONAL", "25"))
 
 LOOKBACK_SEC = float(os.getenv("KC3_LAG_LOOKBACK_SEC", "900"))   # 15m default
