@@ -4,434 +4,520 @@ from typing import Dict, Any, Optional, Tuple, List
 import requests
 from collections import deque
 
-def envf(k, d): 
-    try: return float(os.getenv(k, d))
-    except: return float(d)
-def envi(k, d):
-    try: return int(float(os.getenv(k, d)))
-    except: return int(d)
-def envb(k, d):
-    v=str(os.getenv(k, "")).strip().lower()
-    if v=="":
-        return bool(d)
-    return v in ("1","true","yes","y","on")
-def envs(k, d=""):
-    v=os.getenv(k, None)
-    return d if v is None else v
 
-def log(msg: str):
-    ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    print(f"[{ts}] {msg}", flush=True)
+def in_no_trade_window_utc() -> bool:
+    # Default: block between 02:30 and 08:00 UTC (override with KC3_NO_TRADE_UTC="HH:MM-HH:MM"; set empty to disable)
+    spec = envs("KC3_NO_TRADE_UTC", "02:30-08:00").strip()
+    if not spec:
+        return False
+    try:
+        a,b = spec.split("-",1)
+        ah,am = [int(x) for x in a.split(":")]
+        bh,bm = [int(x) for x in b.split(":")]
+        now = time.gmtime()
+        cur = now.tm_hour*60 + now.tm_min
+        start = ah*60 + am
+        end = bh*60 + bm
+        if start <= end:
+            return start <= cur < end
+        # wraps midnight
+        return cur >= start or cur < end
+    except Exception:
+        return False
+
+
+def envs(k: str, default: str = "") -> str:
+    v = os.getenv(k)
+    return default if v is None else str(v)
+
+
+def envf(k: str, default: float) -> float:
+    try:
+        return float(envs(k, str(default)))
+    except Exception:
+        return float(default)
+
+
+def envi(k: str, default: int) -> int:
+    try:
+        return int(float(envs(k, str(default))))
+    except Exception:
+        return int(default)
+
+
+def utc() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def log(msg: str) -> None:
+    print(f"[{utc()}] {msg}", flush=True)
+
+
+def safe_read_json(path: str, default: Any) -> Any:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            txt = f.read().strip()
+        if not txt:
+            return default
+        return json.loads(txt)
+    except Exception:
+        return default
+
+
+def safe_write_json(path: str, obj: Any) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp, path)
+
 
 @dataclass
 class Cfg:
-    base_url: str
     api_key: str
     api_secret: str
+    base: str = "https://fapi.binance.com"
+    poll_sec: float = 2.0
+    armed: bool = True
+    dry_run: bool = False
 
-    poll_sec: float
-    armed: bool
-    dry_run: bool
+    z_enter: float = 1.6
+    z_exit: float = 0.2
 
-    quote_asset: str
-    symbol_suffix: str
-    usd_notional: float
+    lev_mode: str = "dynamic"  # "fixed" or "dynamic"
+    lev_fixed: int = 10
+    lev_min: int = 1
+    lev_max: int = 20
 
-    # signal plumbing
-    zmap_path: str
-    lag_z_enter: float
-    lag_z_exit: float
-    lag_mode: str  # both/long/short
+    tp_mode: str = "vol"  # placeholder
+    max_notional_usd: float = 300.0
+    min_notional_usd: float = 10.0
 
-    # leverage
-    lev_mode: str
-    lev_min: float
-    lev_base: float
-    lev_max: float
-    lev_z_full: float
+    desired_path: str = "kc3_desired_position.json"
+    zmap_path: str = "kc3_zmap.json"
+    state_path: str = "kc3_exec_state.json"
 
-    # dynamic TP
-    tp_mode: str           # fixed / vol
-    tp_pct_fixed: float
-    tp_check_sec: float
-    tp_vol_lookback_sec: float
-    tp_k: float
-    tp_min: float
-    tp_max: float
+    no_trade_utc: str = "02:30-08:00"
 
-    # exits
-    roll_tp_drop: float
-    edge_stop_enabled: bool
-    edge_stop_lev_dd: float
+    # safety / loop behavior
+    cooldown_sec: float = 8.0
+    heartbeat_sec: float = 60.0
 
-    # misc
-    min_hold_sec: float
-    wait_after_close_sec: float
 
 def load_cfg() -> Cfg:
     return Cfg(
-        base_url=envs("BINANCE_FUTURES_BASE_URL","https://fapi.binance.com").rstrip("/"),
-        api_key=envs("BINANCE_FAPI_KEY", envs("BINANCE_API_KEY","")),
-        api_secret=envs("BINANCE_FAPI_SECRET", envs("BINANCE_API_SECRET","")),
-
+        api_key=envs("BINANCE_FAPI_KEY", ""),
+        api_secret=envs("BINANCE_FAPI_SECRET", ""),
+        base=envs("BINANCE_FAPI_BASE", "https://fapi.binance.com"),
         poll_sec=envf("KC3_POLL_SEC", 2.0),
-        armed=envb("KC3_ARMED", False) and envb("LIVE_TRADING_KC3", True) and envb("LIVE_TRADING", True),
-        dry_run=envb("DRY_RUN", False) or envb("SIMULATE", False) or (not envb("LIVE_TRADING", True)),
+        armed=envi("KC3_ARMED", 1) == 1,
+        dry_run=envi("KC3_DRY_RUN", 0) == 1,
 
-        quote_asset=envs("KC3_QUOTE_ASSET", envs("QUOTE_ASSET","USDT")),
-        symbol_suffix=envs("KC3_SYMBOL_SUFFIX", envs("SYMBOL_SUFFIX","USDT")),
-        usd_notional=envf("KC3_USD_NOTIONAL", 25.0),
+        z_enter=envf("KC3_Z_ENTER", 1.6),
+        z_exit=envf("KC3_Z_EXIT", 0.2),
 
-        zmap_path=envs("KC3_ZMAP_PATH","kc3_zmap.json"),
-        lag_z_enter=envf("KC3_LAG_Z_ENTER", 1.6),
-        lag_z_exit=envf("KC3_LAG_Z_EXIT", 0.2),
-        lag_mode=envs("KC3_LAG_MODE","both").lower(),
+        lev_mode=envs("KC3_LEV_MODE", "dynamic"),
+        lev_fixed=envi("KC3_LEV_FIXED", 10),
+        lev_min=envi("KC3_LEV_MIN", 1),
+        lev_max=envi("KC3_LEV_MAX", 20),
 
-        lev_mode=envs("KC3_LEV_MODE","dynamic").lower(),
-        lev_min=envf("KC3_LEV_MIN", 5),
-        lev_base=envf("KC3_LEV_BASE", 10),
-        lev_max=envf("KC3_LEV_MAX", 15),
-        lev_z_full=envf("KC3_LEV_Z_FULL", 2.6),
+        tp_mode=envs("KC3_TP_MODE", "vol"),
+        max_notional_usd=envf("KC3_MAX_NOTIONAL_USD", 300.0),
+        min_notional_usd=envf("KC3_MIN_NOTIONAL_USD", 10.0),
 
-        tp_mode=envs("KC3_TP_MODE","fixed").lower(),
-        tp_pct_fixed=envf("KC3_TP_PCT", 0.005),
-        tp_check_sec=envf("KC3_TP_CHECK_SEC", 1.0),
-        tp_vol_lookback_sec=envf("KC3_TP_VOL_LOOKBACK_SEC", 21600),
-        tp_k=envf("KC3_TP_K", 1.8),
-        tp_min=envf("KC3_TP_MIN", 0.003),
-        tp_max=envf("KC3_TP_MAX", 0.012),
+        desired_path=envs("KC3_DESIRED_PATH", "kc3_desired_position.json"),
+        zmap_path=envs("KC3_ZMAP_PATH", "kc3_zmap.json"),
+        state_path=envs("KC3_STATE_PATH", "kc3_exec_state.json"),
 
-        roll_tp_drop=envf("KC3_ROLL_TP_DROP", 0.25),
-        edge_stop_enabled=envb("KC3_EDGE_STOP_ENABLED", True),
-        edge_stop_lev_dd=envf("KC3_EDGE_STOP_LEV_DD", 0.05),
-
-        min_hold_sec=envf("KC3_MIN_HOLD_SEC", 60),
-        wait_after_close_sec=envf("KC3_WAIT_AFTER_CLOSE_SEC", 2),
+        no_trade_utc=envs("KC3_NO_TRADE_UTC", "02:30-08:00"),
+        cooldown_sec=envf("KC3_COOLDOWN_SEC", 8.0),
+        heartbeat_sec=envf("KC3_HEARTBEAT_SEC", 60.0),
     )
 
-def sign(secret: str, query: str) -> str:
+
+# -------------------------
+# Binance API helpers
+# -------------------------
+
+def _sign(secret: str, query: str) -> str:
     return hmac.new(secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
 
-def req(C: Cfg, method: str, path: str, params: Dict[str, Any], signed: bool=False) -> requests.Response:
-    url = C.base_url + path
-    headers = {"X-MBX-APIKEY": C.api_key} if C.api_key else {}
-    p = dict(params or {})
-    if signed:
-        p["timestamp"] = int(time.time()*1000)
-        p.setdefault("recvWindow", 5000)
-        qs = urllib.parse.urlencode(p, doseq=True)
-        p["signature"] = sign(C.api_secret, qs)
-    r = requests.request(method, url, params=p, headers=headers, timeout=10)
-    r.raise_for_status()
-    return r
 
-def safe_req(C: Cfg, method: str, path: str, params: Dict[str, Any], signed: bool=False) -> Tuple[Optional[dict], Optional[str]]:
+def _req(
+    C: Cfg,
+    method: str,
+    path: str,
+    params: Optional[Dict[str, Any]] = None,
+    signed: bool = False,
+    timeout: float = 10.0,
+) -> Any:
+    params = dict(params or {})
+    headers = {"X-MBX-APIKEY": C.api_key} if C.api_key else {}
+    if signed:
+        params["timestamp"] = int(time.time() * 1000)
+        params["recvWindow"] = int(envf("KC3_RECV_WINDOW_MS", 5000))
+        q = urllib.parse.urlencode(params, doseq=True)
+        params["signature"] = _sign(C.api_secret, q)
+    url = C.base.rstrip("/") + path
     try:
-        r = req(C, method, path, params, signed=signed)
-        try:
-            return r.json(), None
-        except Exception:
-            return {"text": r.text}, None
+        if method.upper() == "GET":
+            r = requests.get(url, params=params, headers=headers, timeout=timeout)
+        elif method.upper() == "POST":
+            r = requests.post(url, params=params, headers=headers, timeout=timeout)
+        elif method.upper() == "DELETE":
+            r = requests.delete(url, params=params, headers=headers, timeout=timeout)
+        else:
+            raise RuntimeError(f"bad method {method}")
+        r.raise_for_status()
+        if r.text:
+            return r.json()
+        return None
     except requests.HTTPError as e:
         body = ""
         try:
-            body = e.response.text
+            body = r.text[:500]
         except Exception:
             pass
-        return None, f"HTTPError {method} {path} status={getattr(e.response,'status_code',None)} body={body[:500]}"
-    except Exception as e:
-        return None, f"{type(e).__name__}: {e}"
+        raise RuntimeError(f"HTTPError {method} {path} status={getattr(r,'status_code',None)} body={body}") from e
 
-def get_positions(C: Cfg) -> List[dict]:
-    j, err = safe_req(C, "GET", "/fapi/v2/positionRisk", {}, signed=True)
-    if err:
-        log(f"FAIL positions {err}")
-        return []
-    return [x for x in (j or []) if abs(float(x.get("positionAmt") or 0.0)) > 0.0]
 
-def get_all_positions_raw(C: Cfg) -> List[dict]:
-    j, err = safe_req(C, "GET", "/fapi/v2/positionRisk", {}, signed=True)
-    if err:
-        log(f"FAIL positions_raw {err}")
-        return []
-    return j or []
+# -------------------------
+# Exchange info / filters
+# -------------------------
 
-def get_price(C: Cfg, symbol: str) -> Optional[float]:
-    j, err = safe_req(C, "GET", "/fapi/v1/ticker/price", {"symbol": symbol}, signed=False)
-    if err:
-        log(f"FAIL price {symbol} {err}")
-        return None
+class ExchangeInfoCache:
+    def __init__(self):
+        self._ts = 0.0
+        self._data = None
+
+    def get(self, C: Cfg, max_age_sec: float = 300.0) -> Dict[str, Any]:
+        now = time.time()
+        if self._data is None or (now - self._ts) > max_age_sec:
+            self._data = _req(C, "GET", "/fapi/v1/exchangeInfo", signed=False, timeout=20)
+            self._ts = now
+        return self._data
+
+
+XINFO = ExchangeInfoCache()
+
+
+def get_symbol_filters(C: Cfg, symbol: str) -> Dict[str, Dict[str, str]]:
+    info = XINFO.get(C)
+    for s in info.get("symbols", []):
+        if s.get("symbol") == symbol:
+            out: Dict[str, Dict[str, str]] = {}
+            for f in s.get("filters", []):
+                out[f.get("filterType")] = f
+            return out
+    return {}
+
+
+def floor_to_step(qty: float, step: float) -> float:
+    if step <= 0:
+        return qty
+    return math.floor(qty / step) * step
+
+
+def clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def choose_leverage(C: Cfg, z_score: float) -> int:
+    if C.lev_mode.lower() == "fixed":
+        return int(clamp(C.lev_fixed, C.lev_min, C.lev_max))
+    z = abs(float(z_score))
+    # ramp between min and max as z goes from enter->enter*2
+    a = C.z_enter
+    b = max(a * 2.0, a + 1e-9)
+    t = clamp((z - a) / (b - a), 0.0, 1.0)
+    lev = C.lev_min + t * (C.lev_max - C.lev_min)
+    return int(clamp(int(round(lev)), C.lev_min, C.lev_max))
+
+
+def set_leverage(C: Cfg, symbol: str, leverage: int) -> None:
+    if C.dry_run:
+        log(f"SET_LEVERAGE_DRY symbol={symbol} leverage={leverage}")
+        return
+    _req(C, "POST", "/fapi/v1/leverage", params={"symbol": symbol, "leverage": int(leverage)}, signed=True)
+    log(f"SET_LEVERAGE_OK symbol={symbol} leverage={int(leverage)}")
+
+
+def get_mark_price(C: Cfg, symbol: str) -> float:
+    j = _req(C, "GET", "/fapi/v1/premiumIndex", params={"symbol": symbol}, signed=False)
+    return float(j.get("markPrice"))
+
+
+def get_position_amt(C: Cfg, symbol: str) -> float:
+    j = _req(C, "GET", "/fapi/v2/positionRisk", signed=True)
+    for row in j:
+        if row.get("symbol") == symbol:
+            return float(row.get("positionAmt"))
+    return 0.0
+
+
+def cancel_all(C: Cfg, symbol: str) -> None:
+    if C.dry_run:
+        log(f"CANCEL_ALL_DRY symbol={symbol}")
+        return
     try:
-        return float(j["price"])
-    except Exception:
-        return None
+        _req(C, "DELETE", "/fapi/v1/allOpenOrders", params={"symbol": symbol}, signed=True)
+        log(f"CANCEL_ALL_OK symbol={symbol}")
+    except Exception as e:
+        log(f"CANCEL_ALL_FAIL symbol={symbol} {e}")
 
-def set_leverage(C: Cfg, symbol: str, lev: float):
-    lev_i = int(round(float(lev)))
-    # clamp
-    lev_i = max(int(C.lev_min), min(int(C.lev_max), lev_i))
-    if C.dry_run or (not C.armed):
-        log(f"SET_LEVERAGE_DRY symbol={symbol} leverage={lev_i}")
-        return
-    j, err = safe_req(C, "POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": lev_i}, signed=True)
-    if err:
-        log(f"SET_LEVERAGE_FAIL symbol={symbol} leverage={lev_i} {err}")
-        return
-    log(f"SET_LEVERAGE_OK symbol={symbol} leverage={j.get('leverage', lev_i)}")
 
-def order_market(C: Cfg, symbol: str, side: str, qty: float, reduce_only: bool=False):
-    qty = float(qty)
+def order_market(C: Cfg, symbol: str, side: str, qty: float, reduce_only: bool = False) -> Any:
     if qty <= 0:
-        return
-    if C.dry_run or (not C.armed):
-        log(f"ORDER_DRY symbol={symbol} side={side} qty={qty:.8f} reduceOnly={reduce_only}")
-        return
+        raise RuntimeError("qty<=0")
     params = {
         "symbol": symbol,
         "side": side,
         "type": "MARKET",
-        "quantity": f"{qty:.8f}",
-        "reduceOnly": "true" if reduce_only else "false",
-        "newOrderRespType": "RESULT",
+        "quantity": qty,
     }
-    j, err = safe_req(C, "POST", "/fapi/v1/order", params, signed=True)
-    if err:
-        log(f"ORDER_FAIL symbol={symbol} side={side} qty={qty:.8f} reduceOnly={reduce_only} {err}")
-        return
-    log(f"ORDER_OK symbol={symbol} side={side} qty={qty:.8f} reduceOnly={reduce_only}")
+    if reduce_only:
+        params["reduceOnly"] = "true"
+    if C.dry_run:
+        log(f"ORDER_DRY symbol={symbol} side={side} qty={qty} reduceOnly={reduce_only}")
+        return {"dry_run": True, "params": params}
+    j = _req(C, "POST", "/fapi/v1/order", params=params, signed=True)
+    return j
 
-def read_zmap(path: str) -> Dict[str, Any]:
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f) or {}
-    except Exception:
-        return {}
 
-def want_from_z(C: Cfg, z: float, prev_state: int) -> int:
+def normalize_qty(C: Cfg, symbol: str, qty_raw: float, price: float) -> float:
+    f = get_symbol_filters(C, symbol)
+    lot = f.get("LOT_SIZE") or {}
+    step = float(lot.get("stepSize", "0.000001"))
+    min_qty = float(lot.get("minQty", "0"))
+    max_qty = float(lot.get("maxQty", "1e18"))
+    # floor to step
+    qty = floor_to_step(qty_raw, step)
+    # clamp
+    qty = clamp(qty, min_qty, max_qty)
+    # min notional check (Binance futures often enforces minNotional)
+    notion = qty * price
+    if notion < C.min_notional_usd:
+        # try bump to min_notional
+        qty2 = C.min_notional_usd / max(price, 1e-9)
+        qty2 = floor_to_step(qty2, step)
+        qty2 = clamp(qty2, min_qty, max_qty)
+        if qty2 * price >= C.min_notional_usd:
+            qty = qty2
+    return float(qty)
+
+
+def desired_to_symbol(desired: Dict[str, Any]) -> Tuple[str, int, float]:
     """
-    Hysteresis:
-      - If flat: enter when |z| >= z_enter
-      - If in position: exit only when |z| <= z_exit
-    Direction:
-      - z > + => mean reversion expects alt underperformed => LONG alt (target +1)
-      - z < - => SHORT alt (target -1)
+    Returns (symbol, want, z_score)
+      want: +1 long, -1 short, 0 flat
     """
-    az = abs(z)
-    if prev_state == 0:
-        if az >= C.lag_z_enter:
-            return +1 if z > 0 else -1
-        return 0
-    else:
-        # keep until fully reverted
-        if az <= C.lag_z_exit:
-            return 0
-        return prev_state
+    sym = str(desired.get("symbol") or desired.get("sym") or "")
+    side = str(desired.get("side") or "").upper()
+    want = int(desired.get("want") or desired.get("dir") or 0)
+    z = float(desired.get("z_score") or desired.get("z") or 0.0)
 
-def lev_from_z(C: Cfg, z: float) -> float:
-    if C.lev_mode != "dynamic":
-        return float(C.lev_base)
-    az = abs(z)
-    frac = min(1.0, az / max(1e-9, C.lev_z_full))
-    lev = C.lev_base + frac * (C.lev_max - C.lev_base)
-    return max(C.lev_min, min(C.lev_max, lev))
+    if not sym and isinstance(desired.get("best"), str):
+        sym = desired["best"]
 
-def roi_from_pos(pos: dict) -> float:
-    # Binance fields vary; try robustly
-    upnl = float(pos.get("unRealizedProfit") or 0.0)
-    im = pos.get("isolatedMargin")
-    if im is None or float(im) == 0.0:
-        im = pos.get("positionInitialMargin") or pos.get("initialMargin") or 0.0
-    denom = float(im) if float(im) != 0.0 else 0.0
-    if denom <= 0:
-        # fallback to notional/lev approx
-        entry = float(pos.get("entryPrice") or 0.0)
-        amt = abs(float(pos.get("positionAmt") or 0.0))
-        notional = entry * amt
-        lev = float(pos.get("leverage") or 1.0)
-        denom = notional / max(1.0, lev)
-    if denom <= 0:
+    if sym and not sym.endswith("USDT"):
+        # normalize token->symbol convention
+        sym = sym.upper() + "USDT"
+
+    if want == 0:
+        if side in ("BUY", "LONG"):
+            want = 1
+        elif side in ("SELL", "SHORT"):
+            want = -1
+
+    return sym.upper(), want, z
+
+
+def calc_qty_for_notional(notional: float, price: float) -> float:
+    if price <= 0:
         return 0.0
-    return upnl / denom
+    return float(notional) / float(price)
 
-class TPVol:
-    def __init__(self, maxlen: int):
-        self.px = deque(maxlen=maxlen)
-        self.ts = deque(maxlen=maxlen)
 
-    def add(self, t: float, price: float):
-        self.ts.append(t)
-        self.px.append(price)
+def open_or_flip(C: Cfg, symbol: str, want: int, z_score: float, state: Dict[str, Any]) -> None:
+    if want == 0:
+        return
 
-    def vol(self, lookback_sec: float) -> float:
-        if len(self.px) < 5:
-            return 0.0
-        now = self.ts[-1]
-        # collect log returns within lookback
-        rets = []
-        for i in range(1, len(self.px)):
-            if now - self.ts[i-1] > lookback_sec:
-                continue
-            p0 = self.px[i-1]; p1 = self.px[i]
-            if p0 > 0 and p1 > 0:
-                rets.append(math.log(p1/p0))
-        if len(rets) < 5:
-            return 0.0
-        m = sum(rets)/len(rets)
-        v = sum((r-m)*(r-m) for r in rets)/max(1, (len(rets)-1))
-        return math.sqrt(max(0.0, v))
+    # Set leverage first
+    lev = choose_leverage(C, z_score)
+    set_leverage(C, symbol, lev)
+
+    # Determine notional to use (simple)
+    notional = clamp(C.max_notional_usd, C.min_notional_usd, C.max_notional_usd)
+
+    px = get_mark_price(C, symbol)
+    qty_raw = calc_qty_for_notional(notional, px)
+    qty = normalize_qty(C, symbol, qty_raw, px)
+
+    if qty <= 0:
+        raise RuntimeError(f"qty<=0 after normalize (raw={qty_raw} px={px})")
+
+    # Determine side
+    side = "BUY" if want > 0 else "SELL"
+
+    log(f"OPEN symbol={symbol} want={want} z={z_score:.4f} lev={lev:.2f} px={px:.6f} qty={qty:.8f}")
+
+    # Place
+    j = order_market(C, symbol, side, qty, reduce_only=False)
+    state.setdefault("last_order", {})[symbol] = {"t": utc(), "side": side, "qty": qty, "px": px, "z": z_score, "lev": lev}
+    if isinstance(j, dict) and j.get("dry_run"):
+        return
+
+
+def close_position(C: Cfg, symbol: str, amt: float) -> None:
+    if amt == 0.0:
+        return
+    side = "SELL" if amt > 0 else "BUY"
+    qty = abs(float(amt))
+    # normalize to lot size
+    px = get_mark_price(C, symbol)
+    qty = normalize_qty(C, symbol, qty, px)
+    if qty <= 0:
+        return
+    log(f"CLOSE symbol={symbol} side={side} qty={qty:.8f}")
+    cancel_all(C, symbol)
+    order_market(C, symbol, side, qty, reduce_only=True)
+
+
+def should_exit(z_score: float, want: int, current_amt: float, C: Cfg) -> bool:
+    if current_amt == 0.0:
+        return False
+    cur_dir = 1 if current_amt > 0 else -1
+    # if desired flips direction, exit
+    if want != 0 and cur_dir != want:
+        return True
+    # if z is near mean, exit
+    if abs(z_score) <= C.z_exit:
+        return True
+    return False
+
 
 def main():
     C = load_cfg()
+    log(f"BOOT armed={int(C.armed)} dry_run={int(C.dry_run)} poll={C.poll_sec:.1f}s tp_mode={C.tp_mode} lev_mode={C.lev_mode} z_enter={C.z_enter} z_exit={C.z_exit}")
+
+    state_path = C.state_path
+    state = safe_read_json(state_path, {})
+
+    # heartbeat state
+    hb_last = 0.0
+    last_action = 0.0
+
+    # guard: if no key, stay alive but never trade
     if not C.api_key or not C.api_secret:
-        log("FATAL missing BINANCE API keys (BINANCE_FAPI_KEY/SECRET or BINANCE_API_KEY/SECRET)")
-        raise SystemExit(2)
-
-    log(f"BOOT armed={int(C.armed)} dry_run={int(C.dry_run)} poll={C.poll_sec}s tp_mode={C.tp_mode} lev_mode={C.lev_mode} z_enter={C.lag_z_enter} z_exit={C.lag_z_exit}")
-    state_path = "kc3_exec_state.json"
-    state = {"hyst": {}, "peak_roi": {}, "opened_ts": {}, "last_tp_check": 0.0}
-    try:
-        with open(state_path, "r", encoding="utf-8") as f:
-            state.update(json.load(f) or {})
-    except Exception:
-        pass
-
-    vol_buf: Dict[str, TPVol] = {}
+        log("WARN missing BINANCE_FAPI_KEY/SECRET (will not trade)")
 
     while True:
         t0 = time.time()
+
         try:
-            zmap = read_zmap(C.zmap_path)
-            # zmap format expected: { "BNBUSDT": {"z": -2.41, ...}, ... } OR { "BNBUSDT": -2.41 }
-            # build simple z lookup
-            z_of: Dict[str, float] = {}
-            for k,v in (zmap or {}).items():
-                try:
-                    if isinstance(v, dict) and "z" in v:
-                        z_of[k] = float(v["z"])
-                    else:
-                        z_of[k] = float(v)
-                except Exception:
-                    continue
+            # HEARTBEAT
+            if (t0 - hb_last) >= C.heartbeat_sec:
+                hb_last = t0
+                log(f"HEARTBEAT utc={time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} armed={int(C.armed)} dry_run={int(C.dry_run)}")
 
-            # pull all positions (including zero) so we can close + track
-            pos_all = get_all_positions_raw(C)
-            pos_by_sym = {p.get("symbol"): p for p in pos_all if p.get("symbol")}
+            # no-trade window
+            if in_no_trade_window_utc():
+                # still keep process alive; do not trade
+                time.sleep(max(0.2, C.poll_sec))
+                continue
 
-            # ---- EXIT ENGINE (rolling TP + edge stop + dynamic TP) ----
-            open_positions = [p for p in pos_all if abs(float(p.get("positionAmt") or 0.0)) > 0.0]
-            for p in open_positions:
-                sym = p["symbol"]
-                amt = float(p.get("positionAmt") or 0.0)
-                side = "SELL" if amt > 0 else "BUY"   # reduceOnly close side
-                roi = roi_from_pos(p)
+            # read desired + zmap
+            desired = safe_read_json(C.desired_path, {})
+            zmap = safe_read_json(C.zmap_path, {})
 
-                # track peak ROI
-                peak = float(state["peak_roi"].get(sym, -1e9))
-                if roi > peak:
-                    state["peak_roi"][sym] = roi
-                    peak = roi
+            if not zmap or zmap == {}:
+                log("ZMAP_EMPTY (no signals to act on)")
+                time.sleep(max(0.2, C.poll_sec))
+                continue
 
-                # edge stop: close if ROI drawdown exceeds threshold
-                if C.edge_stop_enabled and roi <= -abs(C.edge_stop_lev_dd):
-                    log(f"EDGE_STOP symbol={sym} roi={roi:.5f} thresh={-abs(C.edge_stop_lev_dd):.5f}")
-                    order_market(C, sym, side, abs(amt), reduce_only=True)
-                    state["opened_ts"].pop(sym, None)
-                    state["peak_roi"].pop(sym, None)
-                    time.sleep(C.wait_after_close_sec)
-                    continue
+            # pick top entry in zmap (expects {symbol: {...}} or {token:{...}})
+            # Try a few shapes
+            best_sym = None
+            best = None
 
-                # rolling TP: if fell from peak by fraction
-                if peak > 0 and roi < peak * (1.0 - max(0.0, C.roll_tp_drop)):
-                    log(f"ROLL_TP symbol={sym} roi={roi:.5f} peak={peak:.5f} drop={C.roll_tp_drop:.3f}")
-                    order_market(C, sym, side, abs(amt), reduce_only=True)
-                    state["opened_ts"].pop(sym, None)
-                    state["peak_roi"].pop(sym, None)
-                    time.sleep(C.wait_after_close_sec)
-                    continue
+            # If zmap already looks like {"symbol":"BNBUSDT","want":...}
+            if isinstance(zmap, dict) and "symbol" in zmap and ("want" in zmap or "side" in zmap):
+                best = zmap
+                best_sym, want, z = desired_to_symbol(best)
+            else:
+                # try dict of entries
+                if isinstance(zmap, dict):
+                    # choose by abs(z_score) if present
+                    best_k = None
+                    best_abs = -1.0
+                    for k,v in zmap.items():
+                        if isinstance(v, dict):
+                            zz = float(v.get("z_score") or v.get("z") or 0.0)
+                        else:
+                            zz = 0.0
+                        a = abs(zz)
+                        if a > best_abs:
+                            best_abs = a
+                            best_k = k
+                    if best_k is not None:
+                        best = zmap.get(best_k)
+                        if isinstance(best, dict):
+                            # symbol might be best_k or inside
+                            if not best.get("symbol") and isinstance(best_k, str):
+                                best["symbol"] = best_k if best_k.endswith("USDT") else (best_k.upper()+"USDT")
+                        else:
+                            best = {"symbol": best_k}
+                best_sym, want, z = desired_to_symbol(best or {})
 
-                # dynamic TP (close when ROI >= tp_target)
-                now = time.time()
-                if now - float(state.get("last_tp_check", 0.0)) >= C.tp_check_sec:
-                    tp_target = C.tp_pct_fixed
-                    # maintain volatility buffer
-                    px = get_price(C, sym)
-                    if px is not None:
-                        vb = vol_buf.get(sym)
-                        if vb is None:
-                            vb = TPVol(maxlen=4000)
-                            vol_buf[sym] = vb
-                        vb.add(now, px)
-                        if C.tp_mode == "vol":
-                            vol = vb.vol(C.tp_vol_lookback_sec)
-                            # convert vol of log-returns to pct-ish target
-                            tp_target = max(C.tp_min, min(C.tp_max, C.tp_k * vol))
-                    if tp_target > 0 and roi >= tp_target:
-                        log(f"TP_HIT symbol={sym} roi={roi:.5f} tp_target={tp_target:.5f} mode={C.tp_mode}")
-                        order_market(C, sym, side, abs(amt), reduce_only=True)
-                        state["opened_ts"].pop(sym, None)
-                        state["peak_roi"].pop(sym, None)
-                        time.sleep(C.wait_after_close_sec)
-                        continue
+            if not best_sym:
+                log("ZMAP_EMPTY (no usable symbol)")
+                time.sleep(max(0.2, C.poll_sec))
+                continue
 
-            state["last_tp_check"] = time.time()
+            # hysteresis enter check
+            if want == 0:
+                # If want missing, infer by z sign
+                want = 1 if z > 0 else (-1 if z < 0 else 0)
 
-            # ---- ENTRY / POSITION DIRECTION ENGINE (zscore hysteresis) ----
-            # For each symbol in zmap: decide want state (+1 long / -1 short / 0 flat)
-            for sym, z in z_of.items():
-                prev = int(state["hyst"].get(sym, 0))
-                want = want_from_z(C, z, prev)
-                state["hyst"][sym] = want
+            if abs(z) < C.z_enter:
+                log(f"NO_ENTRY symbol={best_sym} z={z:.4f} (< z_enter {C.z_enter})")
+                time.sleep(max(0.2, C.poll_sec))
+                continue
 
-                # optional directional filter
-                if C.lag_mode == "long" and want < 0:
-                    want = 0
-                if C.lag_mode == "short" and want > 0:
-                    want = 0
+            # cooldown to avoid spam
+            if (t0 - last_action) < C.cooldown_sec:
+                time.sleep(max(0.2, C.poll_sec))
+                continue
 
-                pos = pos_by_sym.get(sym)
-                cur_amt = float(pos.get("positionAmt") or 0.0) if pos else 0.0
-                cur_side = 0
-                if cur_amt > 0: cur_side = +1
-                elif cur_amt < 0: cur_side = -1
+            # do not trade if not armed or missing keys
+            if (not C.armed) or (not C.api_key) or (not C.api_secret):
+                log(f"SKIP armed={int(C.armed)} keys={int(bool(C.api_key and C.api_secret))} symbol={best_sym} want={want} z={z:.4f}")
+                time.sleep(max(0.2, C.poll_sec))
+                continue
 
-                # dynamic leverage from z
-                lev = lev_from_z(C, z)
-                # only set leverage when we intend to be in a position (or already are)
-                if want != 0 or cur_side != 0:
-                    set_leverage(C, sym, lev)
+            # read current position
+            amt = get_position_amt(C, best_sym)
 
-                # If we want flat but have a position -> close
-                if want == 0 and cur_side != 0:
-                    close_side = "SELL" if cur_amt > 0 else "BUY"
-                    log(f"CLOSE_Z symbol={sym} z={z:.4f} cur_side={cur_side} -> want=0")
-                    order_market(C, sym, close_side, abs(cur_amt), reduce_only=True)
-                    state["opened_ts"].pop(sym, None)
-                    state["peak_roi"].pop(sym, None)
-                    time.sleep(C.wait_after_close_sec)
-                    continue
+            # exit conditions
+            if should_exit(z, want, amt, C):
+                log(f"EXIT_COND symbol={best_sym} want={want} pos={amt} z={z:.4f}")
+                close_position(C, best_sym, amt)
+                last_action = time.time()
+                time.sleep(max(0.2, C.poll_sec))
+                continue
 
-                # If want direction differs from current -> flip (close then open)
-                if want != 0 and want != cur_side:
-                    if cur_side != 0:
-                        close_side = "SELL" if cur_amt > 0 else "BUY"
-                        log(f"FLIP_CLOSE symbol={sym} z={z:.4f} cur_side={cur_side} -> want={want}")
-                        order_market(C, sym, close_side, abs(cur_amt), reduce_only=True)
-                        state["peak_roi"].pop(sym, None)
-                        time.sleep(C.wait_after_close_sec)
-
-                    # open new position
-                    px = get_price(C, sym)
-                    if px is None or px <= 0:
-                        continue
-                    # qty based on usd_notional * leverage / price
-                    notional = max(0.0, C.usd_notional) * float(lev)
-                    qty = notional / px
-                    open_side = "BUY" if want > 0 else "SELL"
-                    log(f"OPEN symbol={sym} want={want} z={z:.4f} lev={lev:.2f} px={px:.6f} qty={qty:.8f}")
-                    order_market(C, sym, open_side, qty, reduce_only=False)
-                    state["opened_ts"][sym] = time.time()
-                    state["peak_roi"][sym] = -1e9
-                    continue
+            # entry / flip
+            if amt == 0.0:
+                open_or_flip(C, best_sym, want, z, state)
+                last_action = time.time()
+            else:
+                cur_dir = 1 if amt > 0 else -1
+                if cur_dir != want:
+                    # close then open
+                    log(f"FLIP symbol={best_sym} from={cur_dir} to={want} pos={amt} z={z:.4f}")
+                    close_position(C, best_sym, amt)
+                    time.sleep(0.3)
+                    open_or_flip(C, best_sym, want, z, state)
+                    last_action = time.time()
 
             # persist state
             try:
